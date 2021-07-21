@@ -17,7 +17,9 @@
 package org.gradle.language.base
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.integtests.fixtures.UnsupportedWithConfigurationCache
 
+@UnsupportedWithConfigurationCache(because = "software model")
 class CustomManagedBinaryIntegrationTest extends AbstractIntegrationSpec {
     def "setup"() {
         buildFile << """
@@ -103,7 +105,7 @@ model {
         output.contains """> Task :components
 
 ------------------------------------------------------------
-Root project
+Root project 'custom-binary'
 ------------------------------------------------------------
 
 No components defined for this project.

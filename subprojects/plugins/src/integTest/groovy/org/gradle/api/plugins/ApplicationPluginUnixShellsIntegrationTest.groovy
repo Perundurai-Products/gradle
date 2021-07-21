@@ -32,7 +32,7 @@ class ApplicationPluginUnixShellsIntegrationTest extends AbstractIntegrationSpec
         }
     }
 
-    public static boolean   shellAvailable(String shellCommand) {
+    static boolean shellAvailable(String shellCommand) {
         return TestPrecondition.UNIX_DERIVATIVE.isFulfilled() && (
             new File("/bin/$shellCommand").exists()
                 || new File("/usr/bin/$shellCommand").exists()
@@ -159,46 +159,70 @@ class ApplicationPluginUnixShellsIntegrationTest extends AbstractIntegrationSpec
         outputContains('Arg: -DGOO=\'car < caz\'')
     }
 
+    @Requires(adhoc = { TestPrecondition.JDK9_OR_LATER.fulfilled && ApplicationPluginUnixShellsIntegrationTest.shellAvailable("bash") })
+    def "can execute generated Unix start script for Java module in Bash"() {
+        given:
+        turnSampleProjectIntoModule()
+        succeeds('installDist')
+
+        when:
+        runViaUnixStartScript("bash")
+
+        then:
+        outputContains('Hello World!')
+    }
+
+    @Requires(adhoc = { TestPrecondition.JDK9_OR_LATER.fulfilled && ApplicationPluginUnixShellsIntegrationTest.shellAvailable("dash") })
+    def "can execute generated Unix start script for Java module in Dash"() {
+        given:
+        turnSampleProjectIntoModule()
+        succeeds('installDist')
+
+        when:
+        runViaUnixStartScript("dash")
+
+        then:
+        outputContains('Hello World!')
+    }
+
+    @Requires(adhoc = { TestPrecondition.JDK9_OR_LATER.fulfilled && ApplicationPluginUnixShellsIntegrationTest.shellAvailable("static-sh") })
+    def "can execute generated Unix start script for Java module in BusyBox"() {
+        given:
+        turnSampleProjectIntoModule()
+        succeeds('installDist')
+
+        when:
+        runViaUnixStartScript("static-sh")
+
+        then:
+        outputContains('Hello World!')
+    }
+
     ExecutionResult runViaUnixStartScript(String shCommand, String... args) {
-        def path = setUpTestPATH(shCommand);
         TestFile startScriptDir = file('build/install/sample/bin')
         buildFile << """
 task execStartScript(type: Exec) {
     workingDir '$startScriptDir.canonicalPath'
-    environment PATH: "$path"
-    commandLine './sample'
-    args "${args.join('", "')}"
+    commandLine '$shCommand'
+    args "./sample", "${args.join('", "')}"
 }
 """
         return succeeds('execStartScript')
-    }
-
-    private String setUpTestPATH(String shCommand) {
-        def binDir = file('fake-bin')
-        def basicCommands = ['basename', 'dirname', 'uname', 'which', 'sed', 'java']
-        basicCommands.each { linkToBinary(it, it, binDir) }
-        linkToBinary("sh", shCommand, binDir) // link the shell we want to use to 'sh' which the script will pick up using '#!/usr/bin/env sh'
-        return binDir.absolutePath
-    }
-
-    private void linkToBinary(String command, String linkToCommand, TestFile binDir) {
-        binDir.mkdirs()
-        def binary = new File("/usr/bin/$linkToCommand")
-        if (!binary.exists()) {
-            binary = new File("/bin/$linkToCommand")
-        }
-        if (!binary.exists()) {
-            binary = new File("/opt/local/bin/$linkToCommand")
-        }
-        assert binary.exists()
-
-        binDir.file(command).createLink(binary)
     }
 
     private void createSampleProjectSetup() {
         createMainClass()
         populateBuildFile()
         populateSettingsFile()
+    }
+
+    private void turnSampleProjectIntoModule() {
+        createModuleInfo()
+        buildFile << """
+application {
+    mainModule.set('main.test')
+}
+"""
     }
 
     private void extendBuildFileWithAppHomeProperty() {
@@ -229,11 +253,17 @@ public class Main {
 """
     }
 
+    private void createModuleInfo() {
+        file('src/main/java/module-info.java') << "module main.test {}"
+    }
+
     private void populateBuildFile() {
         buildFile << """
 apply plugin: 'application'
 
-mainClassName = 'org.gradle.test.Main'
+application {
+    mainClass.set('org.gradle.test.Main')
+}
 """
     }
 

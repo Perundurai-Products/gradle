@@ -13,7 +13,7 @@
 // limitations under the License.
 
 [[troubleshooting]]
-= Troubleshooting
+= Troubleshooting builds
 
 The following is a collection of common issues and suggestions for addressing them. You can get other tips and search the link:https://discuss.gradle.org/c/help-discuss[Gradle forums] and link:https://stackoverflow.com/questions/tagged/gradle[StackOverflow #gradle] answers, as well as Gradle documentation from link:https://help.gradle.org/[help.gradle.org].
 
@@ -29,17 +29,18 @@ You should see something like this:
 ----
 ❯ gradle --version
 
------------------------------------------------------------
-Gradle 4.6
+------------------------------------------------------------
+Gradle 6.5
 ------------------------------------------------------------
 
-Build time:   2018-02-21 15:28:42 UTC
-Revision:     819e0059da49f469d3e9b2896dc4e72537c4847d
+Build time:   2020-06-02 20:46:21 UTC
+Revision:     a27f41e4ae5e8a41ab9b19f8dd6d86d7b384dad4
 
-Groovy:       2.4.12
-Ant:          Apache Ant(TM) version 1.9.9 compiled on February 2 2017
-JVM:          1.8.0_151 (Oracle Corporation 25.151-b12)
-OS:           Mac OS X 10.13.3 x86_64
+Kotlin:       1.3.72
+Groovy:       2.5.11
+Ant:          Apache Ant(TM) version 1.10.7 compiled on September 1 2019
+JVM:          14 (AdoptOpenJDK 14+36)
+OS:           Mac OS X 10.15.2 x86_64
 ----
 
 If not, here are some things you might see instead.
@@ -75,7 +76,7 @@ If not, then the problem exists within the execution of one or more of the reque
 [[sec:troubleshooting_dependency_resolution]]
 == Debugging dependency resolution
 
-Common dependency resolution issues such as resolving version conflicts are covered in <<troubleshooting_dependency_resolution.adoc#troubleshooting_dependency_resolution,Troubleshooting Dependency Resolution>>.
+Common dependency resolution issues such as resolving version conflicts are covered in <<viewing_debugging_dependencies.adoc#viewing-debugging-dependencies,Troubleshooting Dependency Resolution>>.
 
 You can see a dependency tree and see which resolved dependency versions differed from what was requested by clicking the _Dependencies_ view and using the search functionality, specifying the resolution reason.
 
@@ -87,7 +88,7 @@ The link:https://scans.gradle.com/s/sample/troubleshooting-userguide/dependencie
 [[sec:troubleshooting_performance]]
 == Troubleshooting slow Gradle builds
 
-For build performance issues (including “slow sync time”), see the guide to link:https://guides.gradle.org/performance/[Improving the Performance of Gradle Builds].
+For build performance issues (including “slow sync time”), see <<performance.adoc#performance_gradle,improving the Performance of Gradle Builds>>.
 
 Android developers should watch a presentation by the Android SDK Tools team about link:https://youtu.be/7ll-rkLCtyk[Speeding Up Your Android Gradle Builds].
 Many tips are also covered in the Android Studio user guide link:https://developer.android.com/studio/build/optimize-your-build.html[on optimizing build speed].
@@ -100,20 +101,15 @@ Many tips are also covered in the Android Studio user guide link:https://develop
 You can set breakpoints and debug <<custom_plugins.adoc#sec:packaging_a_plugin,buildSrc and standalone plugins>> in your Gradle build itself by setting the `org.gradle.debug` property to “true” and then attaching a remote debugger to port 5005.
 
 ----
-❯ gradle help -Dorg.gradle.debug=true --no-daemon
+❯ gradle help -Dorg.gradle.debug=true
 ----
 
 In addition, if you’ve adopted the Kotlin DSL, you can also debug build scripts themselves.
 
-ifdef::basebackend-html5[]
 The following video demonstrates how to debug an example build using IntelliJ IDEA.
 
 .Interactive debugging of a build script
 image::remote-debug-gradle.gif[]
-endif::basebackend-html5[]
-
-[NOTE]
-You must either stop running Gradle Daemons or run with `--no-daemon` when using debug mode.
 
 === Adding and changing logging
 

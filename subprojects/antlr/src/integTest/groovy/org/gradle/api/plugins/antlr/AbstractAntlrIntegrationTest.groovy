@@ -26,7 +26,7 @@ abstract class AbstractAntlrIntegrationTest extends AbstractIntegrationSpec {
         buildFile << """
             allprojects {
                 apply plugin: 'java'
-                ${jcenterRepository()}
+                ${mavenCentralRepository()}
                 tasks.withType(JavaCompile) {
                     options.compilerArgs << "-proc:none"
                 }
@@ -41,7 +41,7 @@ abstract class AbstractAntlrIntegrationTest extends AbstractIntegrationSpec {
             project(":grammar-user") {
 
                 dependencies {
-                    compile project(":grammar-builder")
+                    implementation project(":grammar-builder")
                 }
             }
 """

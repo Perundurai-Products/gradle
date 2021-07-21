@@ -17,8 +17,10 @@
 package org.gradle.plugins.ide.internal.tooling;
 
 import org.gradle.api.internal.artifacts.ivyservice.projectmodule.ProjectPublicationRegistry;
+import org.gradle.api.internal.file.FileCollectionFactory;
 import org.gradle.api.internal.project.ProjectStateRegistry;
 import org.gradle.api.internal.project.ProjectTaskLister;
+import org.gradle.internal.build.BuildStateRegistry;
 import org.gradle.internal.service.ServiceRegistration;
 import org.gradle.internal.service.ServiceRegistry;
 import org.gradle.internal.service.scopes.AbstractPluginServiceRegistry;
@@ -42,6 +44,8 @@ public class ToolingModelServices extends AbstractPluginServiceRegistry {
         protected BuildScopeToolingModelBuilderRegistryAction createIdeBuildScopeToolingModelBuilderRegistryAction(
             final ProjectTaskLister taskLister,
             final ProjectPublicationRegistry projectPublicationRegistry,
+            final FileCollectionFactory fileCollectionFactory,
+            final BuildStateRegistry buildStateRegistry,
             final ServiceRegistry services) {
 
             return new BuildScopeToolingModelBuilderRegistryAction() {
@@ -49,14 +53,16 @@ public class ToolingModelServices extends AbstractPluginServiceRegistry {
                 public void execute(ToolingModelBuilderRegistry registry) {
                     GradleProjectBuilder gradleProjectBuilder = new GradleProjectBuilder();
                     IdeaModelBuilder ideaModelBuilder = new IdeaModelBuilder(gradleProjectBuilder, services);
+                    registry.register(new RunBuildDependenciesTaskBuilder());
+                    registry.register(new RunEclipseTasksBuilder());
                     registry.register(new EclipseModelBuilder(gradleProjectBuilder, services));
                     registry.register(ideaModelBuilder);
                     registry.register(gradleProjectBuilder);
-                    registry.register(new GradleBuildBuilder());
+                    registry.register(new GradleBuildBuilder(buildStateRegistry));
                     registry.register(new BasicIdeaModelBuilder(ideaModelBuilder));
                     registry.register(new BuildInvocationsBuilder(taskLister));
                     registry.register(new PublicationsBuilder(projectPublicationRegistry));
-                    registry.register(new BuildEnvironmentBuilder());
+                    registry.register(new BuildEnvironmentBuilder(fileCollectionFactory));
                 }
             };
         }

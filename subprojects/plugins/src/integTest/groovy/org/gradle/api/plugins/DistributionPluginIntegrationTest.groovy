@@ -16,6 +16,7 @@
 
 package org.gradle.api.plugins
 
+
 import org.gradle.integtests.fixtures.WellBehavedPluginTest
 import org.gradle.integtests.fixtures.archives.TestReproducibleArchives
 import org.gradle.test.fixtures.archive.TarTestFixture
@@ -59,7 +60,7 @@ class DistributionPluginIntegrationTest extends WellBehavedPluginTest {
         when:
         buildFile << """
             apply plugin:'distribution'
-            apply plugin:'maven'
+            apply plugin:'maven-publish'
             group = "org.acme"
             version = "1.0"
 
@@ -71,16 +72,38 @@ class DistributionPluginIntegrationTest extends WellBehavedPluginTest {
                 }
             }
 
-            uploadArchives {
+            configurations {
+                distribution {
+                    attributes {
+                        attribute(Category.CATEGORY_ATTRIBUTE, objects.named(Category, "distribution"))
+                    }
+                    outgoing.artifact(distZip)
+                }
+            }
+
+            interface MyServices {
+                @Inject
+                SoftwareComponentFactory getSoftwareComponentFactory()
+            }
+            def factory = objects.newInstance(MyServices).softwareComponentFactory
+            def distributionComponent = factory.adhoc("distribution")
+            distributionComponent.addVariantsFromConfiguration(configurations.distribution) {}
+
+
+            publishing {
                 repositories {
-                    mavenDeployer {
-                        repository(url: "${file("repo").toURI()}")
+                    maven { url "${file("repo").toURI()}" }
+                }
+                publications {
+                    maven(MavenPublication) {
+                       from distributionComponent
                     }
                 }
             }
+
             """
         then:
-        succeeds("uploadArchives")
+        succeeds("publishMavenPublicationToMavenRepository")
         file("repo/org/acme/TestProject/1.0/TestProject-1.0.zip").assertIsFile()
 
         and:
@@ -98,7 +121,7 @@ class DistributionPluginIntegrationTest extends WellBehavedPluginTest {
 
             distributions {
                 custom{
-                    baseName='customName'
+                    distributionBaseName = 'customName'
                     contents {
                         from { "someFile" }
                     }
@@ -112,14 +135,13 @@ class DistributionPluginIntegrationTest extends WellBehavedPluginTest {
         file("unzip/customName/someFile").assertIsFile()
     }
 
-
     def createTaskForCustomDistributionWithEmptyCustomName() {
         when:
         buildFile << """
             apply plugin:'distribution'
             distributions {
                 custom{
-                    baseName=''
+                    distributionBaseName = ''
                     contents {
                         from { "someFile" }
                     }
@@ -130,7 +152,7 @@ class DistributionPluginIntegrationTest extends WellBehavedPluginTest {
             """
         then:
         runAndFail('customDistZip')
-        failure.assertHasCause "Distribution baseName must not be null or empty! Check your configuration of the distribution plugin."
+        failure.assertHasCause "Distribution 'custom' must not have an empty distributionBaseName."
     }
 
     def createDistributionWithoutVersion() {
@@ -143,12 +165,12 @@ class DistributionPluginIntegrationTest extends WellBehavedPluginTest {
         }
         and:
         buildFile << """
-            apply plugin:'distribution'
+            apply plugin: 'distribution'
 
 
             distributions {
                 main{
-                    baseName='myDistribution'
+                    distributionBaseName = 'myDistribution'
                 }
             }
             """
@@ -173,7 +195,7 @@ class DistributionPluginIntegrationTest extends WellBehavedPluginTest {
 
             distributions {
                 main{
-                    baseName='myDistribution'
+                    distributionBaseName = 'myDistribution'
                 }
             }
             """
@@ -199,7 +221,7 @@ class DistributionPluginIntegrationTest extends WellBehavedPluginTest {
             version = '1.2'
             distributions {
                 main{
-                    baseName='myDistribution'
+                    distributionBaseName = 'myDistribution'
                 }
             }
             distZip{
@@ -435,7 +457,10 @@ class DistributionPluginIntegrationTest extends WellBehavedPluginTest {
         buildFile << """
             apply plugin: 'application'
             apply plugin: 'java'
-            mainClassName = "Main"
+
+            application {
+                mainClass = "Main"
+            }
         """
         file("src/main/java/Main.java") << "public class Main {}"
         settingsFile << """

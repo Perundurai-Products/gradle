@@ -25,14 +25,13 @@ class ToolingApiClasspathIntegrationTest extends AbstractIntegrationSpec {
     def "tooling api classpath contains only tooling-api jar and slf4j"() {
         when:
         ToolingApiDistributionResolver resolver = new ToolingApiDistributionResolver().withDefaultRepository().withExternalToolingApiDistribution()
-        ToolingApiDistribution resolve = resolver.resolve(distribution.getVersion().version)
+        ToolingApiDistribution resolve = resolver.resolve(distribution.getVersion().baseVersion.version)
 
         then:
         resolve.classpath.size() == 2
         resolve.classpath.any {it.name ==~ /slf4j-api-.*\.jar/}
-        resolve.classpath.find { it.name ==~ /gradle-tooling-api.*\.jar/ }.size() < 1.86 * 1024 * 1024
-
-        cleanup:
-        resolver.stop()
+        // If this suddenly fails without an obvious reason, you likely have added some code
+        // that references types that were previously eliminated from gradle-tooling-api.jar.
+        resolve.classpath.find { it.name ==~ /gradle-tooling-api.*\.jar/ }.size() < 2_500_000
     }
 }

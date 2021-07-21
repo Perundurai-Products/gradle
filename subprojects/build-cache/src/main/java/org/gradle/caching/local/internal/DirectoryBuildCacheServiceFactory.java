@@ -17,6 +17,7 @@
 package org.gradle.caching.local.internal;
 
 import org.gradle.api.UncheckedIOException;
+import org.gradle.api.internal.file.temp.TemporaryFileProvider;
 import org.gradle.cache.CacheBuilder;
 import org.gradle.cache.CacheRepository;
 import org.gradle.cache.PersistentCache;
@@ -28,16 +29,16 @@ import org.gradle.cache.internal.VersionStrategy;
 import org.gradle.caching.BuildCacheService;
 import org.gradle.caching.BuildCacheServiceFactory;
 import org.gradle.caching.local.DirectoryBuildCache;
+import org.gradle.internal.file.FileAccessTimeJournal;
+import org.gradle.internal.file.FileAccessTracker;
 import org.gradle.internal.file.PathToFileResolver;
-import org.gradle.internal.resource.local.FileAccessTimeJournal;
-import org.gradle.internal.resource.local.FileAccessTracker;
+import org.gradle.internal.file.impl.SingleDepthFileAccessTracker;
 import org.gradle.internal.resource.local.PathKeyFileStore;
-import org.gradle.internal.resource.local.SingleDepthFileAccessTracker;
 
 import javax.inject.Inject;
 import java.io.File;
 
-import static org.gradle.cache.FileLockManager.LockMode.None;
+import static org.gradle.cache.FileLockManager.LockMode.OnDemand;
 import static org.gradle.cache.internal.filelock.LockOptionsBuilder.mode;
 
 public class DirectoryBuildCacheServiceFactory implements BuildCacheServiceFactory<DirectoryBuildCache> {
@@ -54,16 +55,18 @@ public class DirectoryBuildCacheServiceFactory implements BuildCacheServiceFacto
     private final DirectoryBuildCacheFileStoreFactory fileStoreFactory;
     private final CleanupActionFactory cleanupActionFactory;
     private final FileAccessTimeJournal fileAccessTimeJournal;
+    private final TemporaryFileProvider temporaryFileProvider;
 
     @Inject
     public DirectoryBuildCacheServiceFactory(CacheRepository cacheRepository, CacheScopeMapping cacheScopeMapping, PathToFileResolver resolver, DirectoryBuildCacheFileStoreFactory fileStoreFactory,
-                                             CleanupActionFactory cleanupActionFactory, FileAccessTimeJournal fileAccessTimeJournal) {
+                                             CleanupActionFactory cleanupActionFactory, FileAccessTimeJournal fileAccessTimeJournal, TemporaryFileProvider temporaryFileProvider) {
         this.cacheRepository = cacheRepository;
         this.cacheScopeMapping = cacheScopeMapping;
         this.resolver = resolver;
         this.fileStoreFactory = fileStoreFactory;
         this.cleanupActionFactory = cleanupActionFactory;
         this.fileAccessTimeJournal = fileAccessTimeJournal;
+        this.temporaryFileProvider = temporaryFileProvider;
     }
 
     @Override
@@ -87,10 +90,10 @@ public class DirectoryBuildCacheServiceFactory implements BuildCacheServiceFacto
             .cache(target)
             .withCleanup(cleanupActionFactory.create(new LeastRecentlyUsedCacheCleanup(new SingleDepthFilesFinder(FILE_TREE_DEPTH_TO_TRACK_AND_CLEANUP), fileAccessTimeJournal, removeUnusedEntriesAfterDays)))
             .withDisplayName("Build cache")
-            .withLockOptions(mode(None))
+            .withLockOptions(mode(OnDemand))
             .withCrossVersionCache(CacheBuilder.LockTarget.DefaultTarget)
             .open();
-        BuildCacheTempFileStore tempFileStore = new DefaultBuildCacheTempFileStore(target);
+        BuildCacheTempFileStore tempFileStore = new DefaultBuildCacheTempFileStore(temporaryFileProvider);
         FileAccessTracker fileAccessTracker = new SingleDepthFileAccessTracker(fileAccessTimeJournal, target, FILE_TREE_DEPTH_TO_TRACK_AND_CLEANUP);
 
         return new DirectoryBuildCacheService(fileStore, persistentCache, tempFileStore, fileAccessTracker, FAILED_READ_SUFFIX);

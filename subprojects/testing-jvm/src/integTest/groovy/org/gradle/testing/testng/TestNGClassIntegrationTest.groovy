@@ -26,7 +26,7 @@ import org.gradle.testing.fixture.TestNGCoverage
 
 import static org.gradle.testing.fixture.TestNGCoverage.FIXED_ICLASS_LISTENER
 import static org.gradle.testing.fixture.TestNGCoverage.NEWEST
-import static org.gradle.util.TextUtil.normaliseFileSeparators
+import static org.gradle.util.internal.TextUtil.normaliseFileSeparators
 
 @TargetCoverage({ [FIXED_ICLASS_LISTENER, NEWEST] })
 class TestNGClassIntegrationTest extends MultiVersionIntegrationSpec {
@@ -39,39 +39,38 @@ class TestNGClassIntegrationTest extends MultiVersionIntegrationSpec {
         TestNGCoverage.enableTestNG(buildFile, version)
 
         buildFile << """
-            import org.gradle.api.internal.tasks.testing.TestCompleteEvent
-            import org.gradle.api.internal.tasks.testing.TestDescriptorInternal
-            import org.gradle.api.internal.tasks.testing.TestStartEvent
-            import org.gradle.api.internal.tasks.testing.results.TestListenerInternal
-            import org.gradle.api.tasks.testing.TestOutputEvent
-            import org.gradle.api.tasks.testing.TestResult
-    
+
             test {
                 useTestNG()
-            }
-    
-            gradle.addListener(new TestListenerInternal() {
-                void started(TestDescriptorInternal d, TestStartEvent s) {
-                    printEventInformation('$STARTED', d)
-                }
-    
-                void completed(TestDescriptorInternal d, TestResult result, TestCompleteEvent cE) {
-                    printEventInformation('$FINISHED', d)
-                }
-    
-                private void printEventInformation(String eventTypeDescription, TestDescriptorInternal d) {
-                    def name = d.name
-                    def descriptor = d;
-                    while (descriptor.parent != null) {
-                        name = "\${descriptor.parent.name} > \$name"
-                        descriptor = descriptor.parent
+                addTestListener(new TestListener() {
+
+                    void beforeSuite(TestDescriptor d) {
+                        printEventInformation('$STARTED', d)
                     }
-                    println "\$eventTypeDescription event type \${d.descriptor.class.name} for \${name}"
-                }
-    
-                void output(TestDescriptorInternal descriptor, TestOutputEvent output) {
-                }
-            })
+
+                    void afterSuite(TestDescriptor d, TestResult result) {
+                        printEventInformation('$FINISHED', d)
+                    }
+
+                    void beforeTest(TestDescriptor d) {
+                        printEventInformation('$STARTED', d)
+                    }
+
+                    void afterTest(TestDescriptor d, TestResult result) {
+                        printEventInformation('$FINISHED', d)
+                    }
+
+                    private void printEventInformation(String eventTypeDescription, TestDescriptor d) {
+                        def name = d.name
+                        def descriptor = d;
+                        while (descriptor.parent != null) {
+                            name = "\${descriptor.parent.name} > \$name"
+                            descriptor = descriptor.parent
+                        }
+                        println "\$eventTypeDescription event type \${d.descriptor.class.name} for \${name}"
+                    }
+                })
+            }
         """
     }
 
@@ -81,18 +80,19 @@ class TestNGClassIntegrationTest extends MultiVersionIntegrationSpec {
 
         buildFile << """
             test {
+                def suiteFile = file("${(normaliseFileSeparators(testNgSuite.absolutePath))}")
                 useTestNG {
-                    suites file("${(normaliseFileSeparators(testNgSuite.absolutePath))}")
+                    suites suiteFile
                 }
             }
         """
 
         file("src/test/java/org/company/SystemOutTest.java") << """
             package org.company;
-    
+
             import org.testng.Assert;
             import org.testng.annotations.Test;
-    
+
             public class SystemOutTest {
                 @Test
                 public void testOut() {
@@ -140,10 +140,10 @@ class TestNGClassIntegrationTest extends MultiVersionIntegrationSpec {
         given:
         file("src/test/java/org/company/TestWithBrokenSetupMethod.java") << """
             package org.company;
-    
+
             import org.testng.Assert;
             import org.testng.annotations.*;
-    
+
             public class TestWithBrokenSetupMethod {
                 @BeforeMethod
                 public void broken() {

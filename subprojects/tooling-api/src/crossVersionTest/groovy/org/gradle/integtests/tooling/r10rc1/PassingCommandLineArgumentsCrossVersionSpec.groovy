@@ -115,7 +115,8 @@ class PassingCommandLineArgumentsCrossVersionSpec extends ToolingApiSpecificatio
     def "can overwrite project dir via build arguments"() {
         given:
         file('otherDir').createDir()
-        file('build.gradle') << "assert projectDir.name.endsWith('otherDir')"
+        file('otherDir/build.gradle') << "assert projectDir.name.endsWith('otherDir')"
+        file('otherDir/settings.gradle') << ''
 
         when:
         withConnection {
@@ -135,6 +136,21 @@ class PassingCommandLineArgumentsCrossVersionSpec extends ToolingApiSpecificatio
         when:
         withConnection {
             it.newBuild().withArguments('-g', '.myGradle').run()
+        }
+
+        then:
+        noExceptionThrown()
+    }
+
+    def "can overwrite gradle user home via system property build argument"() {
+        given:
+        file('.myGradle').createDir()
+        file('build.gradle') << "assert gradle.gradleUserHomeDir.name.endsWith('.myGradle')"
+        toolingApi.requireIsolatedDaemons()
+
+        when:
+        withConnection {
+            it.newBuild().withArguments('-Dgradle.user.home=.myGradle').run()
         }
 
         then:

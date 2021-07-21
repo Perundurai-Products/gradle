@@ -16,22 +16,19 @@
 
 package org.gradle.api.internal.provider;
 
-import org.gradle.api.internal.tasks.TaskDependencyResolveContext;
+import com.google.common.collect.ImmutableCollection;
+import org.gradle.api.Action;
 
-import java.util.Collection;
 import java.util.Map;
 
-public interface MapCollector<K, V> {
+/**
+ * A supplier of zero or more mappings from value of type {@link K} to value of type {@link V}.
+ */
+public interface MapCollector<K, V> extends ValueSupplier {
 
-    boolean present();
+    Value<Void> collectEntries(ValueConsumer consumer, MapEntryCollector<K, V> collector, Map<K, V> dest);
 
-    void collectInto(MapEntryCollector<K, V> collector, Map<K, V> dest);
+    Value<Void> collectKeys(ValueConsumer consumer, ValueCollector<K> collector, ImmutableCollection.Builder<K> dest);
 
-    boolean maybeCollectInto(MapEntryCollector<K, V> collector, Map<K, V> dest);
-
-    void collectKeysInto(ValueCollector<K> collector, Collection<K> dest);
-
-    boolean maybeCollectKeysInto(ValueCollector<K> collector, Collection<K> dest);
-
-    boolean maybeVisitBuildDependencies(TaskDependencyResolveContext context);
+    void calculateExecutionTimeValue(Action<ExecutionTimeValue<? extends Map<? extends K, ? extends V>>> visitor);
 }

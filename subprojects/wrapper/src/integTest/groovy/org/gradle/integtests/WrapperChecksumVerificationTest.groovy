@@ -16,12 +16,15 @@
 
 package org.gradle.integtests
 
-import org.gradle.internal.hash.HashUtil
+import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
+import org.gradle.internal.hash.Hashing
 import org.gradle.test.fixtures.server.http.BlockingHttpServer
 import org.junit.Rule
+import spock.lang.IgnoreIf
 import spock.lang.Issue
 
 @Issue('https://github.com/gradle/gradle-private/issues/1537')
+@IgnoreIf({ GradleContextualExecuter.embedded }) // wrapperExecuter requires a real distribution
 class WrapperChecksumVerificationTest extends AbstractWrapperIntegrationSpec {
     @Rule
     BlockingHttpServer server = new BlockingHttpServer()
@@ -39,11 +42,11 @@ class WrapperChecksumVerificationTest extends AbstractWrapperIntegrationSpec {
         file('gradle/wrapper/gradle-wrapper.properties') << 'distributionSha256Sum=bad'
 
         when:
-        def failure = wrapperExecuter.runWithFailure()
+        def failure = wrapperExecuter.withStackTraceChecksDisabled().runWithFailure()
         def f = new File(file("user-home/wrapper/dists/gradle-bin").listFiles()[0], "gradle-bin.zip")
 
         then:
-        failure.error.startsWith("""
+        failure.error.contains("""
 Verification of Gradle distribution failed!
 
 Your Gradle distribution may have been tampered with.
@@ -52,7 +55,7 @@ Confirm that the 'distributionSha256Sum' property in your gradle-wrapper.propert
  Distribution Url: ${server.uri}/gradle-bin.zip
 Download Location: $f.absolutePath
 Expected checksum: 'bad'
-  Actual checksum: '${HashUtil.sha256(distribution.binDistribution).asZeroPaddedHexString(64)}'
+  Actual checksum: '${Hashing.sha256().hashFile(distribution.binDistribution).toZeroPaddedString(Hashing.sha256().hexDigits)}'
 """.trim())
     }
 
@@ -61,7 +64,7 @@ Expected checksum: 'bad'
         prepareWrapper(new URI("${server.uri}/gradle-bin.zip"))
 
         and:
-        file('gradle/wrapper/gradle-wrapper.properties') << "distributionSha256Sum=${HashUtil.sha256(distribution.binDistribution).asZeroPaddedHexString(64)}"
+        file('gradle/wrapper/gradle-wrapper.properties') << "distributionSha256Sum=${Hashing.sha256().hashFile(distribution.binDistribution).toZeroPaddedString(Hashing.sha256().hexDigits)}"
 
         when:
         def success = wrapperExecuter.run()

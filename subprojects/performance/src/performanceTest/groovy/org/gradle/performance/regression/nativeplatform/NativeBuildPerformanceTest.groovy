@@ -17,21 +17,43 @@
 package org.gradle.performance.regression.nativeplatform
 
 import org.gradle.performance.AbstractCrossVersionPerformanceTest
-import org.gradle.performance.mutator.ApplyChangeToNativeSourceFileMutator
+import org.gradle.performance.annotations.RunFor
+import org.gradle.performance.annotations.Scenario
+import org.gradle.profiler.mutations.ApplyChangeToNativeSourceFileMutator
 import spock.lang.Unroll
 
+import static org.gradle.performance.annotations.ScenarioType.PER_COMMIT
+import static org.gradle.performance.annotations.ScenarioType.PER_DAY
+import static org.gradle.performance.results.OperatingSystem.LINUX
+
+@RunFor([
+    @Scenario(type = PER_COMMIT, operatingSystems = [LINUX], testProjects = ["bigCppMulti"]),
+    @Scenario(type = PER_DAY, operatingSystems = [LINUX], testProjects = ["bigCppApp"])
+])
 class NativeBuildPerformanceTest extends AbstractCrossVersionPerformanceTest {
     def setup() {
-        runner.minimumVersion = '4.1' // minimum version that contains new C++ plugins
-        runner.targetVersions = ["5.2-20181218000039+0000"]
+        runner.minimumBaseVersion = '4.1' // minimum version that contains new C++ plugins
+        runner.targetVersions = ["7.2-20210713113638+0000"]
+    }
+
+    def "up-to-date assemble (native)"() {
+        given:
+        runner.tasksToRun = ["assemble"]
+
+        when:
+        def result = runner.run()
+
+        then:
+        result.assertCurrentVersionHasNotRegressed()
     }
 
     @Unroll
-    def "up-to-date assemble on #testProject"() {
+    def "assemble with #changeType file change"() {
         given:
-        runner.testProject = testProject
         runner.tasksToRun = ["assemble"]
-        runner.gradleOpts = ["-Xms$maxMemory", "-Xmx$maxMemory"]
+        runner.addBuildMutator { settings ->
+            new ApplyChangeToNativeSourceFileMutator(new File(settings.getProjectDir(), determineFileToChange(changeType, runner.testProject)))
+        }
 
         when:
         def result = runner.run()
@@ -40,32 +62,28 @@ class NativeBuildPerformanceTest extends AbstractCrossVersionPerformanceTest {
         result.assertCurrentVersionHasNotRegressed()
 
         where:
-        testProject        | maxMemory
-        "bigCppApp"        | '256m'
-        "bigCppMulti"      | '1g'
+        changeType << ['header', 'source']
     }
 
-    @Unroll
-    def "assemble with #changeType file change on #testProject"() {
-        given:
-        runner.testProject = testProject
-        runner.tasksToRun = ["assemble"]
-        runner.gradleOpts = ["-Xms$maxMemory", "-Xmx$maxMemory"]
-        runner.addBuildExperimentListener(new ApplyChangeToNativeSourceFileMutator(fileToChange))
-
-        when:
-        def result = runner.run()
-
-        then:
-        result.assertCurrentVersionHasNotRegressed()
-
-        where:
-        testProject   | maxMemory | fileToChange
-        "bigCppApp"   | '256m'    | 'src/main/cpp/lib250.cpp'
-        "bigCppApp"   | '256m'    | 'src/main/headers/lib250.h'
-        "bigCppMulti" | '1g'      | 'project101/src/main/cpp/project101lib4.cpp'
-        "bigCppMulti" | '1g'      | 'project101/src/main/public/project101lib4.h'
-        changeType = fileToChange.endsWith('.h') ? 'header' : 'source'
+    static String determineFileToChange(String changeType, String testProject) {
+        if (changeType == 'header') {
+            switch (testProject) {
+                case 'bigCppApp':
+                    return 'src/main/headers/lib250.h'
+                case 'bigCppMulti':
+                    return 'project101/src/main/public/project101lib4.h'
+                default:
+                    throw new IllegalArgumentException("Unknown test project " + testProject)
+            }
+        } else {
+            switch (testProject) {
+                case 'bigCppApp':
+                    return 'src/main/cpp/lib250.cpp'
+                case 'bigCppMulti':
+                    return 'project101/src/main/cpp/project101lib4.cpp'
+                default:
+                    throw new IllegalArgumentException("Unknown test project " + testProject)
+            }
+        }
     }
-
 }

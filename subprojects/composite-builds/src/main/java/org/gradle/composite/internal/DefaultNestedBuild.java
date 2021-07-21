@@ -16,33 +16,85 @@
 
 package org.gradle.composite.internal;
 
-import org.gradle.api.Transformer;
 import org.gradle.api.artifacts.component.BuildIdentifier;
 import org.gradle.api.internal.BuildDefinition;
+import org.gradle.api.internal.GradleInternal;
 import org.gradle.api.internal.SettingsInternal;
-import org.gradle.initialization.GradleLauncher;
-import org.gradle.initialization.NestedBuildFactory;
+import org.gradle.api.internal.project.ProjectStateRegistry;
+import org.gradle.initialization.exception.ExceptionAnalyser;
 import org.gradle.internal.build.AbstractBuildState;
+import org.gradle.internal.build.BuildLifecycleController;
+import org.gradle.internal.build.BuildLifecycleControllerFactory;
 import org.gradle.internal.build.BuildState;
+import org.gradle.internal.build.ExecutionResult;
 import org.gradle.internal.build.StandAloneNestedBuild;
+import org.gradle.internal.buildtree.BuildModelParameters;
+import org.gradle.internal.buildtree.BuildTreeFinishExecutor;
+import org.gradle.internal.buildtree.BuildTreeLifecycleController;
+import org.gradle.internal.buildtree.BuildTreeLifecycleControllerFactory;
+import org.gradle.internal.buildtree.BuildTreeState;
+import org.gradle.internal.buildtree.BuildTreeWorkExecutor;
+import org.gradle.internal.buildtree.DefaultBuildTreeWorkExecutor;
 import org.gradle.internal.concurrent.Stoppable;
-import org.gradle.internal.invocation.BuildController;
-import org.gradle.internal.invocation.GradleBuildController;
+import org.gradle.internal.service.scopes.BuildScopeServices;
 import org.gradle.util.Path;
+
+import java.io.File;
+import java.util.List;
+import java.util.function.Function;
 
 class DefaultNestedBuild extends AbstractBuildState implements StandAloneNestedBuild, Stoppable {
     private final Path identityPath;
     private final BuildState owner;
+    private final ProjectStateRegistry projectStateRegistry;
     private final BuildIdentifier buildIdentifier;
     private final BuildDefinition buildDefinition;
-    private final GradleLauncher gradleLauncher;
+    private final BuildLifecycleController buildLifecycleController;
+    private final BuildTreeLifecycleController buildTreeLifecycleController;
+    private final BuildScopeServices buildScopeServices;
 
-    DefaultNestedBuild(BuildIdentifier buildIdentifier, Path identityPath, BuildDefinition buildDefinition, BuildState owner) {
+    DefaultNestedBuild(BuildIdentifier buildIdentifier,
+                       Path identityPath,
+                       BuildDefinition buildDefinition,
+                       BuildState owner,
+                       BuildTreeState buildTree,
+                       BuildLifecycleControllerFactory buildLifecycleControllerFactory,
+                       ProjectStateRegistry projectStateRegistry) {
         this.buildIdentifier = buildIdentifier;
         this.identityPath = identityPath;
         this.buildDefinition = buildDefinition;
         this.owner = owner;
-        gradleLauncher = owner.getNestedBuildFactory().nestedInstance(buildDefinition, this);
+        this.projectStateRegistry = projectStateRegistry;
+
+        buildScopeServices = new BuildScopeServices(buildTree.getServices());
+        this.buildLifecycleController = buildLifecycleControllerFactory.newInstance(buildDefinition, this, owner.getMutableModel(), buildScopeServices);
+
+        IncludedBuildTaskGraph taskGraph = buildScopeServices.get(IncludedBuildTaskGraph.class);
+        ExceptionAnalyser exceptionAnalyser = buildScopeServices.get(ExceptionAnalyser.class);
+        BuildModelParameters modelParameters = buildScopeServices.get(BuildModelParameters.class);
+        BuildTreeWorkExecutor workExecutor = new DefaultBuildTreeWorkExecutor(taskGraph, buildLifecycleController);
+        BuildTreeLifecycleControllerFactory buildTreeLifecycleControllerFactory = buildScopeServices.get(BuildTreeLifecycleControllerFactory.class);
+
+        // On completion of the action, finish only this build and do not finish any other builds
+        // When the build model is required, then do not finish anything on completion of the action
+        // The root build will take care of finishing this build later, if not finished now
+        BuildTreeFinishExecutor finishExecutor;
+        if (modelParameters.isRequiresBuildModel()) {
+            finishExecutor = new DoNothingBuildFinishExecutor();
+        } else {
+            finishExecutor = new FinishThisBuildOnlyFinishExecutor(exceptionAnalyser);
+        }
+        buildTreeLifecycleController = buildTreeLifecycleControllerFactory.createController(buildLifecycleController, workExecutor, finishExecutor);
+    }
+
+    @Override
+    protected BuildLifecycleController getBuildController() {
+        return buildLifecycleController;
+    }
+
+    @Override
+    protected ProjectStateRegistry getProjectStateRegistry() {
+        return projectStateRegistry;
     }
 
     @Override
@@ -62,28 +114,22 @@ class DefaultNestedBuild extends AbstractBuildState implements StandAloneNestedB
 
     @Override
     public void stop() {
-        gradleLauncher.stop();
+        buildLifecycleController.stop();
     }
 
     @Override
-    public <T> T run(Transformer<T, ? super BuildController> buildAction) {
-        GradleBuildController buildController = new GradleBuildController(gradleLauncher);
-        try {
-            gradleLauncher.getGradle().setIdentityPath(getCurrentPrefixForProjectsInChildBuilds());
-            return buildAction.transform(buildController);
-        } finally {
-            buildController.stop();
-        }
+    public ExecutionResult<Void> finishBuild() {
+        return buildLifecycleController.finishBuild(null);
+    }
+
+    @Override
+    public <T> T run(Function<? super BuildTreeLifecycleController, T> buildAction) {
+        return buildAction.apply(buildTreeLifecycleController);
     }
 
     @Override
     public SettingsInternal getLoadedSettings() {
-        return gradleLauncher.getGradle().getSettings();
-    }
-
-    @Override
-    public NestedBuildFactory getNestedBuildFactory() {
-        return gradleLauncher.getGradle().getServices().get(NestedBuildFactory.class);
+        return buildLifecycleController.getGradle().getSettings();
     }
 
     @Override
@@ -93,6 +139,42 @@ class DefaultNestedBuild extends AbstractBuildState implements StandAloneNestedB
 
     @Override
     public Path getIdentityPathForProject(Path projectPath) {
-        return gradleLauncher.getGradle().getIdentityPath().append(projectPath);
+        return buildLifecycleController.getGradle().getIdentityPath().append(projectPath);
+    }
+
+    @Override
+    public File getBuildRootDir() {
+        return buildDefinition.getBuildRootDir();
+    }
+
+    @Override
+    public GradleInternal getBuild() {
+        return buildLifecycleController.getGradle();
+    }
+
+    @Override
+    public GradleInternal getMutableModel() {
+        return buildLifecycleController.getGradle();
+    }
+
+    private static class DoNothingBuildFinishExecutor implements BuildTreeFinishExecutor {
+        @Override
+        public ExecutionResult<Void> finishBuildTree(List<Throwable> failures) {
+            return ExecutionResult.succeeded();
+        }
+    }
+
+    private class FinishThisBuildOnlyFinishExecutor implements BuildTreeFinishExecutor {
+        private final ExceptionAnalyser exceptionAnalyser;
+
+        public FinishThisBuildOnlyFinishExecutor(ExceptionAnalyser exceptionAnalyser) {
+            this.exceptionAnalyser = exceptionAnalyser;
+        }
+
+        @Override
+        public ExecutionResult<Void> finishBuildTree(List<Throwable> failures) {
+            RuntimeException reportable = exceptionAnalyser.transform(failures);
+            return buildLifecycleController.finishBuild(reportable);
+        }
     }
 }

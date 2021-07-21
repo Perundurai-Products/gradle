@@ -17,17 +17,19 @@
 package org.gradle.integtests.resolve.ivy
 
 import org.gradle.integtests.fixtures.GradleMetadataResolveRunner
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.junit.Assume
 import spock.lang.Issue
 import spock.lang.Unroll
 
 
-class  ComponentSelectionRulesDependencyResolveIntegTest extends AbstractComponentSelectionRulesIntegrationTest {
+class ComponentSelectionRulesDependencyResolveIntegTest extends AbstractComponentSelectionRulesIntegrationTest {
     boolean isWellBehaved(boolean mavenCompatible, boolean gradleCompatible = true) {
-        (GradleMetadataResolveRunner.useIvy() || mavenCompatible) && (!GradleMetadataResolveRunner.gradleMetadataEnabled || gradleCompatible)
+        (GradleMetadataResolveRunner.useIvy() || mavenCompatible) && (!GradleMetadataResolveRunner.gradleMetadataPublished || gradleCompatible)
     }
 
     @Unroll
+    @ToBeFixedForConfigurationCache
     def "uses '#rule' rule to choose component for #selector"() {
         given:
         Assume.assumeTrue isWellBehaved(mavenCompatible, gradleCompatible)
@@ -51,7 +53,7 @@ class  ComponentSelectionRulesDependencyResolveIntegTest extends AbstractCompone
 """
 
         when:
-        def chosenModule = setupInterations(selector, chosenVersion, downloadedMetadata)
+        def chosenModule = setupInteractions(selector, chosenVersion, downloadedMetadata)
 
         then:
         checkDependencies {
@@ -85,7 +87,7 @@ class  ComponentSelectionRulesDependencyResolveIntegTest extends AbstractCompone
         "1.1"                | "select branch" | "1.1"         | '["1.1"]'        | ['1.1']            | false           | false            | []
     }
 
-    private String setupInterations(String selector, String chosenVersion, List<String> downloadedMetadata, Closure<Void> more = {}) {
+    private String setupInteractions(String selector, String chosenVersion, List<String> downloadedMetadata, Closure<Void> more = {}) {
         def chosenModule = chosenVersion ? (chosenVersion.contains('-lib') ? 'lib' : 'api') : null
         repositoryInteractions {
             'org.utils:api' {
@@ -115,6 +117,7 @@ class  ComponentSelectionRulesDependencyResolveIntegTest extends AbstractCompone
     }
 
     @Unroll
+    @ToBeFixedForConfigurationCache
     def "uses '#rule' rule to reject all candidates for dynamic version #selector"() {
         given:
         Assume.assumeTrue isWellBehaved(mavenCompatible)
@@ -143,7 +146,7 @@ class  ComponentSelectionRulesDependencyResolveIntegTest extends AbstractCompone
 """
 
         when:
-        setupInterations(selector, null, downloadedMetadata)
+        setupInteractions(selector, null, downloadedMetadata)
 
         then:
         checkDependencies(':checkLenient')
@@ -187,6 +190,7 @@ class  ComponentSelectionRulesDependencyResolveIntegTest extends AbstractCompone
         "latest.milestone"   | "select 1.1"               | '["2.0"]'               | ['2.1', '2.0']        | false
     }
 
+    @ToBeFixedForConfigurationCache
     def "reports all candidates rejected by rule"() {
         buildFile << """
 
@@ -204,7 +208,7 @@ class  ComponentSelectionRulesDependencyResolveIntegTest extends AbstractCompone
 """
 
         when:
-        setupInterations('1.+', null, ['1.2', '1.1', '1.0'])
+        setupInteractions('1.+', null, ['1.2', '1.1', '1.0'])
 
         then:
         fails ':checkDeps'
@@ -220,9 +224,9 @@ Versions rejected by component selection rules:
   - 1.0
 Searched in the following locations:
   - ${versionListingURI('org.utils', 'api')}
-${triedMetadata('org.utils', 'api', "1.2", false, gradleMetadataEnabled || !experimentalEnabled)}
-${triedMetadata('org.utils', 'api', "1.1", false, gradleMetadataEnabled || !experimentalEnabled)}
-${triedMetadata('org.utils', 'api', "1.0", false, gradleMetadataEnabled || !experimentalEnabled)}
+${triedMetadata('org.utils', 'api', "1.2")}
+${triedMetadata('org.utils', 'api', "1.1")}
+${triedMetadata('org.utils', 'api', "1.0")}
 Required by:
 """)
 
@@ -254,6 +258,7 @@ Required by:
     }
 
     @Unroll
+    @ToBeFixedForConfigurationCache
     def "uses '#rule' rule to reject candidate for static version #selector"() {
         given:
         Assume.assumeTrue isWellBehaved(mavenCompatible, gradleCompatible)
@@ -281,7 +286,7 @@ Required by:
 """
 
         when:
-        setupInterations(selector, null, downloadedMetadata)
+        setupInteractions(selector, null, downloadedMetadata)
 
         then:
         checkDependencies(':checkLenient')
@@ -406,7 +411,7 @@ Required by:
         """
 
         when:
-        setupInterations(selector, chosen, downloadedMetadata) {
+        setupInteractions(selector, chosen, downloadedMetadata) {
             'org.utils:lib' {
                 expectVersionListing()
             }
@@ -429,6 +434,7 @@ Required by:
     }
 
     @Issue("GRADLE-3236")
+    @ToBeFixedForConfigurationCache
     def "can select a different component for the same selector in different configurations"() {
         def descriptorArg = GradleMetadataResolveRunner.useIvy() ? 'selection.getDescriptor(IvyModuleDescriptor)' : 'selection.metadata'
         buildFile << """

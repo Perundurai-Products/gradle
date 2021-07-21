@@ -16,6 +16,7 @@
 
 package org.gradle.performance.fixture
 
+import groovy.transform.CompileStatic
 import org.gradle.integtests.fixtures.executer.IntegrationTestBuildContext
 import org.gradle.internal.jvm.Jvm
 import org.gradle.internal.os.OperatingSystem
@@ -24,10 +25,11 @@ import org.gradle.performance.results.DataReporter
 import org.gradle.performance.util.Git
 import org.gradle.util.GradleVersion
 
-class BuildScanPerformanceTestRunner extends CrossBuildPerformanceTestRunner {
+@CompileStatic
+class BuildScanPerformanceTestRunner extends AbstractCrossBuildPerformanceTestRunner<CrossBuildPerformanceResults> {
     private final String pluginCommitSha
 
-    BuildScanPerformanceTestRunner(BuildExperimentRunner experimentRunner, DataReporter<CrossBuildPerformanceResults> dataReporter, String pluginCommitSha, IntegrationTestBuildContext buildContext) {
+    BuildScanPerformanceTestRunner(GradleBuildExperimentRunner experimentRunner, DataReporter<CrossBuildPerformanceResults> dataReporter, String pluginCommitSha, IntegrationTestBuildContext buildContext) {
         super(experimentRunner, dataReporter, buildContext)
         this.pluginCommitSha = pluginCommitSha
         this.testGroup = "build scan plugin"
@@ -37,11 +39,13 @@ class BuildScanPerformanceTestRunner extends CrossBuildPerformanceTestRunner {
     @Override
     CrossBuildPerformanceResults newResult() {
         new CrossBuildPerformanceResults(
+            testClass: testClassName,
             testId: testId,
+            testProject: testProject,
             testGroup: testGroup,
             jvm: Jvm.current().toString(),
-            operatingSystem: OperatingSystem.current().toString(),
             host: InetAddress.getLocalHost().getHostName(),
+            operatingSystem: OperatingSystem.current().toString(),
             versionUnderTest: GradleVersion.current().getVersion(),
             vcsBranch: Git.current().branchName,
             vcsCommits: [Git.current().commitId, pluginCommitSha],
@@ -50,5 +54,4 @@ class BuildScanPerformanceTestRunner extends CrossBuildPerformanceTestRunner {
             teamCityBuildId: determineTeamCityBuildId()
         )
     }
-
 }

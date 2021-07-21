@@ -27,6 +27,8 @@ import org.gradle.internal.operations.TestBuildOperationExecutor
 import org.gradle.util.Path
 import spock.lang.Specification
 
+import java.util.function.Consumer
+
 class LifecycleProjectEvaluatorTest extends Specification {
 
     private project = Mock(ProjectInternal)
@@ -45,8 +47,7 @@ class LifecycleProjectEvaluatorTest extends Specification {
         project.getProjectEvaluationBroadcaster() >> listener
         project.displayName >> "<project>"
         project.gradle >> gradle
-        gradle.findIdentityPath() >> Path.path(":")
-        gradle.identityPath >> gradle.findIdentityPath()
+        gradle.getIdentityPath() >> Path.path(":")
         gradle.startParameter >> new StartParameter()
         project.projectPath >> Path.path(":project1")
         project.path >> project.projectPath.toString()
@@ -55,8 +56,8 @@ class LifecycleProjectEvaluatorTest extends Specification {
             step.execute(listener)
             null
         }
-        project.getMutationState() >> mutationState
-        mutationState.withMutableState(_) >> { args -> args[0].run() }
+        project.getOwner() >> mutationState
+        mutationState.applyToMutableState(_) >> { Consumer consumer -> consumer.accept(project) }
     }
 
     void "nothing happens if project was already configured"() {

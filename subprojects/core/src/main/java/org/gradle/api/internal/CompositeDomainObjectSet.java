@@ -44,10 +44,13 @@ public class CompositeDomainObjectSet<T> extends DelegatingDomainObjectSet<T> im
     private final DefaultDomainObjectSet<T> backingSet;
     private final CollectionCallbackActionDecorator callbackActionDecorator;
 
+    @SafeVarargs
+    @SuppressWarnings("varargs")
     public static <T> CompositeDomainObjectSet<T> create(Class<T> type, DomainObjectCollection<? extends T>... collections) {
         return create(type, CollectionCallbackActionDecorator.NOOP, collections);
     }
 
+    @SafeVarargs
     public static <T> CompositeDomainObjectSet<T> create(Class<T> type, CollectionCallbackActionDecorator callbackActionDecorator, DomainObjectCollection<? extends T>... collections) {
         DefaultDomainObjectSet<T> backingSet = new DefaultDomainObjectSet<T>(type, new DomainObjectCompositeCollection<T>(), callbackActionDecorator);
         CompositeDomainObjectSet<T> out = new CompositeDomainObjectSet<T>(backingSet, callbackActionDecorator);
@@ -64,6 +67,7 @@ public class CompositeDomainObjectSet<T> extends DelegatingDomainObjectSet<T> im
     }
 
     public class ItemIsUniqueInCompositeSpec implements Spec<T> {
+        @Override
         public boolean isSatisfiedBy(T element) {
             int matches = 0;
             for (DomainObjectCollection<? extends T> collection : getStore().store) {
@@ -79,6 +83,7 @@ public class CompositeDomainObjectSet<T> extends DelegatingDomainObjectSet<T> im
     }
 
     public class ItemNotInCompositeSpec implements Spec<T> {
+        @Override
         public boolean isSatisfiedBy(T element) {
             return !getStore().contains(element);
         }
@@ -89,10 +94,12 @@ public class CompositeDomainObjectSet<T> extends DelegatingDomainObjectSet<T> im
         return (DomainObjectCompositeCollection) this.backingSet.getStore();
     }
 
+    @Override
     public Action<? super T> whenObjectAdded(Action<? super T> action) {
         return super.whenObjectAdded(Actions.filter(action, uniqueSpec));
     }
 
+    @Override
     public Action<? super T> whenObjectRemoved(Action<? super T> action) {
         return super.whenObjectRemoved(Actions.filter(action, notInSpec));
     }
@@ -128,6 +135,7 @@ public class CompositeDomainObjectSet<T> extends DelegatingDomainObjectSet<T> im
         return getStore().iterator();
     }
 
+    @Override
     @SuppressWarnings("unchecked")
     /**
      * This method is expensive. Avoid calling it if possible. If all you need is a rough
@@ -142,6 +150,7 @@ public class CompositeDomainObjectSet<T> extends DelegatingDomainObjectSet<T> im
         return getStore().estimatedSize();
     }
 
+    @Override
     public void all(Action<? super T> action) {
         //calling overloaded method with extra behavior:
         whenObjectAdded(action);

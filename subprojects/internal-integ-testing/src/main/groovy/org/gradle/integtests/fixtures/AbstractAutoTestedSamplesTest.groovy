@@ -18,18 +18,29 @@ package org.gradle.integtests.fixtures
 
 class AbstractAutoTestedSamplesTest extends AbstractIntegrationTest {
 
-     def util = new AutoTestedSamplesUtil()
+    def util = new AutoTestedSamplesUtil()
 
-     void runSamplesFrom(String dir) {
+    void runSamplesFrom(String dir) {
         util.findSamples(dir) { file, sample, tagSuffix ->
             println "Found sample: ${sample.split("\n")[0]} (...) in $file"
             def buildFile = testFile('build.gradle')
             def settingsFile = testFile('settings.gradle')
-            def fileToTest = tagSuffix == 'Settings' ? settingsFile : buildFile
+            def fileToTest = tagSuffix.contains('Settings') ? settingsFile : buildFile
+            if (tagSuffix.contains('WithDeprecations')) {
+                executer.noDeprecationChecks()
+            }
             fileToTest.text = sample
-            executer.withTasks('help').withArguments("-s").run()
+            executer
+                .withTasks('help')
+                .withArguments("--stacktrace")
+            beforeSample()
+            executer.run()
             fileToTest.delete()
         }
+    }
+
+    void beforeSample() {
+
     }
 
     /**

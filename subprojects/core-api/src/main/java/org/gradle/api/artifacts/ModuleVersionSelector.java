@@ -16,14 +16,12 @@
 
 package org.gradle.api.artifacts;
 
-import org.gradle.api.Incubating;
-
 import javax.annotation.Nullable;
 
 /**
  * Selects a module version.
  * If you need to change this interface, you're probably doing it wrong:
- * it is superceded by {@link org.gradle.api.artifacts.component.ModuleComponentSelector}, so check this first, and only
+ * it is superseded by {@link org.gradle.api.artifacts.component.ModuleComponentSelector}, so check this first, and only
  * add methods here if it's for bridging.
  */
 public interface ModuleVersionSelector {
@@ -69,6 +67,5 @@ public interface ModuleVersionSelector {
      *
      * @since 4.9
      */
-    @Incubating
     ModuleIdentifier getModule();
 }

@@ -17,15 +17,24 @@
 package org.gradle.performance.regression.corefeature
 
 import org.gradle.performance.AbstractCrossVersionPerformanceTest
+import org.gradle.performance.annotations.RunFor
+import org.gradle.performance.annotations.Scenario
+
+import static org.gradle.performance.annotations.ScenarioType.PER_COMMIT
+import static org.gradle.performance.annotations.ScenarioType.PER_DAY
+import static org.gradle.performance.results.OperatingSystem.LINUX
+
 
 class ArchiveTreePerformanceTest extends AbstractCrossVersionPerformanceTest {
     def setup() {
-        runner.targetVersions = ["5.2-20181218000039+0000"]
+        runner.targetVersions = ["7.2-20210713113638+0000"]
     }
 
+    @RunFor(
+        @Scenario(type = PER_COMMIT, operatingSystems = [LINUX], testProjects = ["archivePerformanceProject"])
+    )
     def "visiting zip trees"() {
         given:
-        runner.testProject = "archivePerformanceProject"
         runner.tasksToRun = ['visitZip']
 
         when:
@@ -34,9 +43,12 @@ class ArchiveTreePerformanceTest extends AbstractCrossVersionPerformanceTest {
         then:
         result.assertCurrentVersionHasNotRegressed()
     }
+
+    @RunFor(
+        @Scenario(type = PER_DAY, operatingSystems = [LINUX], testProjects = ["archivePerformanceProject"])
+    )
     def "visiting tar trees"() {
         given:
-        runner.testProject = "archivePerformanceProject"
         runner.tasksToRun = ['visitTar']
 
         when:
@@ -46,9 +58,11 @@ class ArchiveTreePerformanceTest extends AbstractCrossVersionPerformanceTest {
         result.assertCurrentVersionHasNotRegressed()
     }
 
+    @RunFor(
+        @Scenario(type = PER_DAY, operatingSystems = [LINUX], testProjects = ["archivePerformanceProject"])
+    )
     def "visiting gzip tar trees"() {
         given:
-        runner.testProject = "archivePerformanceProject"
         runner.tasksToRun = ['visitTarGz']
 
         when:

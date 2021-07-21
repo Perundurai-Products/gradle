@@ -19,7 +19,7 @@ package org.gradle.nativeplatform.toolchain.internal.msvcpp.version
 import net.rubygrapefruit.platform.MissingRegistryEntryException
 import net.rubygrapefruit.platform.WindowsRegistry
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
-import org.gradle.util.VersionNumber
+import org.gradle.util.internal.VersionNumber
 import org.junit.Rule
 import spock.lang.Specification
 import spock.lang.Unroll
@@ -29,7 +29,7 @@ import static org.gradle.nativeplatform.toolchain.internal.msvcpp.version.Visual
 class WindowsRegistryVersionLocatorTest extends Specification {
     public static final String SOFTWARE_KEY = "SOFTWARE\\Microsoft\\VisualStudio\\SxS\\VC7"
     public static final String SOFTWARE_WOW6432_KEY = "SOFTWARE\\Wow6432Node\\Microsoft\\VisualStudio\\SxS\\VC7"
-    @Rule TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
+    @Rule TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider(getClass())
 
     def windowsRegistry = Mock(WindowsRegistry)
     def locator = new WindowsRegistryVersionLocator(windowsRegistry)

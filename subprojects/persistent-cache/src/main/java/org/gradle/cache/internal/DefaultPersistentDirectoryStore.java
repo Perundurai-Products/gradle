@@ -30,10 +30,11 @@ import org.gradle.internal.logging.progress.ProgressLoggerFactory;
 import org.gradle.internal.serialize.Serializer;
 import org.gradle.internal.time.Time;
 import org.gradle.internal.time.Timer;
-import org.gradle.util.GFileUtils;
+import org.gradle.util.internal.GFileUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
 import java.io.File;
 import java.util.Arrays;
 import java.util.Collection;
@@ -48,6 +49,7 @@ public class DefaultPersistentDirectoryStore implements ReferencablePersistentCa
     private final File dir;
     private final CacheBuilder.LockTarget lockTarget;
     private final LockOptions lockOptions;
+    @Nullable
     private final CleanupAction cleanupAction;
     private final FileLockManager lockManager;
     private final ExecutorFactory executorFactory;
@@ -57,7 +59,16 @@ public class DefaultPersistentDirectoryStore implements ReferencablePersistentCa
     private final ProgressLoggerFactory progressLoggerFactory;
     private CacheCoordinator cacheAccess;
 
-    public DefaultPersistentDirectoryStore(File dir, String displayName, CacheBuilder.LockTarget lockTarget, LockOptions lockOptions, CleanupAction cleanupAction, FileLockManager fileLockManager, ExecutorFactory executorFactory, ProgressLoggerFactory progressLoggerFactory) {
+    public DefaultPersistentDirectoryStore(
+        File dir,
+        @Nullable String displayName,
+        CacheBuilder.LockTarget lockTarget,
+        LockOptions lockOptions,
+        @Nullable CleanupAction cleanupAction,
+        FileLockManager fileLockManager,
+        ExecutorFactory executorFactory,
+        ProgressLoggerFactory progressLoggerFactory
+    ) {
         this.dir = dir;
         this.lockTarget = lockTarget;
         this.lockOptions = lockOptions;
@@ -101,10 +112,12 @@ public class DefaultPersistentDirectoryStore implements ReferencablePersistentCa
 
     protected CacheInitializationAction getInitAction() {
         return new CacheInitializationAction() {
+            @Override
             public boolean requiresInitialization(FileLock fileLock) {
                 return false;
             }
 
+            @Override
             public void initialize(FileLock fileLock) {
                 throw new UnsupportedOperationException();
             }
@@ -163,6 +176,11 @@ public class DefaultPersistentDirectoryStore implements ReferencablePersistentCa
     @Override
     public <K, V> PersistentIndexedCache<K, V> createCache(String name, Class<K> keyType, Serializer<V> valueSerializer) {
         return cacheAccess.newCache(PersistentIndexedCacheParameters.of(name, keyType, valueSerializer));
+    }
+
+    @Override
+    public <K, V> boolean cacheExists(PersistentIndexedCacheParameters<K, V> parameters) {
+        return cacheAccess.cacheExists(parameters);
     }
 
     @Override

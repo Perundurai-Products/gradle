@@ -21,19 +21,22 @@ import org.gradle.api.internal.component.ComponentRegistry
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 
 class JavaPluginIntegrationTest extends AbstractIntegrationSpec {
+
     def appliesBasePluginsAndAddsConventionObject() {
         given:
         buildFile << """
             apply plugin: 'java'
-            
+
             task expect {
+
+                def component = project.services.get(${ComponentRegistry.canonicalName}).mainComponent
+                assert component instanceof ${BuildableJavaComponent.canonicalName}
+                assert component.runtimeClasspath != null
+                assert component.compileDependencies == project.configurations.compileClasspath
+
+                def buildTasks = component.buildTasks as List
                 doLast {
-                    def component = project.services.get(${ComponentRegistry.canonicalName}).mainComponent
-                    
-                    assert component instanceof ${BuildableJavaComponent.canonicalName}
-                    assert component.buildTasks as List == [ JavaBasePlugin.BUILD_TASK_NAME ]
-                    assert component.runtimeClasspath != null
-                    assert component.compileDependencies == project.configurations.compileClasspath
+                    assert buildTasks == [ JavaBasePlugin.BUILD_TASK_NAME ]
                 }
             }
         """
@@ -41,25 +44,4 @@ class JavaPluginIntegrationTest extends AbstractIntegrationSpec {
         succeeds "expect"
     }
 
-    def "jar task is created lazily"() {
-        buildFile << """
-            apply plugin: 'java'
-
-            tasks.named('jar').configure {
-                println "jar task created"
-            }
-            
-            task printArtifacts {
-                doLast {
-                    configurations.runtime.artifacts.files.each { println it }
-                }
-            }
-        """
-
-        when:
-        succeeds("printArtifacts")
-
-        then:
-        result.groupedOutput.task(':printArtifacts').output.contains("jar task created")
-    }
 }

@@ -16,6 +16,8 @@
 
 package org.gradle.internal.logging.progress;
 
+import org.gradle.internal.scan.UsedByScanPlugin;
+
 import javax.annotation.Nullable;
 
 /**
@@ -37,6 +39,7 @@ import javax.annotation.Nullable;
  *
  * </p>
  */
+@UsedByScanPlugin("test-distribution")
 public interface ProgressLogger {
     /**
      * Returns the description of the operation.
@@ -53,44 +56,6 @@ public interface ProgressLogger {
      * @param description The description.
      */
     ProgressLogger setDescription(String description);
-
-    /**
-     * Returns the short description of the operation. This is used in place of the full description when display space is limited.
-     *
-     * @return The short description, must not be empty.
-     */
-    String getShortDescription();
-
-    /**
-     * <p>Sets the short description of the operation. This is used in place of the full description when display space is limited.
-     *
-     * <p>This must be called before {@link #started()}
-     *
-     * @param description The short description.
-     * @deprecated No replacement
-     */
-    @Deprecated
-    ProgressLogger setShortDescription(String description);
-
-    /**
-     * <p>Returns the logging header for the operation. This is logged before any other log messages for this operation are logged. It is usually
-     * also logged at the end of the operation, along with the final status message. Defaults to null.
-     *
-     * <p>If not specified, no logging header is logged.
-     *
-     * @return The logging header, possibly empty.
-     */
-    String getLoggingHeader();
-
-    /**
-     * <p>Sets the logging header for the operation. This is logged before any other log messages for this operation are logged. It is usually
-     * also logged at the end of the operation, along with the final status message. Defaults to null.
-     *
-     * @param header The header. May be empty or null.
-     * @deprecated Use {@link org.gradle.api.logging.Logger#lifecycle(String)} instead.
-     */
-    @Deprecated
-    ProgressLogger setLoggingHeader(String header);
 
     /**
      * Convenience method that sets descriptions and logs started() event.

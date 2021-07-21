@@ -19,13 +19,21 @@ package org.gradle.launcher.daemon.server;
 import org.gradle.internal.UncheckedException;
 import org.gradle.internal.concurrent.CompositeStoppable;
 import org.gradle.internal.concurrent.ExecutorFactory;
-import org.gradle.internal.concurrent.Stoppable;
 import org.gradle.internal.concurrent.ManagedExecutor;
-import org.gradle.launcher.daemon.protocol.*;
+import org.gradle.internal.concurrent.Stoppable;
+import org.gradle.internal.logging.events.OutputEvent;
+import org.gradle.launcher.daemon.protocol.BuildEvent;
+import org.gradle.launcher.daemon.protocol.BuildStarted;
+import org.gradle.launcher.daemon.protocol.Cancel;
+import org.gradle.launcher.daemon.protocol.CloseInput;
+import org.gradle.launcher.daemon.protocol.DaemonUnavailable;
+import org.gradle.launcher.daemon.protocol.ForwardInput;
+import org.gradle.launcher.daemon.protocol.InputMessage;
+import org.gradle.launcher.daemon.protocol.Message;
+import org.gradle.launcher.daemon.protocol.OutputMessage;
+import org.gradle.launcher.daemon.protocol.Result;
 import org.gradle.launcher.daemon.server.api.DaemonConnection;
 import org.gradle.launcher.daemon.server.api.StdinHandler;
-import org.gradle.internal.logging.events.OutputEvent;
-import org.gradle.internal.remote.internal.RemoteConnection;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,7 +47,7 @@ import java.util.concurrent.locks.ReentrantLock;
 
 public class DefaultDaemonConnection implements DaemonConnection {
     private static final Logger LOGGER = LoggerFactory.getLogger(DefaultDaemonConnection.class);
-    private final RemoteConnection<Message> connection;
+    private final SynchronizedDispatchConnection<Message> connection;
     private final ManagedExecutor executor;
     private final StdinQueue stdinQueue;
     private final DisconnectQueue disconnectQueue;
@@ -47,7 +55,7 @@ public class DefaultDaemonConnection implements DaemonConnection {
     private final ReceiveQueue receiveQueue;
     private volatile boolean stopping;
 
-    public DefaultDaemonConnection(final RemoteConnection<Message> connection, ExecutorFactory executorFactory) {
+    public DefaultDaemonConnection(final SynchronizedDispatchConnection<Message> connection, ExecutorFactory executorFactory) {
         this.connection = connection;
         stdinQueue = new StdinQueue(executorFactory);
         disconnectQueue = new DisconnectQueue();
@@ -55,6 +63,7 @@ public class DefaultDaemonConnection implements DaemonConnection {
         receiveQueue = new ReceiveQueue();
         executor = executorFactory.create("Handler for " + connection.toString());
         executor.execute(new Runnable() {
+            @Override
             public void run() {
                 Throwable failure = null;
                 try {
@@ -95,48 +104,52 @@ public class DefaultDaemonConnection implements DaemonConnection {
         });
     }
 
+    @Override
     public void onStdin(StdinHandler handler) {
         stdinQueue.useHandler(handler);
     }
 
+    @Override
     public void onDisconnect(Runnable handler) {
         disconnectQueue.useHandler(handler);
     }
 
+    @Override
     public void onCancel(Runnable handler) {
         cancelQueue.useHandler(handler);
     }
 
+    @Override
     public Object receive(long timeoutValue, TimeUnit timeoutUnits) {
         return receiveQueue.take(timeoutValue, timeoutUnits);
     }
 
+    @Override
     public void daemonUnavailable(DaemonUnavailable unavailable) {
-        connection.dispatch(unavailable);
-        connection.flush();
+        connection.dispatchAndFlush(unavailable);
     }
 
+    @Override
     public void buildStarted(BuildStarted buildStarted) {
-        connection.dispatch(buildStarted);
-        connection.flush();
+        connection.dispatchAndFlush(buildStarted);
     }
 
+    @Override
     public void logEvent(OutputEvent logEvent) {
-        connection.dispatch(new OutputMessage(logEvent));
-        connection.flush();
+        connection.dispatchAndFlush(new OutputMessage(logEvent));
     }
 
     @Override
     public void event(Object event) {
-        connection.dispatch(new BuildEvent(event));
-        connection.flush();
+        connection.dispatchAndFlush(new BuildEvent(event));
     }
 
+    @Override
     public void completed(Result result) {
-        connection.dispatch(result);
-        connection.flush();
+        connection.dispatchAndFlush(result);
     }
 
+    @Override
     public void stop() {
         stopping = true;
 
@@ -167,6 +180,7 @@ public class DefaultDaemonConnection implements DaemonConnection {
             this.name = name;
         }
 
+        @Override
         public void stop() {
             ManagedExecutor executor;
             lock.lock();
@@ -222,6 +236,7 @@ public class DefaultDaemonConnection implements DaemonConnection {
                 }
                 executor = executorFactory.create(name);
                 executor.execute(new Runnable() {
+                    @Override
                     public void run() {
                         while (true) {
                             C command;
@@ -274,6 +289,7 @@ public class DefaultDaemonConnection implements DaemonConnection {
             super(executorFactory, "Stdin handler");
         }
 
+        @Override
         protected boolean doHandleCommand(final StdinHandler handler, InputMessage command) {
             try {
                 if (command instanceof CloseInput) {
@@ -357,6 +373,7 @@ public class DefaultDaemonConnection implements DaemonConnection {
             }
         }
 
+        @Override
         public void stop() {
             useHandler(null);
         }
@@ -411,6 +428,7 @@ public class DefaultDaemonConnection implements DaemonConnection {
         private static final Object END = new Object();
         private final BlockingQueue<Object> queue = new LinkedBlockingQueue<Object>();
 
+        @Override
         public void stop() {
         }
 

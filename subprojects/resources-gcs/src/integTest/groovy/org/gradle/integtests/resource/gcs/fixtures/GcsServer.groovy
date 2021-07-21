@@ -16,8 +16,11 @@
 
 package org.gradle.integtests.resource.gcs.fixtures
 
+import org.eclipse.jetty.server.Request
+import org.eclipse.jetty.server.handler.AbstractHandler
 import org.gradle.integtests.resource.gcs.fixtures.stub.HttpStub
 import org.gradle.integtests.resource.gcs.fixtures.stub.StubRequest
+import org.gradle.internal.hash.Hashing
 import org.gradle.test.fixtures.file.TestDirectoryProvider
 import org.gradle.test.fixtures.server.RepositoryServer
 import org.gradle.test.fixtures.server.http.HttpServer
@@ -25,15 +28,13 @@ import org.joda.time.DateTimeZone
 import org.joda.time.format.DateTimeFormat
 import org.joda.time.format.DateTimeFormatter
 import org.joda.time.tz.FixedDateTimeZone
-import org.mortbay.jetty.Request
-import org.mortbay.jetty.handler.AbstractHandler
 
+import javax.servlet.ServletException
 import javax.servlet.http.HttpServletRequest
 import javax.servlet.http.HttpServletResponse
 import java.security.MessageDigest
 
 import static org.apache.commons.codec.binary.Base64.encodeBase64String
-import static org.gradle.internal.hash.HashUtil.createHash
 
 class GcsServer extends HttpServer implements RepositoryServer {
 
@@ -177,11 +178,11 @@ class GcsServer extends HttpServer implements RepositoryServer {
                 ]
                 body = {
                     """
-                    { 
+                    {
                         "etag": "${calculateEtag(file)}",
                         "size": "0",
                         "updated": "${RCF_3339_DATE_FORMAT.print(file.lastModified())}",
-                        "md5Hash": "${encodeBase64String(createHash(file, "MD5").asByteArray())}"
+                        "md5Hash": "${encodeBase64String(Hashing.md5().hashFile(file).toByteArray())}"
                     }
                     """
                 }
@@ -427,7 +428,7 @@ class GcsServer extends HttpServer implements RepositoryServer {
         add(httpStub, stubAction(httpStub))
     }
 
-    private HttpServer.ActionSupport stubAction(HttpStub httpStub) {
+    private static HttpServer.ActionSupport stubAction(HttpStub httpStub) {
         new HttpServer.ActionSupport("Generic stub handler") {
             void handle(HttpServletRequest request, HttpServletResponse response) {
                 if (httpStub.request.body) {
@@ -448,20 +449,23 @@ class GcsServer extends HttpServer implements RepositoryServer {
         HttpServer.HttpExpectOne expectation = new HttpServer.HttpExpectOne(action, [httpStub.request.method], httpStub.request.path)
         expectations << expectation
         addHandler(new AbstractHandler() {
-            void handle(String target, HttpServletRequest request, HttpServletResponse response, int dispatch) {
+            @Override
+            void handle(String target, Request baseRequest, HttpServletRequest request, HttpServletResponse response) throws IOException, ServletException {
+
                 if (requestMatches(httpStub, request)) {
                     assertRequest(httpStub, request)
                     if (expectation.run) {
                         println("This expectation for the request [${request.method} :${request.pathInfo}] was already handled - skipping")
                         return
                     }
-                    if (!((Request) request).isHandled()) {
-                        expectation.run = true
+                    if (!baseRequest.isHandled()) {
+                        expectation.atomicRun.set(true)
                         action.handle(request, response)
-                        ((Request) request).setHandled(true)
+                        baseRequest.setHandled(true)
                     }
                 }
             }
+
         })
     }
 

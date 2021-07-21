@@ -16,19 +16,22 @@
 package org.gradle.configuration;
 
 import org.gradle.api.DefaultTask;
-import org.gradle.api.tasks.options.Option;
 import org.gradle.api.internal.tasks.options.OptionReader;
 import org.gradle.api.tasks.TaskAction;
+import org.gradle.api.tasks.options.Option;
+import org.gradle.execution.TaskSelection;
 import org.gradle.execution.TaskSelector;
 import org.gradle.initialization.BuildClientMetaData;
 import org.gradle.internal.logging.text.StyledTextOutput;
 import org.gradle.internal.logging.text.StyledTextOutputFactory;
 import org.gradle.util.GradleVersion;
+import org.gradle.work.DisableCachingByDefault;
 
 import javax.inject.Inject;
 
 import static org.gradle.internal.logging.text.StyledTextOutput.Style.UserInput;
 
+@DisableCachingByDefault(because = "Produces only non-cacheable console output")
 public class Help extends DefaultTask {
     private String taskPath;
 
@@ -65,7 +68,7 @@ public class Help extends DefaultTask {
 
     private void printTaskHelp(StyledTextOutput output) {
         TaskSelector selector = getTaskSelector();
-        TaskSelector.TaskSelection selection = selector.getSelection(taskPath);
+        TaskSelection selection = selector.getSelection(taskPath);
         OptionReader optionReader = getOptionReader();
         TaskDetailPrinter taskDetailPrinter = new TaskDetailPrinter(taskPath, selection, optionReader);
         taskDetailPrinter.print(output);

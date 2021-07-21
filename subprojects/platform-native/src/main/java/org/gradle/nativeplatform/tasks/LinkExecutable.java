@@ -15,14 +15,14 @@
  */
 package org.gradle.nativeplatform.tasks;
 
-import org.gradle.api.Incubating;
 import org.gradle.nativeplatform.internal.DefaultLinkerSpec;
 import org.gradle.nativeplatform.internal.LinkerSpec;
+import org.gradle.work.DisableCachingByDefault;
 
 /**
  * Links a binary executable from object files and libraries.
  */
-@Incubating
+@DisableCachingByDefault(because = "Not made cacheable, yet")
 public class LinkExecutable extends AbstractLinkTask {
     @Override
     protected LinkerSpec createLinkerSpec() {

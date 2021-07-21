@@ -16,7 +16,6 @@
 package org.gradle.api.tasks.compile;
 
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Maps;
 import org.gradle.api.tasks.Console;
 import org.gradle.api.tasks.Input;
@@ -37,8 +36,6 @@ import java.util.Map;
  */
 public class GroovyCompileOptions extends AbstractOptions {
     private static final long serialVersionUID = 0;
-    private static final ImmutableSet<String> EXCLUDE_FROM_ANT_PROPERTIES =
-            ImmutableSet.of("forkOptions", "optimizationOptions", "stubDir", "keepStubs", "fileExtensions");
 
     private boolean failOnError = true;
 
@@ -63,6 +60,8 @@ public class GroovyCompileOptions extends AbstractOptions {
     private File configurationScript;
 
     private boolean javaAnnotationProcessing;
+
+    private boolean parameters;
 
     /**
      * Tells whether the compilation task should fail if compile errors occurred. Defaults to {@code true}.
@@ -145,8 +144,8 @@ public class GroovyCompileOptions extends AbstractOptions {
      * The script is executed as Groovy code, with the following context:
      * </p>
      * <ul>
-     * <li>The instance of <a href="http://docs.groovy-lang.org/latest/html/gapi/org/codehaus/groovy/control/CompilerConfiguration.html">CompilerConfiguration</a> available as the {@code configuration} variable.</li>
-     * <li>All static members of <a href="http://docs.groovy-lang.org/latest/html/gapi/org/codehaus/groovy/control/customizers/builder/CompilerCustomizationBuilder.html">CompilerCustomizationBuilder</a> pre imported.</li>
+     * <li>The instance of <a href="https://docs.groovy-lang.org/latest/html/gapi/org/codehaus/groovy/control/CompilerConfiguration.html">CompilerConfiguration</a> available as the {@code configuration} variable.</li>
+     * <li>All static members of <a href="https://docs.groovy-lang.org/latest/html/gapi/org/codehaus/groovy/control/customizers/builder/CompilerCustomizationBuilder.html">CompilerCustomizationBuilder</a> pre imported.</li>
      * </ul>
      * <p>
      * This facilitates the following pattern:
@@ -167,14 +166,14 @@ public class GroovyCompileOptions extends AbstractOptions {
      * }
      * </pre>
      * <p>
-     * Please see <a href="http://docs.groovy-lang.org/latest/html/documentation/#compilation-customizers">the Groovy compiler customization builder documentation</a>
+     * Please see <a href="https://docs.groovy-lang.org/latest/html/documentation/#compilation-customizers">the Groovy compiler customization builder documentation</a>
      * for more information about the compiler configuration DSL.
      * </p>
      * <p>
      * <b>This feature is only available if compiling with Groovy 2.1 or later.</b>
      * </p>
-     * @see <a href="http://docs.groovy-lang.org/latest/html/gapi/org/codehaus/groovy/control/CompilerConfiguration.html">CompilerConfiguration</a>
-     * @see <a href="http://docs.groovy-lang.org/latest/html/gapi/org/codehaus/groovy/control/customizers/builder/CompilerCustomizationBuilder.html">CompilerCustomizationBuilder</a>
+     * @see <a href="https://docs.groovy-lang.org/latest/html/gapi/org/codehaus/groovy/control/CompilerConfiguration.html">CompilerConfiguration</a>
+     * @see <a href="https://docs.groovy-lang.org/latest/html/gapi/org/codehaus/groovy/control/customizers/builder/CompilerCustomizationBuilder.html">CompilerCustomizationBuilder</a>
      */
     @Nullable
     @Optional
@@ -217,6 +216,26 @@ public class GroovyCompileOptions extends AbstractOptions {
      */
     public void setJavaAnnotationProcessing(boolean javaAnnotationProcessing) {
         this.javaAnnotationProcessing = javaAnnotationProcessing;
+    }
+
+    /**
+     * Whether the Groovy compiler generate metadata for reflection on method parameter names on JDK 8 and above.
+     *
+     * @since 6.1
+     */
+    @Input
+    public boolean isParameters() {
+        return parameters;
+    }
+
+    /**
+     * Sets whether metadata for reflection on method parameter names should be generated.
+     * Defaults to {@code false}
+     *
+     * @since 6.1
+     */
+    public void setParameters(boolean parameters) {
+        this.parameters = parameters;
     }
 
     /**
@@ -326,23 +345,5 @@ public class GroovyCompileOptions extends AbstractOptions {
         fork = true;
         forkOptions.define(forkArgs);
         return this;
-    }
-
-    @Override
-    protected boolean excludeFromAntProperties(String fieldName) {
-        return EXCLUDE_FROM_ANT_PROPERTIES.contains(fieldName);
-    }
-
-    /**
-     * Internal method.
-     */
-    @Override
-    public Map<String, Object> optionMap() {
-        Map<String, Object> map = super.optionMap();
-        map.putAll(forkOptions.optionMap());
-        if (optimizationOptions.containsKey("indy")) {
-            map.put("indy", optimizationOptions.get("indy"));
-        }
-        return map;
     }
 }

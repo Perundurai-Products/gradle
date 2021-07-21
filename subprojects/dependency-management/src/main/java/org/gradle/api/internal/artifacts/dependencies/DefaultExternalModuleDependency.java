@@ -18,6 +18,8 @@ package org.gradle.api.internal.artifacts.dependencies;
 
 import org.gradle.api.artifacts.Dependency;
 import org.gradle.api.artifacts.ExternalModuleDependency;
+import org.gradle.api.artifacts.ModuleIdentifier;
+import org.gradle.api.artifacts.MutableVersionConstraint;
 
 public class DefaultExternalModuleDependency extends AbstractExternalModuleDependency implements ExternalModuleDependency {
 
@@ -29,12 +31,18 @@ public class DefaultExternalModuleDependency extends AbstractExternalModuleDepen
         super(assertModuleId(group, name), version, configuration);
     }
 
+    public DefaultExternalModuleDependency(ModuleIdentifier id, MutableVersionConstraint versionConstraint) {
+        super(id, versionConstraint);
+    }
+
+    @Override
     public DefaultExternalModuleDependency copy() {
         DefaultExternalModuleDependency copiedModuleDependency = new DefaultExternalModuleDependency(getGroup(), getName(), getVersion(), getTargetConfiguration());
         copyTo(copiedModuleDependency);
         return copiedModuleDependency;
     }
 
+    @Override
     public boolean contentEquals(Dependency dependency) {
         if (this == dependency) {
             return true;

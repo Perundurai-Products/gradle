@@ -17,22 +17,19 @@ package org.gradle.api.tasks.diagnostics;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.gradle.api.DefaultTask;
-import org.gradle.api.Project;
-import org.gradle.api.Task;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.initialization.dsl.ScriptHandler;
-import org.gradle.api.specs.Spec;
 import org.gradle.api.tasks.TaskAction;
 import org.gradle.api.tasks.diagnostics.internal.DependencyReportRenderer;
-import org.gradle.api.tasks.diagnostics.internal.ProjectReportGenerator;
 import org.gradle.api.tasks.diagnostics.internal.ReportGenerator;
 import org.gradle.api.tasks.diagnostics.internal.dependencies.AsciiDependencyReportRenderer;
 import org.gradle.initialization.BuildClientMetaData;
 import org.gradle.internal.logging.text.StyledTextOutputFactory;
+import org.gradle.work.DisableCachingByDefault;
 
 import javax.inject.Inject;
-import java.io.IOException;
-import java.util.Collections;
+
+import static java.util.Collections.singleton;
 
 /**
  * Provides information about the build environment for the project that the task is associated with.
@@ -45,6 +42,7 @@ import java.util.Collections;
  *
  * @since 2.10
  */
+@DisableCachingByDefault(because = "Produces only non-cacheable console output")
 public class BuildEnvironmentReportTask extends DefaultTask {
 
     public static final String TASK_NAME = "buildEnvironment";
@@ -52,11 +50,7 @@ public class BuildEnvironmentReportTask extends DefaultTask {
     private DependencyReportRenderer renderer = new AsciiDependencyReportRenderer();
 
     public BuildEnvironmentReportTask() {
-        getOutputs().upToDateWhen(new Spec<Task>() {
-            public boolean isSatisfiedBy(Task element) {
-                return false;
-            }
-        });
+        getOutputs().upToDateWhen(element -> false);
     }
 
     @Inject
@@ -71,19 +65,19 @@ public class BuildEnvironmentReportTask extends DefaultTask {
 
     @TaskAction
     public void generate() {
-        ProjectReportGenerator projectReportGenerator = new ProjectReportGenerator() {
-            @Override
-            public void generateReport(Project project) throws IOException {
-                Configuration configuration = getProject().getBuildscript().getConfigurations().getByName(ScriptHandler.CLASSPATH_CONFIGURATION);
+        reportGenerator().generateReport(
+            singleton(getProject()),
+            project -> {
+                Configuration configuration = project.getBuildscript().getConfigurations().getByName(ScriptHandler.CLASSPATH_CONFIGURATION);
                 renderer.startConfiguration(configuration);
                 renderer.render(configuration);
                 renderer.completeConfiguration(configuration);
             }
-        };
+        );
+    }
 
-        ReportGenerator reportGenerator = new ReportGenerator(renderer, getClientMetaData(), null,
-            getTextOutputFactory(), projectReportGenerator);
-        reportGenerator.generateReport(Collections.singleton(getProject()));
+    private ReportGenerator reportGenerator() {
+        return new ReportGenerator(renderer, getClientMetaData(), null, getTextOutputFactory());
     }
 
     @VisibleForTesting

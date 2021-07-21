@@ -15,9 +15,17 @@
  */
 package org.gradle.integtests.publish.ivy
 
-import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 
-class IvyWarProjectPublishIntegrationTest extends AbstractIntegrationSpec {
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
+
+class IvyWarProjectPublishIntegrationTest extends AbstractLegacyIvyPublishTest {
+
+    def setup() {
+        // the OLD publish plugins work with the OLD deprecated Java plugin configuration (compile/runtime)
+        executer.noDeprecationChecks()
+    }
+
+    @ToBeFixedForConfigurationCache
     public void "published WAR only for mixed java and WAR project"() {
         given:
         file("settings.gradle") << "rootProject.name = 'publishTest' "
@@ -33,8 +41,8 @@ version = '1.9'
 ${mavenCentralRepository()}
 
 dependencies {
-    compile "commons-collections:commons-collections:3.2.2"
-    runtime "commons-io:commons-io:1.4"
+    implementation "commons-collections:commons-collections:3.2.2"
+    runtimeOnly "commons-io:commons-io:1.4"
 }
 
 uploadArchives {
@@ -47,6 +55,7 @@ uploadArchives {
 """
 
         when:
+        expectUploadTaskDeprecationWarning("uploadArchives")
         run "uploadArchives"
 
         then:

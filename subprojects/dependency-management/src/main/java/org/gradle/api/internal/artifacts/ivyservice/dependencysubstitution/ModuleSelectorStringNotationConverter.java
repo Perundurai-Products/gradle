@@ -23,11 +23,11 @@ import org.gradle.internal.component.external.model.DefaultModuleComponentSelect
 import org.gradle.internal.exceptions.DiagnosticsVisitor;
 import org.gradle.internal.typeconversion.TypedNotationConverter;
 import org.gradle.internal.typeconversion.UnsupportedNotationException;
-import org.gradle.util.GUtil;
+import org.gradle.util.internal.GUtil;
 
 import static org.gradle.api.internal.notations.ModuleNotationValidation.*;
 
-class ModuleSelectorStringNotationConverter extends TypedNotationConverter<String, ComponentSelector> {
+public class ModuleSelectorStringNotationConverter extends TypedNotationConverter<String, ComponentSelector> {
     private final ImmutableModuleIdentifierFactory moduleIdentifierFactory;
 
     public ModuleSelectorStringNotationConverter(ImmutableModuleIdentifierFactory moduleIdentifierFactory) {
@@ -38,6 +38,7 @@ class ModuleSelectorStringNotationConverter extends TypedNotationConverter<Strin
     /**
      * Empty String for either group or module name is not allowed.
      */
+    @Override
     protected ComponentSelector parseType(String notation) {
         assert notation != null;
         String[] split = notation.split(":");

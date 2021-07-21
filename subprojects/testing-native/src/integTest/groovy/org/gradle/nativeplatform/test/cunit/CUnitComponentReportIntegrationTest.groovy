@@ -16,6 +16,7 @@
 package org.gradle.nativeplatform.test.cunit
 
 import org.gradle.api.reporting.components.AbstractNativeComponentReportIntegrationTest
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.nativeplatform.fixtures.RequiresInstalledToolChain
 
 class CUnitComponentReportIntegrationTest extends AbstractNativeComponentReportIntegrationTest {
@@ -48,6 +49,7 @@ model {
     }
 
     @RequiresInstalledToolChain
+    @ToBeFixedForConfigurationCache(because = ":components")
     def "shows details of native C executable with test suite"() {
         given:
         buildFile << """

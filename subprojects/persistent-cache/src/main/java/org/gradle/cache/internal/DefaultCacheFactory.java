@@ -71,6 +71,7 @@ public class DefaultCacheFactory implements CacheFactory, Closeable {
         }
     }
 
+    @Override
     public void close() {
         lock.lock();
         try {
@@ -81,7 +82,15 @@ public class DefaultCacheFactory implements CacheFactory, Closeable {
         }
     }
 
-    private PersistentCache doOpen(File cacheDir, String displayName, Map<String, ?> properties, CacheBuilder.LockTarget lockTarget, LockOptions lockOptions, @Nullable Action<? super PersistentCache> initializer, @Nullable CleanupAction cleanup) {
+    private PersistentCache doOpen(
+        File cacheDir,
+        String displayName,
+        Map<String, ?> properties,
+        CacheBuilder.LockTarget lockTarget,
+        LockOptions lockOptions,
+        @Nullable Action<? super PersistentCache> initializer,
+        @Nullable CleanupAction cleanup
+    ) {
         File canonicalDir = FileUtils.canonicalize(cacheDir);
         DirCacheReference dirCacheReference = dirCaches.get(canonicalDir);
         if (dirCacheReference == null) {
@@ -113,7 +122,7 @@ public class DefaultCacheFactory implements CacheFactory, Closeable {
         private final CacheBuilder.LockTarget lockTarget;
         private final LockOptions lockOptions;
         private final ReferencablePersistentCache cache;
-        private final Set<ReferenceTrackingCache> references = new HashSet<ReferenceTrackingCache>();
+        private final Set<ReferenceTrackingCache> references = new HashSet<>();
 
         DirCacheReference(ReferencablePersistentCache cache, Map<String, ?> properties, CacheBuilder.LockTarget lockTarget, LockOptions lockOptions) {
             this.cache = cache;
@@ -138,6 +147,7 @@ public class DefaultCacheFactory implements CacheFactory, Closeable {
             }
         }
 
+        @Override
         public void close() {
             onClose(cache);
             dirCaches.values().remove(this);
@@ -187,6 +197,11 @@ public class DefaultCacheFactory implements CacheFactory, Closeable {
         @Override
         public <K, V> PersistentIndexedCache<K, V> createCache(String name, Class<K> keyType, Serializer<V> valueSerializer) {
             return reference.cache.createCache(name, keyType, valueSerializer);
+        }
+
+        @Override
+        public <K, V> boolean cacheExists(PersistentIndexedCacheParameters<K, V> parameters) {
+            return reference.cache.cacheExists(parameters);
         }
 
         @Override

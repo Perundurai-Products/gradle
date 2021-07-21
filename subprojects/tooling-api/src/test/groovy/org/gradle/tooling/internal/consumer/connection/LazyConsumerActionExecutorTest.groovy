@@ -37,6 +37,7 @@ class LazyConsumerActionExecutorTest extends Specification {
     final ProgressLoggerFactory progressLoggerFactory = Mock()
     final FailsafeBuildProgressListenerAdapter buildProgressListener = Mock()
     final BuildCancellationToken cancellationToken = Mock()
+
     final LazyConsumerActionExecutor connection = new LazyConsumerActionExecutor(distribution, implementationLoader, loggingProvider, connectionParams)
 
     def createsConnectionOnDemandToBuildModel() {

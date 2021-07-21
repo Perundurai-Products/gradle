@@ -23,22 +23,15 @@ import org.gradle.integtests.fixtures.UsesSample
 import org.gradle.integtests.fixtures.ZincScalaCompileFixture
 import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
 import org.gradle.test.fixtures.file.TestFile
-import org.gradle.util.Requires
 import org.junit.Rule
 import spock.lang.Unroll
 
-import static org.gradle.util.TestPrecondition.KOTLIN_SCRIPT
-import static org.hamcrest.Matchers.containsString
+import static org.hamcrest.CoreMatchers.containsString
 
-@Requires(KOTLIN_SCRIPT)
 class SamplesScalaQuickstartIntegrationTest extends AbstractSampleIntegrationTest {
 
     @Rule public final Sample sample = new Sample(testDirectoryProvider)
     @Rule public final ZincScalaCompileFixture zincScalaCompileFixture = new ZincScalaCompileFixture(executer, testDirectoryProvider)
-
-    def setup() {
-        executer.requireGradleDistribution()
-    }
 
     @Unroll
     @UsesSample('scala/quickstart')

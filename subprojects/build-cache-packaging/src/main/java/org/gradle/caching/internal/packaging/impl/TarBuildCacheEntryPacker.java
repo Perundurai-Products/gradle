@@ -18,34 +18,35 @@ package org.gradle.caching.internal.packaging.impl;
 
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Interner;
+import com.google.common.io.CountingOutputStream;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.io.input.CloseShieldInputStream;
-import org.gradle.api.GradleException;
-import org.gradle.api.UncheckedIOException;
-import org.gradle.api.internal.cache.StringInterner;
 import org.gradle.caching.internal.CacheableEntity;
 import org.gradle.caching.internal.origin.OriginMetadata;
 import org.gradle.caching.internal.origin.OriginReader;
 import org.gradle.caching.internal.origin.OriginWriter;
 import org.gradle.caching.internal.packaging.BuildCacheEntryPacker;
-import org.gradle.internal.IoActions;
-import org.gradle.internal.MutableLong;
+import org.gradle.internal.RelativePathSupplier;
 import org.gradle.internal.file.FileType;
 import org.gradle.internal.file.TreeType;
-import org.gradle.internal.fingerprint.CurrentFileCollectionFingerprint;
+import org.gradle.internal.file.impl.DefaultFileMetadata;
 import org.gradle.internal.hash.HashCode;
 import org.gradle.internal.hash.StreamHasher;
-import org.gradle.internal.nativeplatform.filesystem.FileSystem;
 import org.gradle.internal.snapshot.DirectorySnapshot;
 import org.gradle.internal.snapshot.FileSystemLocationSnapshot;
-import org.gradle.internal.snapshot.FileSystemSnapshotVisitor;
+import org.gradle.internal.snapshot.FileSystemLocationSnapshot.FileSystemLocationSnapshotVisitor;
+import org.gradle.internal.snapshot.FileSystemSnapshot;
 import org.gradle.internal.snapshot.MerkleDirectorySnapshotBuilder;
+import org.gradle.internal.snapshot.MissingFileSnapshot;
 import org.gradle.internal.snapshot.RegularFileSnapshot;
-import org.gradle.internal.snapshot.RelativePathStringTracker;
+import org.gradle.internal.snapshot.RelativePathTracker;
+import org.gradle.internal.snapshot.RelativePathTrackingFileSystemSnapshotHierarchyVisitor;
+import org.gradle.internal.snapshot.SnapshotVisitResult;
 
 import javax.annotation.Nullable;
 import java.io.BufferedOutputStream;
@@ -56,93 +57,102 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.UncheckedIOException;
 import java.io.UnsupportedEncodingException;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import static org.gradle.caching.internal.packaging.impl.PackerDirectoryUtil.ensureDirectoryForTree;
-import static org.gradle.caching.internal.packaging.impl.PackerDirectoryUtil.makeDirectory;
+import static org.gradle.internal.file.FileMetadata.AccessType.DIRECT;
+import static org.gradle.internal.snapshot.MerkleDirectorySnapshotBuilder.EmptyDirectoryHandlingStrategy.INCLUDE_EMPTY_DIRS;
 
 /**
  * Packages build cache entries to a POSIX TAR file.
  */
 public class TarBuildCacheEntryPacker implements BuildCacheEntryPacker {
+
     @SuppressWarnings("OctalInteger")
     private interface UnixPermissions {
-        int FILE_FLAG =         0100000;
-        int DEFAULT_FILE_PERM =    0644;
-        int DIR_FLAG =           040000;
-        int DEFAULT_DIR_PERM =     0755;
-        int PERM_MASK           = 07777;
+        int FILE_FLAG = 0100000;
+        int DEFAULT_FILE_PERM = 0644;
+        int DIR_FLAG = 040000;
+        int DEFAULT_DIR_PERM = 0755;
+        int PERM_MASK = 07777;
     }
 
+    private static final Charset ENCODING = StandardCharsets.UTF_8;
     private static final String METADATA_PATH = "METADATA";
     private static final Pattern TREE_PATH = Pattern.compile("(missing-)?tree-([^/]+)(?:/(.*))?");
     private static final int BUFFER_SIZE = 64 * 1024;
-    private static final ThreadLocal<byte[]> COPY_BUFFERS = new ThreadLocal<byte[]>() {
-        @Override
-        protected byte[] initialValue() {
-            return new byte[BUFFER_SIZE];
-        }
-    };
+    private static final ThreadLocal<byte[]> COPY_BUFFERS = ThreadLocal.withInitial(() -> new byte[BUFFER_SIZE]);
 
-    private final FileSystem fileSystem;
+    private final TarPackerFileSystemSupport fileSystemSupport;
+    private final FilePermissionAccess filePermissionAccess;
     private final StreamHasher streamHasher;
-    private final StringInterner stringInterner;
+    private final Interner<String> stringInterner;
 
-    public TarBuildCacheEntryPacker(FileSystem fileSystem, StreamHasher streamHasher, StringInterner stringInterner) {
-        this.fileSystem = fileSystem;
+    public TarBuildCacheEntryPacker(
+        TarPackerFileSystemSupport fileSystemSupport,
+        FilePermissionAccess filePermissionAccess,
+        StreamHasher streamHasher,
+        Interner<String> stringInterner
+    ) {
+        this.fileSystemSupport = fileSystemSupport;
+        this.filePermissionAccess = filePermissionAccess;
         this.streamHasher = streamHasher;
         this.stringInterner = stringInterner;
     }
 
     @Override
-    public PackResult pack(CacheableEntity entity, Map<String, CurrentFileCollectionFingerprint> fingerprints, OutputStream output, OriginWriter writeOrigin) throws IOException {
+    public PackResult pack(CacheableEntity entity, Map<String, ? extends FileSystemSnapshot> snapshots, OutputStream output, OriginWriter writeOrigin) throws IOException {
         BufferedOutputStream bufferedOutput;
         if (output instanceof BufferedOutputStream) {
             bufferedOutput = (BufferedOutputStream) output;
         } else {
             bufferedOutput = new BufferedOutputStream(output);
         }
-        try (TarArchiveOutputStream tarOutput = new TarArchiveOutputStream(bufferedOutput, "utf-8")) {
+        try (TarArchiveOutputStream tarOutput = new TarArchiveOutputStream(bufferedOutput, ENCODING.name())) {
             tarOutput.setLongFileMode(TarArchiveOutputStream.LONGFILE_POSIX);
             tarOutput.setBigNumberMode(TarArchiveOutputStream.BIGNUMBER_POSIX);
             tarOutput.setAddPaxHeadersForNonAsciiNames(true);
             packMetadata(writeOrigin, tarOutput);
-            long entryCount = pack(entity, fingerprints, tarOutput);
+            long entryCount = pack(entity, snapshots, tarOutput);
             return new PackResult(entryCount + 1);
         }
     }
 
     private void packMetadata(OriginWriter writeMetadata, TarArchiveOutputStream tarOutput) throws IOException {
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        writeMetadata.execute(baos);
-        createTarEntry(METADATA_PATH, baos.size(), UnixPermissions.FILE_FLAG | UnixPermissions.DEFAULT_FILE_PERM, tarOutput);
-        tarOutput.write(baos.toByteArray());
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        writeMetadata.execute(output);
+        createTarEntry(METADATA_PATH, output.size(), UnixPermissions.FILE_FLAG | UnixPermissions.DEFAULT_FILE_PERM, tarOutput);
+        tarOutput.write(output.toByteArray());
         tarOutput.closeArchiveEntry();
     }
 
-    private long pack(CacheableEntity entity, Map<String, CurrentFileCollectionFingerprint> fingerprints, TarArchiveOutputStream tarOutput) {
-        MutableLong entries = new MutableLong();
+    private long pack(CacheableEntity entity, Map<String, ? extends FileSystemSnapshot> snapshots, TarArchiveOutputStream tarOutput) {
+        AtomicLong entries = new AtomicLong();
         entity.visitOutputTrees((treeName, type, root) -> {
-            CurrentFileCollectionFingerprint fingerprint = fingerprints.get(treeName);
+            FileSystemSnapshot treeSnapshots = snapshots.get(treeName);
             try {
-                entries.increment(packTree(treeName, type, fingerprint, tarOutput));
+                long entryCount = packTree(treeName, type, treeSnapshots, tarOutput);
+                entries.addAndGet(entryCount);
             } catch (Exception ex) {
-                throw new GradleException(String.format("Could not pack tree '%s': %s", treeName, ex.getMessage()), ex);
+                throw new RuntimeException(String.format("Could not pack tree '%s': %s", treeName, ex.getMessage()), ex);
             }
         });
         return entries.get();
     }
 
-    private long packTree(String name, TreeType type, CurrentFileCollectionFingerprint fingerprint, TarArchiveOutputStream tarOutput) {
-        PackingVisitor packingVisitor = new PackingVisitor(tarOutput, name, type, fileSystem);
-        fingerprint.accept(packingVisitor);
-        return packingVisitor.finish();
+    private long packTree(String name, TreeType type, FileSystemSnapshot snapshots, TarArchiveOutputStream tarOutput) {
+        PackingVisitor packingVisitor = new PackingVisitor(tarOutput, name, type, filePermissionAccess);
+        snapshots.accept(new RelativePathTracker(), packingVisitor);
+        return packingVisitor.getPackedEntryCount();
     }
 
     private static void createTarEntry(String path, long size, int mode, TarArchiveOutputStream tarOutput) throws IOException {
@@ -154,26 +164,24 @@ public class TarBuildCacheEntryPacker implements BuildCacheEntryPacker {
 
     @Override
     public UnpackResult unpack(CacheableEntity entity, InputStream input, OriginReader readOrigin) throws IOException {
-        try (TarArchiveInputStream tarInput = new TarArchiveInputStream(input)) {
+        try (TarArchiveInputStream tarInput = new TarArchiveInputStream(input, ENCODING.name())) {
             return unpack(entity, tarInput, readOrigin);
         }
     }
 
     private UnpackResult unpack(CacheableEntity entity, TarArchiveInputStream tarInput, OriginReader readOriginAction) throws IOException {
         ImmutableMap.Builder<String, CacheableTree> treesBuilder = ImmutableMap.builder();
-        entity.visitOutputTrees((name, type, root) -> {
-            treesBuilder.put(name, new CacheableTree(type, root));
-        });
+        entity.visitOutputTrees((name, type, root) -> treesBuilder.put(name, new CacheableTree(type, root)));
         ImmutableMap<String, CacheableTree> treesByName = treesBuilder.build();
 
         TarArchiveEntry tarEntry;
         OriginMetadata originMetadata = null;
-        Map<String, FileSystemLocationSnapshot> snapshots = new HashMap<String, FileSystemLocationSnapshot>();
+        Map<String, FileSystemLocationSnapshot> snapshots = new HashMap<>();
 
         tarEntry = tarInput.getNextTarEntry();
-        MutableLong entries = new MutableLong();
+        AtomicLong entries = new AtomicLong();
         while (tarEntry != null) {
-            entries.increment(1);
+            entries.incrementAndGet();
             String path = tarEntry.getName();
 
             if (path.equals(METADATA_PATH)) {
@@ -224,7 +232,7 @@ public class TarBuildCacheEntryPacker implements BuildCacheEntryPacker {
     }
 
     @Nullable
-    private TarArchiveEntry unpackTree(String treeName, TreeType treeType, File treeRoot, TarArchiveInputStream input, TarArchiveEntry rootEntry, String childPath, boolean missing, Map<String, FileSystemLocationSnapshot> snapshots, MutableLong entries) throws IOException {
+    private TarArchiveEntry unpackTree(String treeName, TreeType treeType, File treeRoot, TarArchiveInputStream input, TarArchiveEntry rootEntry, String childPath, boolean missing, Map<String, FileSystemLocationSnapshot> snapshots, AtomicLong entries) throws IOException {
         boolean isDirEntry = rootEntry.isDirectory();
         boolean root = Strings.isNullOrEmpty(childPath);
         if (!root) {
@@ -232,11 +240,11 @@ public class TarBuildCacheEntryPacker implements BuildCacheEntryPacker {
         }
         // We are handling the root of the tree here
         if (missing) {
-            unpackMissingFile(treeRoot);
+            fileSystemSupport.ensureFileIsMissing(treeRoot);
             return input.getNextTarEntry();
         }
 
-        ensureDirectoryForTree(treeType, treeRoot);
+        fileSystemSupport.ensureDirectoryForTree(treeType, treeRoot);
         if (treeType == TreeType.FILE) {
             if (isDirEntry) {
                 throw new IllegalStateException("Should be a file: " + treeName);
@@ -254,80 +262,60 @@ public class TarBuildCacheEntryPacker implements BuildCacheEntryPacker {
         return unpackDirectoryTree(input, rootEntry, snapshots, entries, treeRoot, treeName);
     }
 
-    private void unpackMissingFile(File treeRoot) throws IOException {
-        if (!makeDirectory(treeRoot.getParentFile())) {
-            // Make sure tree is removed if it exists already
-            if (treeRoot.exists()) {
-                FileUtils.forceDelete(treeRoot);
-            }
-        }
-    }
-
     private RegularFileSnapshot unpackFile(TarArchiveInputStream input, TarArchiveEntry entry, File file, String fileName) throws IOException {
-        OutputStream output = new FileOutputStream(file);
-        HashCode hash;
-        try {
-            hash = streamHasher.hashCopy(input, output);
+        try (CountingOutputStream output = new CountingOutputStream(new FileOutputStream(file))) {
+            HashCode hash = streamHasher.hashCopy(input, output);
             chmodUnpackedFile(entry, file);
-        } finally {
-            IoActions.closeQuietly(output);
+            String internedAbsolutePath = stringInterner.intern(file.getAbsolutePath());
+            String internedFileName = stringInterner.intern(fileName);
+            return new RegularFileSnapshot(internedAbsolutePath, internedFileName, hash, DefaultFileMetadata.file(output.getCount(), file.lastModified(), DIRECT));
         }
-        String internedAbsolutePath = stringInterner.intern(file.getAbsolutePath());
-        String internedFileName = stringInterner.intern(fileName);
-        return new RegularFileSnapshot(internedAbsolutePath, internedFileName, hash, file.lastModified());
     }
 
     @Nullable
-    private TarArchiveEntry unpackDirectoryTree(TarArchiveInputStream input, TarArchiveEntry rootEntry, Map<String, FileSystemLocationSnapshot> snapshots, MutableLong entries, File treeRoot, String treeName) throws IOException {
-        RelativePathParser parser = new RelativePathParser();
-        parser.rootPath(rootEntry.getName());
+    private TarArchiveEntry unpackDirectoryTree(TarArchiveInputStream input, TarArchiveEntry rootEntry, Map<String, FileSystemLocationSnapshot> snapshots, AtomicLong entries, File treeRoot, String treeName) throws IOException {
+        RelativePathParser parser = new RelativePathParser(rootEntry.getName());
 
         MerkleDirectorySnapshotBuilder builder = MerkleDirectorySnapshotBuilder.noSortingRequired();
-        String rootPath = stringInterner.intern(treeRoot.getAbsolutePath());
-        String rootDirName = stringInterner.intern(treeRoot.getName());
-        builder.preVisitDirectory(rootPath, rootDirName);
+        builder.enterDirectory(DIRECT, stringInterner.intern(treeRoot.getAbsolutePath()), stringInterner.intern(treeRoot.getName()), INCLUDE_EMPTY_DIRS);
 
         TarArchiveEntry entry;
 
         while ((entry = input.getNextTarEntry()) != null) {
-            entries.increment(1);
             boolean isDir = entry.isDirectory();
-            int directoriesLeft = parser.nextPath(entry.getName(), isDir);
-            for (int i = 0; i < directoriesLeft; i++) {
-                builder.postVisitDirectory();
-            }
-            if (parser.getDepth() == 0) {
+            boolean outsideOfRoot = parser.nextPath(entry.getName(), isDir, builder::leaveDirectory);
+            if (outsideOfRoot) {
                 break;
             }
+            entries.incrementAndGet();
 
             File file = new File(treeRoot, parser.getRelativePath());
             if (isDir) {
                 FileUtils.forceMkdir(file);
                 chmodUnpackedFile(entry, file);
                 String internedAbsolutePath = stringInterner.intern(file.getAbsolutePath());
-                String indernedDirName = stringInterner.intern(parser.getName());
-                builder.preVisitDirectory(internedAbsolutePath, indernedDirName);
+                String internedName = stringInterner.intern(parser.getName());
+                builder.enterDirectory(DIRECT, internedAbsolutePath, internedName, INCLUDE_EMPTY_DIRS);
             } else {
                 RegularFileSnapshot fileSnapshot = unpackFile(input, entry, file, parser.getName());
-                builder.visit(fileSnapshot);
+                builder.visitLeafElement(fileSnapshot);
             }
         }
 
-        for (int i = 0; i < parser.getDepth(); i++) {
-            builder.postVisitDirectory();
-        }
+        parser.exitToRoot(builder::leaveDirectory);
+        builder.leaveDirectory();
 
         snapshots.put(treeName, builder.getResult());
         return entry;
     }
 
     private void chmodUnpackedFile(TarArchiveEntry entry, File file) {
-        fileSystem.chmod(file, entry.getMode() & UnixPermissions.PERM_MASK);
+        filePermissionAccess.chmod(file, entry.getMode() & UnixPermissions.PERM_MASK);
     }
 
     private static String escape(String name) {
         try {
-            return URLEncoder.encode(name, "utf-8");
+            return URLEncoder.encode(name, ENCODING.name());
         } catch (UnsupportedEncodingException ignored) {
             throw new AssertionError();
         }
@@ -335,71 +323,64 @@ public class TarBuildCacheEntryPacker implements BuildCacheEntryPacker {
 
     private static String unescape(String name) {
         try {
-            return URLDecoder.decode(name, "utf-8");
+            return URLDecoder.decode(name, ENCODING.name());
         } catch (UnsupportedEncodingException e) {
             throw new AssertionError(e);
         }
     }
 
-    private static class PackingVisitor implements FileSystemSnapshotVisitor {
-        private final RelativePathStringTracker relativePathStringTracker;
+    private static class PackingVisitor implements RelativePathTrackingFileSystemSnapshotHierarchyVisitor {
         private final TarArchiveOutputStream tarOutput;
         private final String treePath;
         private final String treeRoot;
-        private final FileSystem fileSystem;
+        private final FilePermissionAccess filePermissionAccess;
         private final TreeType type;
 
-        private long entries;
+        private long packedEntryCount;
 
-        public PackingVisitor(TarArchiveOutputStream tarOutput, String treeName, TreeType type, FileSystem fileSystem) {
+        public PackingVisitor(TarArchiveOutputStream tarOutput, String treeName, TreeType type, FilePermissionAccess filePermissionAccess) {
             this.tarOutput = tarOutput;
             this.treePath = "tree-" + escape(treeName);
             this.treeRoot = treePath + "/";
             this.type = type;
-            this.fileSystem = fileSystem;
-            this.relativePathStringTracker = new RelativePathStringTracker();
+            this.filePermissionAccess = filePermissionAccess;
         }
 
         @Override
-        public boolean preVisitDirectory(DirectorySnapshot directorySnapshot) {
-            boolean root = relativePathStringTracker.isRoot();
-            relativePathStringTracker.enter(directorySnapshot);
-            assertCorrectType(root, directorySnapshot);
-            String targetPath = getTargetPath(root);
-            int mode = root ? UnixPermissions.DEFAULT_DIR_PERM : fileSystem.getUnixMode(new File(directorySnapshot.getAbsolutePath()));
-            storeDirectoryEntry(targetPath, mode, tarOutput);
-            entries++;
-            return true;
+        public SnapshotVisitResult visitEntry(FileSystemLocationSnapshot snapshot, RelativePathSupplier relativePath) {
+            boolean isRoot = relativePath.isRoot();
+            String targetPath = getTargetPath(relativePath);
+            snapshot.accept(new FileSystemLocationSnapshotVisitor() {
+                @Override
+                public void visitDirectory(DirectorySnapshot directorySnapshot) {
+                    assertCorrectType(isRoot, snapshot);
+                    File dir = new File(snapshot.getAbsolutePath());
+                    int dirMode = isRoot ? UnixPermissions.DEFAULT_DIR_PERM : filePermissionAccess.getUnixMode(dir);
+                    storeDirectoryEntry(targetPath, dirMode, tarOutput);
+                }
+
+                @Override
+                public void visitRegularFile(RegularFileSnapshot fileSnapshot) {
+                    assertCorrectType(isRoot, snapshot);
+                    File file = new File(snapshot.getAbsolutePath());
+                    int fileMode = filePermissionAccess.getUnixMode(file);
+                    storeFileEntry(file, targetPath, file.length(), fileMode, tarOutput);
+                }
+
+                @Override
+                public void visitMissing(MissingFileSnapshot missingSnapshot) {
+                    if (!isRoot) {
+                        throw new RuntimeException(String.format("Couldn't read content of file '%s'", snapshot.getAbsolutePath()));
+                    }
+                    storeMissingTree(targetPath, tarOutput);
+                }
+            });
+            packedEntryCount++;
+            return SnapshotVisitResult.CONTINUE;
         }
 
-        @Override
-        public void visit(FileSystemLocationSnapshot fileSnapshot) {
-            boolean root = relativePathStringTracker.isRoot();
-            relativePathStringTracker.enter(fileSnapshot);
-            String targetPath = getTargetPath(root);
-            if (fileSnapshot.getType() == FileType.Missing) {
-                storeMissingTree(targetPath, tarOutput);
-            } else {
-                assertCorrectType(root, fileSnapshot);
-                File file = new File(fileSnapshot.getAbsolutePath());
-                int mode = fileSystem.getUnixMode(file);
-                storeFileEntry(file, targetPath, file.length(), mode, tarOutput);
-            }
-            relativePathStringTracker.leave();
-            entries++;
-        }
-
-        @Override
-        public void postVisitDirectory(DirectorySnapshot directorySnapshot) {
-            relativePathStringTracker.leave();
-        }
-
-        public long finish() {
-            if (entries == 0) {
-                storeMissingTree(treePath, tarOutput);
-                entries++;
-            }
-            return entries;
+        public long getPackedEntryCount() {
+            return packedEntryCount;
         }
 
         private void assertCorrectType(boolean root, FileSystemLocationSnapshot snapshot) {
@@ -421,12 +402,10 @@ public class TarBuildCacheEntryPacker implements BuildCacheEntryPacker {
             }
         }
 
-        private String getTargetPath(boolean root) {
-            if (root) {
-                return treePath;
-            }
-            String relativePath = relativePathStringTracker.getRelativePathString();
-            return treeRoot + relativePath;
+        private String getTargetPath(RelativePathSupplier relativePath) {
+            return relativePath.isRoot()
+                ? treePath
+                : treeRoot + relativePath.toRelativePath();
         }
 
         private void storeMissingTree(String treePath, TarArchiveOutputStream tarOutput) {
@@ -437,6 +416,7 @@ public class TarBuildCacheEntryPacker implements BuildCacheEntryPacker {
                 throw new UncheckedIOException(e);
             }
         }
+
         private void storeDirectoryEntry(String path, int mode, TarArchiveOutputStream tarOutput) {
             try {
                 createTarEntry(path + "/", 0, UnixPermissions.DIR_FLAG | mode, tarOutput);
@@ -449,11 +429,8 @@ public class TarBuildCacheEntryPacker implements BuildCacheEntryPacker {
         private void storeFileEntry(File inputFile, String path, long size, int mode, TarArchiveOutputStream tarOutput) {
             try {
                 createTarEntry(path, size, UnixPermissions.FILE_FLAG | mode, tarOutput);
-                FileInputStream input = new FileInputStream(inputFile);
-                try {
+                try (FileInputStream input = new FileInputStream(inputFile)) {
                     IOUtils.copyLarge(input, tarOutput, COPY_BUFFERS.get());
-                } finally {
-                    IoActions.closeQuietly(input);
                 }
                 tarOutput.closeArchiveEntry();
             } catch (IOException e) {

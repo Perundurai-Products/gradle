@@ -41,6 +41,7 @@ import org.gradle.internal.component.external.model.ModuleComponentResolveMetada
 import org.gradle.internal.component.external.model.ModuleDependencyMetadata;
 import org.gradle.internal.component.model.DefaultComponentOverrideMetadata;
 import org.gradle.internal.component.model.DependencyMetadata;
+import org.gradle.internal.component.model.IvyArtifactName;
 import org.gradle.internal.resolve.ModuleVersionNotFoundException;
 import org.gradle.internal.resolve.ModuleVersionResolveException;
 import org.gradle.internal.resolve.RejectedByAttributesVersion;
@@ -57,6 +58,7 @@ import org.gradle.internal.resolve.result.ResourceAwareResolveResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -73,8 +75,8 @@ import static org.gradle.internal.resolve.result.BuildableModuleComponentMetaDat
 public class DynamicVersionResolver {
     private static final Logger LOGGER = LoggerFactory.getLogger(DynamicVersionResolver.class);
 
-    private final List<ModuleComponentRepository> repositories = new ArrayList<ModuleComponentRepository>();
-    private final List<String> repositoryNames = new ArrayList<String>();
+    private final List<ModuleComponentRepository> repositories = new ArrayList<>();
+    private final List<String> repositoryNames = new ArrayList<>();
     private final VersionedComponentChooser versionedComponentChooser;
     private final VersionParser versionParser;
     private final Transformer<ModuleComponentResolveMetadata, RepositoryChainModuleResolution> metaDataFactory;
@@ -83,7 +85,9 @@ public class DynamicVersionResolver {
     private final ComponentMetadataSupplierRuleExecutor componentMetadataSupplierRuleExecutor;
     private final CachePolicy cachePolicy;
 
-    public DynamicVersionResolver(VersionedComponentChooser versionedComponentChooser, VersionParser versionParser, Transformer<ModuleComponentResolveMetadata, RepositoryChainModuleResolution> metaDataFactory, ImmutableAttributesFactory attributesFactory, ComponentMetadataProcessorFactory componentMetadataProcessor, ComponentMetadataSupplierRuleExecutor componentMetadataSupplierRuleExecutor, CachePolicy cachePolicy) {
+    public DynamicVersionResolver(VersionedComponentChooser versionedComponentChooser, VersionParser versionParser, Transformer<ModuleComponentResolveMetadata, RepositoryChainModuleResolution> metaDataFactory,
+                                  ImmutableAttributesFactory attributesFactory, ComponentMetadataProcessorFactory componentMetadataProcessor,
+                                  ComponentMetadataSupplierRuleExecutor componentMetadataSupplierRuleExecutor, CachePolicy cachePolicy) {
         this.versionedComponentChooser = versionedComponentChooser;
         this.versionParser = versionParser;
         this.metaDataFactory = metaDataFactory;
@@ -98,10 +102,10 @@ public class DynamicVersionResolver {
         repositoryNames.add(repository.getName());
     }
 
-    public void resolve(ModuleDependencyMetadata dependency, VersionSelector versionSelector, VersionSelector rejectedVersionSelector, AttributeContainer consumerAttributes, BuildableComponentIdResolveResult result) {
+    public void resolve(ModuleDependencyMetadata dependency, VersionSelector versionSelector, @Nullable VersionSelector rejectedVersionSelector, AttributeContainer consumerAttributes, BuildableComponentIdResolveResult result) {
         ModuleComponentSelector requested = dependency.getSelector();
         LOGGER.debug("Attempting to resolve version for {} using repositories {}", requested, repositoryNames);
-        List<Throwable> errors = new ArrayList<Throwable>();
+        List<Throwable> errors = new ArrayList<>();
 
         List<RepositoryResolveState> resolveStates = Lists.newArrayListWithCapacity(repositories.size());
         for (ModuleComponentRepository repository : repositories) {
@@ -144,11 +148,11 @@ public class DynamicVersionResolver {
         result.failed(new ModuleVersionNotFoundException(requested, result.getAttempted(), result.getUnmatchedVersions(), result.getRejectedVersions()));
     }
 
+    @Nullable
     private RepositoryChainModuleResolution findLatestModule(List<RepositoryResolveState> resolveStates, Collection<Throwable> failures) {
-        LinkedList<RepositoryResolveState> queue = new LinkedList<RepositoryResolveState>();
-        queue.addAll(resolveStates);
+        LinkedList<RepositoryResolveState> queue = new LinkedList<>(resolveStates);
 
-        LinkedList<RepositoryResolveState> missing = new LinkedList<RepositoryResolveState>();
+        LinkedList<RepositoryResolveState> missing = new LinkedList<>();
 
         // A first pass to do local resolves only
         RepositoryChainModuleResolution best = findLatestModule(queue, failures, missing);
@@ -165,6 +169,7 @@ public class DynamicVersionResolver {
         return findLatestModule(queue, failures, missing);
     }
 
+    @Nullable
     private RepositoryChainModuleResolution findLatestModule(LinkedList<RepositoryResolveState> queue, Collection<Throwable> failures, Collection<RepositoryResolveState> missing) {
         RepositoryChainModuleResolution best = null;
         while (!queue.isEmpty()) {
@@ -206,7 +211,8 @@ public class DynamicVersionResolver {
         return best;
     }
 
-    private RepositoryChainModuleResolution chooseBest(RepositoryChainModuleResolution one, RepositoryChainModuleResolution two) {
+    @Nullable
+    private RepositoryChainModuleResolution chooseBest(@Nullable RepositoryChainModuleResolution one, @Nullable RepositoryChainModuleResolution two) {
         if (one == null || two == null) {
             return two == null ? one : two;
         }
@@ -214,7 +220,7 @@ public class DynamicVersionResolver {
     }
 
     private static class AttemptCollector implements Action<ResourceAwareResolveResult> {
-        private final List<String> attempts = new ArrayList<String>();
+        private final List<String> attempts = new ArrayList<>();
 
         @Override
         public void execute(ResourceAwareResolveResult resourceAwareResolveResult) {
@@ -238,7 +244,7 @@ public class DynamicVersionResolver {
     private static class RepositoryResolveState implements ComponentSelectionContext {
         private final VersionedComponentChooser versionedComponentChooser;
         private final BuildableModuleComponentMetaDataResolveResult resolvedVersionMetadata = new DefaultBuildableModuleComponentMetaDataResolveResult();
-        private final Map<String, CandidateResult> candidateComponents = new LinkedHashMap<String, CandidateResult>();
+        private final Map<String, CandidateResult> candidateComponents = new LinkedHashMap<>();
         private final Set<String> unmatchedVersions = Sets.newLinkedHashSet();
         private final Set<RejectedVersion> rejectedVersions = Sets.newLinkedHashSet();
         private final VersionListResult versionListingResult;
@@ -365,7 +371,7 @@ public class DynamicVersionResolver {
         }
 
         private List<CandidateResult> candidates() {
-            List<CandidateResult> candidates = new ArrayList<CandidateResult>();
+            List<CandidateResult> candidates = new ArrayList<>();
             for (String version : versionListingResult.result.getVersions()) {
                 CandidateResult candidateResult = candidateComponents.get(version);
                 if (candidateResult == null) {
@@ -430,6 +436,7 @@ public class DynamicVersionResolver {
             return version;
         }
 
+        @Override
         public BuildableModuleComponentMetaDataResolveResult resolve() {
             if (!searchedLocally) {
                 searchedLocally = true;
@@ -476,7 +483,8 @@ public class DynamicVersionResolver {
 
         private void process(ModuleComponentRepositoryAccess access, DefaultBuildableModuleComponentMetaDataResolveResult result) {
             DependencyMetadata dependency = dependencyMetadata.withRequestedVersion(new DefaultImmutableVersionConstraint(version.getSource()));
-            access.resolveComponentMetaData(identifier, DefaultComponentOverrideMetadata.forDependency(dependency), result);
+            IvyArtifactName firstArtifact = dependency.getArtifacts().isEmpty() ? null : dependency.getArtifacts().get(0);
+            access.resolveComponentMetaData(identifier, DefaultComponentOverrideMetadata.forDependency(dependency.isChanging(), firstArtifact, DefaultComponentOverrideMetadata.extractClientModule(dependency)), result);
             attemptCollector.execute(result);
         }
 

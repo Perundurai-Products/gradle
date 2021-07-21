@@ -36,7 +36,7 @@ class SwiftMissingToolchainIntegrationTest extends AbstractIntegrationSpec imple
         new SwiftApp().writeToProject(testDirectory)
 
         when:
-        succeeds("tasks")
+        succeeds("help")
 
         then:
         noExceptionThrown()

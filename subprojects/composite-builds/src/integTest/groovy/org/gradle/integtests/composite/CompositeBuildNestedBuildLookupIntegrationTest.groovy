@@ -16,7 +16,6 @@
 
 package org.gradle.integtests.composite
 
-
 class CompositeBuildNestedBuildLookupIntegrationTest extends AbstractCompositeBuildIntegrationTest {
     def "can query the included builds defined by an included build"() {
         given:
@@ -30,7 +29,7 @@ class CompositeBuildNestedBuildLookupIntegrationTest extends AbstractCompositeBu
                 assert gradle.includedBuild("buildC").name == "buildC"
                 assert gradle.includedBuild("buildC").projectDir == file("${buildC.toURI()}")
                 assert gradle.includedBuilds.name == ["buildC"]
-                
+
                 task broken {
                     doLast {
                         assert gradle.includedBuilds.name == ["buildC"]
@@ -59,7 +58,7 @@ class CompositeBuildNestedBuildLookupIntegrationTest extends AbstractCompositeBu
         def buildC = singleProjectBuild("buildC") {
             buildFile << """
                 assert gradle.includedBuilds.empty
-            
+
                 task broken1 {
                     doLast {
                         assert gradle.includedBuilds.empty

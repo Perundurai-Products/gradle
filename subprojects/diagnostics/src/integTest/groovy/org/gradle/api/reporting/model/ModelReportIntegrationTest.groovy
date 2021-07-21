@@ -17,7 +17,9 @@
 package org.gradle.api.reporting.model
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.integtests.fixtures.UnsupportedWithConfigurationCache
 
+@UnsupportedWithConfigurationCache(because = "software model")
 class ModelReportIntegrationTest extends AbstractIntegrationSpec {
 
     def "displays basic structure of an empty project"() {
@@ -37,9 +39,12 @@ class ModelReportIntegrationTest extends AbstractIntegrationSpec {
                     dependencies()
                     dependencyInsight()
                     dependentComponents()
+                    javaToolchains()
                     help()
                     init()
                     model()
+                    outgoingVariants()
+                    prepareKotlinBuildScriptModel()
                     projects()
                     properties()
                     tasks()
@@ -212,9 +217,10 @@ model {
     }
 
     // nb: specifically doesn't use the parsing fixture, so that the output is visualised
-    //If you're changing this you will also need to change: src/samples/modelRules/basicRuleSourcePlugin/basicRuleSourcePlugin-model-task.out
+    //If you're changing this you will also need to change: src/snippets/modelRules/basicRuleSourcePlugin/basicRuleSourcePlugin-model-task.out
     def "displays a report in the correct format"() {
         given:
+        settingsFile << "rootProject.name = 'test'"
         buildFile << """
 
 @Managed
@@ -249,7 +255,7 @@ model {
 
         then:
         def modelReportOutput = ModelReportOutput.from(output)
-        modelReportOutput.hasTitle("Root project")
+        modelReportOutput.hasTitle("Root project 'test'")
 
         and:
         modelReportOutput.nodeContentEquals('''
@@ -331,10 +337,28 @@ model {
           | Creator: \tProject.<init>.tasks.init()
           | Rules:
              ⤷ copyToTaskContainer
+    + javaToolchains
+          | Type:   \torg.gradle.jvm.toolchain.internal.task.ShowToolchainsTask
+          | Value:  \ttask ':javaToolchains\'
+          | Creator: \tProject.<init>.tasks.javaToolchains()
+          | Rules:
+             ⤷ copyToTaskContainer
     + model
           | Type:   \torg.gradle.api.reporting.model.ModelReport
           | Value:  \ttask ':model\'
           | Creator: \tProject.<init>.tasks.model()
+          | Rules:
+             ⤷ copyToTaskContainer
+    + outgoingVariants
+          | Type:   \torg.gradle.api.tasks.diagnostics.OutgoingVariantsReportTask
+          | Value:  \ttask ':outgoingVariants\'
+          | Creator: \tProject.<init>.tasks.outgoingVariants()
+          | Rules:
+             ⤷ copyToTaskContainer
+    + prepareKotlinBuildScriptModel
+          | Type:   \torg.gradle.api.DefaultTask
+          | Value:  \ttask ':prepareKotlinBuildScriptModel\'
+          | Creator: \tProject.<init>.tasks.prepareKotlinBuildScriptModel()
           | Rules:
              ⤷ copyToTaskContainer
     + projects

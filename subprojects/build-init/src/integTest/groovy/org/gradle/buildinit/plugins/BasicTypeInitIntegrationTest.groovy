@@ -20,9 +20,14 @@ import org.gradle.buildinit.plugins.fixtures.ScriptDslFixture
 import spock.lang.Unroll
 
 import static org.gradle.buildinit.plugins.internal.modifiers.BuildInitDsl.GROOVY
+import static org.gradle.util.internal.TextUtil.toPlatformLineSeparators
 
 
 class BasicTypeInitIntegrationTest extends AbstractInitIntegrationSpec {
+
+    @Override
+    String subprojectName() { null }
+
     def "defaults to groovy build scripts"() {
         when:
         run 'init'
@@ -46,6 +51,28 @@ class BasicTypeInitIntegrationTest extends AbstractInitIntegrationSpec {
 
         then:
         noExceptionThrown()
+
+        where:
+        scriptDsl << ScriptDslFixture.SCRIPT_DSLS
+    }
+
+    @Unroll
+    def "merges .gitignore if it already exists with #scriptDsl build scripts"() {
+        when:
+        def gitignoreFile = targetDir.file(".gitignore")
+        gitignoreFile << "*.class${System.lineSeparator()}existingIgnores"
+        run('init', '--project-name', 'someApp', '--dsl', scriptDsl.id)
+
+        then:
+        gitignoreFile.file
+        gitignoreFile.text == toPlatformLineSeparators("""*.class
+existingIgnores
+# Ignore Gradle project-specific cache directory
+.gradle
+
+# Ignore Gradle build output directory
+build
+""")
 
         where:
         scriptDsl << ScriptDslFixture.SCRIPT_DSLS

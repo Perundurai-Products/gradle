@@ -40,8 +40,6 @@ public class ThrottlingOutputEventListener implements OutputEventListener {
     private final int throttleMs;
     private final Object lock = new Object();
 
-    private long currentTimePeriod;
-    private long lastUpdate;
     private final List<OutputEvent> queue = new ArrayList<OutputEvent>();
 
     public ThrottlingOutputEventListener(OutputEventListener listener, Clock clock) {
@@ -65,13 +63,12 @@ public class ThrottlingOutputEventListener implements OutputEventListener {
         }, throttleMs, throttleMs, TimeUnit.MILLISECONDS);
     }
 
+    @Override
     public void onOutput(OutputEvent newEvent) {
         synchronized (lock) {
             queue.add(newEvent);
 
-            if (newEvent instanceof UpdateNowEvent) {
-                // Flush any buffered events and update the clock
-                currentTimePeriod = ((UpdateNowEvent) newEvent).getTimestamp();
+            if (queue.size() == 10000 || newEvent instanceof UpdateNowEvent) {
                 renderNow();
                 return;
             }
@@ -92,10 +89,10 @@ public class ThrottlingOutputEventListener implements OutputEventListener {
     }
 
     private void renderNow() {
-        for (OutputEvent event : queue) {
+        // Remove event only as it is handled, and leave unhandled events in the queue
+        while (!queue.isEmpty()) {
+            OutputEvent event = queue.remove(0);
             listener.onOutput(event);
         }
-        queue.clear();
-        lastUpdate = currentTimePeriod;
     }
 }

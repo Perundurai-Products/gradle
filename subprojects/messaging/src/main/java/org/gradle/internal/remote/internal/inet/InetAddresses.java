@@ -44,7 +44,7 @@ class InetAddresses {
         if (interfaces != null) {
             while (interfaces.hasMoreElements()) {
                 analyzeNetworkInterface(interfaces.nextElement());
-            }   
+            }
         }
     }
 

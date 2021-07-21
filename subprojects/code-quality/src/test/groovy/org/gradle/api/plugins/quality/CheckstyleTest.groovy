@@ -18,7 +18,7 @@ package org.gradle.api.plugins.quality
 
 import org.gradle.api.reporting.Report
 import org.gradle.testfixtures.ProjectBuilder
-import org.gradle.testing.internal.util.Specification
+import spock.lang.Specification
 
 class CheckstyleTest extends Specification {
     def project = ProjectBuilder.builder().build()
@@ -32,11 +32,11 @@ class CheckstyleTest extends Specification {
             configFile == null
             config == null
             configProperties == [:]
-            !reports.xml.enabled
-            reports.xml.destination == null
+            !reports.xml.required.get()
+            !reports.xml.outputLocation.isPresent()
             reports.xml.outputType == Report.OutputType.FILE
-            !reports.html.enabled
-            reports.html.destination == null
+            !reports.html.required.get()
+            !reports.html.outputLocation.isPresent()
             reports.html.outputType == Report.OutputType.FILE
             !ignoreFailures
             showViolations

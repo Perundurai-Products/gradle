@@ -31,13 +31,13 @@ import org.gradle.platform.base.internal.BinaryBuildAbility;
 import org.gradle.platform.base.internal.BinarySpecInternal;
 import org.gradle.platform.base.internal.VariantAspect;
 import org.gradle.reporting.ReportRenderer;
-import org.gradle.util.GUtil;
+import org.gradle.util.internal.GUtil;
 
 import java.util.Map;
 
 // TODO - bust up this hierarchy and compose using interfaces instead
 public abstract class AbstractBinaryRenderer<T extends BinarySpec> extends ReportRenderer<BinarySpec, TextReportBuilder> {
-    private ModelSchemaStore schemaStore;
+    private final ModelSchemaStore schemaStore;
 
     protected AbstractBinaryRenderer(ModelSchemaStore schemaStore) {
         this.schemaStore = schemaStore;

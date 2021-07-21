@@ -21,14 +21,12 @@ import com.google.common.collect.Lists;
 import org.gradle.api.Buildable;
 import org.gradle.api.DefaultTask;
 import org.gradle.api.DomainObjectSet;
-import org.gradle.api.Incubating;
 import org.gradle.api.InvalidUserDataException;
 import org.gradle.api.Task;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.artifacts.PublishArtifact;
 import org.gradle.api.file.FileCollection;
 import org.gradle.api.internal.CollectionCallbackActionDecorator;
-import org.gradle.api.internal.DefaultDomainObjectSet;
 import org.gradle.api.internal.file.FileCollectionFactory;
 import org.gradle.api.publish.Publication;
 import org.gradle.api.publish.PublicationArtifact;
@@ -41,7 +39,7 @@ import org.gradle.api.tasks.TaskAction;
 import org.gradle.api.tasks.bundling.AbstractArchiveTask;
 import org.gradle.plugins.signing.signatory.Signatory;
 import org.gradle.plugins.signing.type.SignatureType;
-import org.gradle.util.SingleMessageLogger;
+import org.gradle.work.DisableCachingByDefault;
 
 import javax.inject.Inject;
 import java.io.File;
@@ -59,34 +57,18 @@ import static java.util.stream.Collectors.toMap;
  * <p>The task produces {@link Signature}</p> objects that are publishable artifacts and can be assigned to another configuration. <p> The signature objects are created with defaults and using this
  * tasks signatory and signature type.
  */
+@DisableCachingByDefault(because = "Not made cacheable, yet")
 public class Sign extends DefaultTask implements SignatureSpec {
 
     private SignatureType signatureType;
     private Signatory signatory;
     private boolean required = true;
-    private final DefaultDomainObjectSet<Signature> signatures;
+    private final DomainObjectSet<Signature> signatures = getProject().getObjects().domainObjectSet(Signature.class);
 
     @Inject
     public Sign() {
-        this.signatures = new DefaultDomainObjectSet<Signature>(Signature.class, getCallbackActionDecorator());
         // If we aren't required and don't have a signatory then we just don't run
         onlyIf(task -> isRequired() || getSignatory() != null);
-    }
-
-    @Internal
-    @Deprecated
-    public Iterable<File> getInputFiles() {
-        SingleMessageLogger.nagUserOfDiscontinuedMethod("Sign.getInputFiles()",
-            "Please use Sign.getSignatures() and Signature.getToSign() instead.");
-        return Iterables.transform(signatures, Signature::getToSign);
-    }
-
-    @Internal
-    @Deprecated
-    public Map<String, File> getOutputFiles() {
-        SingleMessageLogger.nagUserOfDiscontinuedMethod("Sign.getOutputFiles()",
-            "Please use Sign.getSignatures() and Signature.getFile() instead.");
-        return signatures.stream().collect(toMap(Signature::toKey, Signature::getFile));
     }
 
     /**
@@ -105,7 +87,7 @@ public class Sign extends DefaultTask implements SignatureSpec {
 
     private void signTask(final AbstractArchiveTask archiveTask) {
         dependsOn(archiveTask);
-        addSignature(new Signature(archiveTask::getArchivePath, archiveTask::getClassifier, this, this));
+        addSignature(new Signature(() -> archiveTask.getArchiveFile().get().getAsFile(), () -> archiveTask.getArchiveClassifier().getOrNull(), this, this));
     }
 
     /**
@@ -121,10 +103,6 @@ public class Sign extends DefaultTask implements SignatureSpec {
     private void signArtifact(PublishArtifact publishArtifact) {
         dependsOn(publishArtifact);
         addSignature(new Signature(publishArtifact, this, this));
-    }
-
-    private void signArtifact(final PublicationArtifact publicationArtifact) {
-        addSignature(new Signature(publicationArtifact, publicationArtifact::getFile, null, null, this, this));
     }
 
     /**
@@ -171,7 +149,6 @@ public class Sign extends DefaultTask implements SignatureSpec {
      *
      * @since 4.8
      */
-    @Incubating
     public void sign(Publication... publications) {
         for (Publication publication : publications) {
             PublicationInternal<?> publicationInternal = (PublicationInternal<?>) publication;
@@ -180,7 +157,7 @@ public class Sign extends DefaultTask implements SignatureSpec {
             });
             publicationInternal.allPublishableArtifacts(artifact -> {
                 if (isNoSignatureArtifact(artifact)) {
-                    signArtifact(artifact);
+                    addSignature(new Signature(artifact, artifact::getFile, null, null, this, this));
                 }
             });
             publicationInternal.whenPublishableArtifactRemoved(this::removeSignature);
@@ -226,7 +203,7 @@ public class Sign extends DefaultTask implements SignatureSpec {
             throw new InvalidUserDataException("Cannot perform signing task \'" + getPath() + "\' because it has no configured signatory");
         }
 
-        for (Signature signature : signatures) {
+        for (Signature signature : sanitizedSignatures().values()) {
             signature.generate();
         }
     }
@@ -244,9 +221,15 @@ public class Sign extends DefaultTask implements SignatureSpec {
      * @since 5.1
      */
     @Nested
-    @Incubating
     public Map<String, Signature> getSignaturesByKey() {
-        return signatures.stream().collect(toMap(Signature::toKey, identity()));
+        return sanitizedSignatures();
+    }
+
+    /**
+     * Returns signatures mapped by their key with duplicated and non-existing inputs removed.
+     */
+    private Map<String, Signature> sanitizedSignatures() {
+        return signatures.matching(signature -> signature.getToSign().exists()).stream().collect(toMap(Signature::toKey, identity(), (signature, duplicate) -> signature));
     }
 
     /**
@@ -257,10 +240,11 @@ public class Sign extends DefaultTask implements SignatureSpec {
      */
     @Internal
     public Signature getSingleSignature() {
-        if (signatures.size() == 1) {
-            return signatures.iterator().next();
+        Map<String, Signature> sanitizedSignatures = sanitizedSignatures();
+        if (sanitizedSignatures.size() == 1) {
+            return sanitizedSignatures.values().iterator().next();
         }
-        throw new IllegalStateException("Expected %s to contain exactly one signature, however, it contains " + signatures.size() + " signatures.");
+        throw new IllegalStateException("Expected %s to contain exactly one signature, however, it contains " + sanitizedSignatures.size() + " signatures.");
     }
 
     @Inject
@@ -275,7 +259,7 @@ public class Sign extends DefaultTask implements SignatureSpec {
     @Internal
     public FileCollection getFilesToSign() {
         return getFileCollectionFactory().fixed("Task \'" + getPath() + "\' files to sign",
-            Lists.newLinkedList(Iterables.filter(getInputFiles(), Predicates.notNull())));
+            Lists.newLinkedList(Iterables.filter(Iterables.transform(signatures, Signature::getToSign), Predicates.notNull())));
     }
 
     /**
@@ -287,12 +271,14 @@ public class Sign extends DefaultTask implements SignatureSpec {
             Lists.newLinkedList(Iterables.filter(Iterables.transform(signatures, Signature::getFile), Predicates.notNull())));
     }
 
+    @Override
     @Nested
     @Optional
     public SignatureType getSignatureType() {
         return signatureType;
     }
 
+    @Override
     public void setSignatureType(SignatureType signatureType) {
         this.signatureType = signatureType;
     }
@@ -301,12 +287,14 @@ public class Sign extends DefaultTask implements SignatureSpec {
      * Returns the signatory for this signing task.
      * @return the signatory
      */
+    @Override
     @Nested
     @Optional
     public Signatory getSignatory() {
         return signatory;
     }
 
+    @Override
     public void setSignatory(Signatory signatory) {
         this.signatory = signatory;
     }
@@ -316,11 +304,13 @@ public class Sign extends DefaultTask implements SignatureSpec {
      *
      * <p>Defaults to {@code true}.</p>
      */
+    @Override
     @Input
     public boolean isRequired() {
         return required;
     }
 
+    @Override
     public void setRequired(boolean required) {
         this.required = required;
     }

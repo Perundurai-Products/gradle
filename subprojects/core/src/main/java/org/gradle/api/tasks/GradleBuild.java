@@ -16,32 +16,28 @@
 package org.gradle.api.tasks;
 
 import org.gradle.StartParameter;
-import org.gradle.api.Transformer;
-import org.gradle.api.internal.BuildDefinition;
 import org.gradle.api.internal.ConventionTask;
-import org.gradle.internal.build.BuildState;
-import org.gradle.internal.build.BuildStateRegistry;
-import org.gradle.internal.build.NestedRootBuild;
-import org.gradle.internal.build.PublicBuildPath;
-import org.gradle.internal.invocation.BuildController;
+import org.gradle.api.internal.StartParameterInternal;
+import org.gradle.work.DisableCachingByDefault;
 
 import javax.annotation.Nullable;
 import java.io.File;
 import java.util.Collection;
 import java.util.List;
 
+import static org.gradle.internal.build.NestedRootBuildRunner.createStartParameterForNewBuild;
+import static org.gradle.internal.build.NestedRootBuildRunner.runNestedRootBuild;
+
 /**
  * Executes a Gradle build.
  */
+@DisableCachingByDefault(because = "Child Gradle build will do its own caching")
 public class GradleBuild extends ConventionTask {
-    private final BuildState currentBuild;
-    private final BuildStateRegistry buildStateRegistry;
     private StartParameter startParameter;
+    private String buildName;
 
     public GradleBuild() {
-        this.currentBuild = getServices().get(BuildState.class);
-        this.buildStateRegistry = getServices().get(BuildStateRegistry.class);
-        this.startParameter = getServices().get(StartParameter.class).newBuild();
+        this.startParameter = createStartParameterForNewBuild(getServices());
         startParameter.setCurrentDir(getProject().getProjectDir());
     }
 
@@ -98,10 +94,14 @@ public class GradleBuild extends ConventionTask {
      * org.gradle.api.Project#DEFAULT_BUILD_FILE} in the project directory.
      *
      * @return The build file. May be null.
+     * @deprecated Use {@link #getDir()} instead to get the root of the nested build.
+     * This method will be removed in Gradle 8.0.
      */
-    @Nullable @Optional
+    @Nullable
+    @Optional
     @PathSensitive(PathSensitivity.NAME_ONLY)
     @InputFile
+    @Deprecated
     public File getBuildFile() {
         return getStartParameter().getBuildFile();
     }
@@ -111,7 +111,10 @@ public class GradleBuild extends ConventionTask {
      *
      * @param file The build file. May be null to use the default build file for the build.
      * @since 4.0
+     * @deprecated Use {@link #setDir(File)} instead to set the root of the nested build.
+     * This method will be removed in Gradle 8.0.
      */
+    @Deprecated
     public void setBuildFile(@Nullable File file) {
         setBuildFile((Object) file);
     }
@@ -120,7 +123,10 @@ public class GradleBuild extends ConventionTask {
      * Sets the build file that should be used for this build.
      *
      * @param file The build file. May be null to use the default build file for the build.
+     * @deprecated Use {@link #setDir(Object)} instead to set the root of the nested build.
+     * This method will be removed in Gradle 8.0.
      */
+    @Deprecated
     public void setBuildFile(@Nullable Object file) {
         getStartParameter().setBuildFile(getProject().file(file));
     }
@@ -154,17 +160,32 @@ public class GradleBuild extends ConventionTask {
         getStartParameter().setTaskNames(tasks);
     }
 
+    /**
+     * The build name to use for the nested build.
+     * <p>
+     * If no value is specified, the name of the directory of the build will be used.
+     *
+     * @return the build name to use for the nested build (or null if the default is to be used)
+     * @since 6.0
+     */
+    @Internal
+    public String getBuildName() {
+        return buildName;
+    }
+
+    /**
+     * Sets build name to use for the nested build.
+     *
+     * @param buildName the build name to use for the nested build
+     * @since 6.0
+     */
+    public void setBuildName(String buildName) {
+        this.buildName = buildName;
+    }
+
     @TaskAction
     void build() {
-        // TODO: Allow us to inject plugins into GradleBuild nested builds too.
-        BuildDefinition buildDefinition = BuildDefinition.fromStartParameter(getStartParameter(), getServices().get(PublicBuildPath.class));
-        NestedRootBuild nestedBuild = buildStateRegistry.addNestedBuildTree(buildDefinition, currentBuild);
-        nestedBuild.run(new Transformer<Void, BuildController>() {
-            @Override
-            public Void transform(BuildController buildController) {
-                buildController.run();
-                return null;
-            }
-        });
+        // TODO: Allow us to inject plugins into nested builds too.
+        runNestedRootBuild(buildName, (StartParameterInternal) getStartParameter(), getServices());
     }
 }

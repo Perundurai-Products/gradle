@@ -20,6 +20,7 @@ import com.google.common.collect.ImmutableSet;
 import org.gradle.api.internal.tasks.DefaultTaskDependency;
 import org.gradle.api.internal.tasks.TaskDependencyInternal;
 import org.gradle.api.publish.ivy.internal.publisher.IvyPublicationIdentity;
+import org.gradle.api.tasks.TaskDependency;
 import org.gradle.api.tasks.bundling.AbstractArchiveTask;
 
 import java.io.File;
@@ -42,17 +43,17 @@ public class ArchiveTaskBasedIvyArtifact extends AbstractIvyArtifact {
 
     @Override
     protected String getDefaultType() {
-        return archiveTask.getExtension();
+        return archiveTask.getArchiveExtension().getOrNull();
     }
 
     @Override
     protected String getDefaultExtension() {
-        return archiveTask.getExtension();
+        return archiveTask.getArchiveExtension().getOrNull();
     }
 
     @Override
     protected String getDefaultClassifier() {
-        return archiveTask.getClassifier();
+        return archiveTask.getArchiveClassifier().getOrNull();
     }
 
     @Override
@@ -61,12 +62,17 @@ public class ArchiveTaskBasedIvyArtifact extends AbstractIvyArtifact {
     }
 
     @Override
-    protected TaskDependencyInternal getDefaultBuildDependencies() {
+    protected TaskDependency getDefaultBuildDependencies() {
         return buildDependencies;
     }
 
     @Override
     public File getFile() {
-        return archiveTask.getArchivePath();
+        return archiveTask.getArchiveFile().get().getAsFile();
+    }
+
+    @Override
+    public boolean shouldBePublished() {
+        return archiveTask.isEnabled();
     }
 }

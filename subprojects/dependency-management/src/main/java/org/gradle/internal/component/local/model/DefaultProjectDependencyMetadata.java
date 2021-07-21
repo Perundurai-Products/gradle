@@ -18,18 +18,21 @@ package org.gradle.internal.component.local.model;
 
 import org.gradle.api.artifacts.component.ComponentSelector;
 import org.gradle.api.artifacts.component.ProjectComponentSelector;
+import org.gradle.api.capabilities.Capability;
 import org.gradle.api.internal.attributes.AttributesSchemaInternal;
 import org.gradle.api.internal.attributes.ImmutableAttributes;
 import org.gradle.internal.component.model.ComponentResolveMetadata;
 import org.gradle.internal.component.model.ConfigurationMetadata;
 import org.gradle.internal.component.model.DependencyMetadata;
 import org.gradle.internal.component.model.ExcludeMetadata;
+import org.gradle.internal.component.model.ForcingDependencyMetadata;
 import org.gradle.internal.component.model.IvyArtifactName;
 
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 
-public class DefaultProjectDependencyMetadata implements DependencyMetadata {
+public class DefaultProjectDependencyMetadata implements ForcingDependencyMetadata {
     private final ProjectComponentSelector selector;
     private final DependencyMetadata delegate;
     private final boolean isTransitive;
@@ -59,13 +62,26 @@ public class DefaultProjectDependencyMetadata implements DependencyMetadata {
     }
 
     @Override
+    public DependencyMetadata withTargetAndArtifacts(ComponentSelector target, List<IvyArtifactName> artifacts) {
+        if (target.equals(selector) && delegate.getArtifacts().equals(artifacts)) {
+            return this;
+        }
+        return delegate.withTargetAndArtifacts(target, artifacts);
+    }
+
+    @Override
     public boolean isChanging() {
         return delegate.isChanging();
     }
 
     @Override
     public boolean isConstraint() {
-        return false;
+        return delegate.isConstraint();
+    }
+
+    @Override
+    public boolean isEndorsingStrictVersions() {
+        return delegate.isEndorsingStrictVersions();
     }
 
     @Override
@@ -79,8 +95,8 @@ public class DefaultProjectDependencyMetadata implements DependencyMetadata {
     }
 
     @Override
-    public List<ConfigurationMetadata> selectConfigurations(ImmutableAttributes consumerAttributes, ComponentResolveMetadata targetComponent, AttributesSchemaInternal consumerSchema) {
-        return delegate.selectConfigurations(consumerAttributes, targetComponent, consumerSchema);
+    public List<ConfigurationMetadata> selectConfigurations(ImmutableAttributes consumerAttributes, ComponentResolveMetadata targetComponent, AttributesSchemaInternal consumerSchema, Collection<? extends Capability> explicitRequestedCapabilities) {
+        return delegate.selectConfigurations(consumerAttributes, targetComponent, consumerSchema, explicitRequestedCapabilities);
     }
 
     @Override
@@ -93,4 +109,19 @@ public class DefaultProjectDependencyMetadata implements DependencyMetadata {
         return delegate.withReason(reason);
     }
 
+    @Override
+    public boolean isForce() {
+        if (delegate instanceof ForcingDependencyMetadata) {
+            return ((ForcingDependencyMetadata) delegate).isForce();
+        }
+        return false;
+    }
+
+    @Override
+    public ForcingDependencyMetadata forced() {
+        if (delegate instanceof ForcingDependencyMetadata) {
+            return ((ForcingDependencyMetadata) delegate).forced();
+        }
+        return this;
+    }
 }

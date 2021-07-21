@@ -17,7 +17,7 @@
 package org.gradle.integtests
 
 import org.gradle.integtests.fixtures.versions.ReleasedVersionDistributions
-import org.gradle.util.DistributionLocator
+import org.gradle.util.internal.DistributionLocator
 import org.gradle.util.GradleVersion
 import org.gradle.util.Requires
 import org.gradle.util.TestPrecondition
@@ -25,7 +25,8 @@ import spock.lang.Specification
 
 @Requires(TestPrecondition.ONLINE)
 class DistributionLocatorIntegrationTest extends Specification {
-
+    private static final int CONNECTION_TIMEOUT_SECONDS = 60 * 1000
+    private static final int READ_TIMEOUT_SECONDS = 60 * 1000
     def locator = new DistributionLocator()
     def distributions = new ReleasedVersionDistributions()
 
@@ -44,6 +45,8 @@ class DistributionLocatorIntegrationTest extends Specification {
 
     void urlExist(URI url) {
         HttpURLConnection connection = url.toURL().openConnection()
+        connection.setConnectTimeout(CONNECTION_TIMEOUT_SECONDS)
+        connection.setReadTimeout(READ_TIMEOUT_SECONDS)
         connection.requestMethod = "HEAD"
         connection.connect()
         assert connection.responseCode == 200

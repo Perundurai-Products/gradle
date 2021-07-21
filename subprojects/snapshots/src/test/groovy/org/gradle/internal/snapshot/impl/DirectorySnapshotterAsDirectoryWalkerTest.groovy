@@ -23,24 +23,23 @@ import org.gradle.api.internal.cache.StringInterner
 import org.gradle.api.internal.file.TestFiles
 import org.gradle.api.internal.file.collections.AbstractDirectoryWalkerTest
 import org.gradle.api.internal.file.collections.DirectoryFileTree
-import org.gradle.api.internal.file.collections.jdk7.Jdk7DirectoryWalker
 import org.gradle.api.specs.Spec
 import org.gradle.api.tasks.util.PatternSet
-import org.gradle.internal.Factory
-import org.gradle.internal.MutableBoolean
-import org.gradle.internal.snapshot.DirectorySnapshot
-import org.gradle.internal.snapshot.FileSystemLocationSnapshot
-import org.gradle.internal.snapshot.FileSystemSnapshotVisitor
+import org.gradle.internal.fingerprint.impl.PatternSetSnapshottingFilter
+import org.gradle.internal.snapshot.SnapshotVisitorUtil
+import org.gradle.internal.snapshot.SnapshottingFilter
 
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 class DirectorySnapshotterAsDirectoryWalkerTest extends AbstractDirectoryWalkerTest<DirectorySnapshotter> {
+
     def "directory snapshotter returns the same details as directory walker"() {
         given:
         def rootDir = tmpDir.createDir("root")
         generateFilesAndSubDirectories(rootDir, 10, 5, 3, 1, new AtomicInteger(0))
         def patternSet = Mock(PatternSet)
-        List<FileVisitDetails> visitedWithJdk7Walker = walkFiles(rootDir, new Jdk7DirectoryWalker(TestFiles.fileSystem()))
+        List<FileVisitDetails> visitedWithJdk7Walker = walkFiles(rootDir)
         Spec<FileTreeElement> assertingSpec = new Spec<FileTreeElement>() {
             @Override
             boolean isSatisfiedBy(FileTreeElement element) {
@@ -59,7 +58,7 @@ class DirectorySnapshotterAsDirectoryWalkerTest extends AbstractDirectoryWalkerT
         }
 
         when:
-        directorySnapshotter().snapshot(rootDir.absolutePath, patternSet, new MutableBoolean())
+        directorySnapshotter().snapshot(rootDir.absolutePath, directoryWalkerPredicate(patternSet), new AtomicBoolean())
         then:
         1 * patternSet.getAsSpec() >> assertingSpec
 
@@ -73,12 +72,12 @@ class DirectorySnapshotterAsDirectoryWalkerTest extends AbstractDirectoryWalkerT
         ]
     }
 
-    private static DirectorySnapshotter directorySnapshotter() {
-        new DirectorySnapshotter(TestFiles.fileHasher(), TestFiles.fileSystem(), new StringInterner())
+    private DirectorySnapshotter directorySnapshotter() {
+        new DirectorySnapshotter(TestFiles.fileHasher(), new StringInterner(), [], Stub(DirectorySnapshotterStatistics.Collector))
     }
 
-    private static List<FileVisitDetails> walkFiles(rootDir, walkerInstance) {
-        def fileTree = new DirectoryFileTree(rootDir, new PatternSet(), { walkerInstance } as Factory, TestFiles.fileSystem(), false)
+    private static List<FileVisitDetails> walkFiles(rootDir) {
+        def fileTree = new DirectoryFileTree(rootDir, new PatternSet(), TestFiles.fileSystem(), false)
         def visited = []
         def visitClosure = { visited << it }
         def fileVisitor = [visitFile: visitClosure, visitDir: visitClosure] as FileVisitor
@@ -88,29 +87,11 @@ class DirectorySnapshotterAsDirectoryWalkerTest extends AbstractDirectoryWalkerT
 
     @Override
     protected List<String> walkDirForPaths(DirectorySnapshotter walker, File rootDir, PatternSet patternSet) {
-        def snapshot = walker.snapshot(rootDir.absolutePath, patternSet, new MutableBoolean())
-        def visited = []
-        snapshot.accept(new FileSystemSnapshotVisitor() {
-            private boolean root = true
+        def snapshot = walker.snapshot(rootDir.absolutePath, directoryWalkerPredicate(patternSet), new AtomicBoolean())
+        return SnapshotVisitorUtil.getAbsolutePaths(snapshot)
+    }
 
-            @Override
-            boolean preVisitDirectory(DirectorySnapshot directorySnapshot) {
-                if (!root) {
-                    visited << directorySnapshot.absolutePath
-                }
-                root = false
-                return true
-            }
-
-            @Override
-            void visit(FileSystemLocationSnapshot fileSnapshot) {
-                visited << fileSnapshot.absolutePath
-            }
-
-            @Override
-            void postVisitDirectory(DirectorySnapshot directorySnapshot) {
-            }
-        })
-        return visited
+    private static SnapshottingFilter.DirectoryWalkerPredicate directoryWalkerPredicate(PatternSet patternSet) {
+        return new PatternSetSnapshottingFilter(patternSet, TestFiles.fileSystem()).asDirectoryWalkerPredicate
     }
 }

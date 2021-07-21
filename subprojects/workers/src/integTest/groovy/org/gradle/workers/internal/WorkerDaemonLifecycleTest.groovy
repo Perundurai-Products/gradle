@@ -21,22 +21,23 @@ import org.gradle.integtests.fixtures.timeout.IntegrationTestTimeout
 import org.gradle.test.fixtures.ConcurrentTestUtil
 import org.gradle.util.Requires
 import org.gradle.util.TestPrecondition
+import org.gradle.workers.fixtures.WorkerExecutorFixture
 
 @IntegrationTestTimeout(180)
 class WorkerDaemonLifecycleTest extends AbstractDaemonWorkerExecutorIntegrationSpec {
     String logSnapshot = ""
 
     def "worker daemons are reused across builds"() {
-        fixture.withRunnableClassInBuildScript()
+        fixture.withWorkActionClassInBuildScript()
         buildFile << """
             import org.gradle.workers.internal.WorkerDaemonFactory
-            
+
             task runInWorker1(type: WorkerTask) {
-                isolationMode = IsolationMode.PROCESS
+                isolationMode = 'processIsolation'
             }
-            
+
             task runInWorker2(type: WorkerTask) {
-                isolationMode = IsolationMode.PROCESS
+                isolationMode = 'processIsolation'
                 doFirst {
                     def all = services.get(WorkerDaemonFactory.class).clientsManager.allClients.size()
                     def idle = services.get(WorkerDaemonFactory.class).clientsManager.idleClients.size()
@@ -56,14 +57,14 @@ class WorkerDaemonLifecycleTest extends AbstractDaemonWorkerExecutorIntegrationS
     }
 
     def "worker daemons can be restarted when daemon is stopped"() {
-        fixture.withRunnableClassInBuildScript()
+        fixture.withWorkActionClassInBuildScript()
         buildFile << """
             task runInWorker1(type: WorkerTask) {
-                isolationMode = IsolationMode.PROCESS
+                isolationMode = 'processIsolation'
             }
-            
+
             task runInWorker2(type: WorkerTask) {
-                isolationMode = IsolationMode.PROCESS
+                isolationMode = 'processIsolation'
             }
         """
 
@@ -81,10 +82,10 @@ class WorkerDaemonLifecycleTest extends AbstractDaemonWorkerExecutorIntegrationS
     }
 
     def "worker daemons are stopped when daemon is stopped"() {
-        fixture.withRunnableClassInBuildScript()
+        fixture.withWorkActionClassInBuildScript()
         buildFile << """
             task runInWorker(type: WorkerTask) {
-                isolationMode = IsolationMode.PROCESS
+                isolationMode = 'processIsolation'
             }
         """
 
@@ -104,14 +105,14 @@ class WorkerDaemonLifecycleTest extends AbstractDaemonWorkerExecutorIntegrationS
     }
 
     def "worker daemons are stopped and not reused when log level is changed"() {
-        fixture.withRunnableClassInBuildScript()
+        fixture.withWorkActionClassInBuildScript()
         buildFile << """
             task runInWorker1(type: WorkerTask) {
-                isolationMode = IsolationMode.PROCESS
+                isolationMode = 'processIsolation'
             }
-            
+
             task runInWorker2(type: WorkerTask) {
-                isolationMode = IsolationMode.PROCESS
+                isolationMode = 'processIsolation'
             }
         """
 
@@ -134,14 +135,14 @@ class WorkerDaemonLifecycleTest extends AbstractDaemonWorkerExecutorIntegrationS
     }
 
     def "worker daemons are not reused when classpath changes"() {
-        fixture.withRunnableClassInBuildScript()
+        fixture.withWorkActionClassInBuildScript()
         buildFile << """
             task runInWorker1(type: WorkerTask) {
-                isolationMode = IsolationMode.PROCESS
+                isolationMode = 'processIsolation'
             }
-            
+
             task runInWorker2(type: WorkerTask) {
-                isolationMode = IsolationMode.PROCESS
+                isolationMode = 'processIsolation'
             }
         """
 
@@ -170,18 +171,17 @@ class WorkerDaemonLifecycleTest extends AbstractDaemonWorkerExecutorIntegrationS
     }
 
     def "worker daemons are not reused when they fail unexpectedly"() {
+        workerExecutorThatCanFailUnexpectedly.writeToBuildFile()
         buildFile << """
-            $runnableThatCanFailUnexpectedly
-
             task runInWorker1(type: WorkerTask) {
-                isolationMode = IsolationMode.PROCESS
+                isolationMode = 'processIsolation'
             }
-            
+
             task runInWorker2(type: WorkerTask) {
                 // This will cause the worker process to fail with exit code 127
                 list = runInWorker1.list + ["poisonPill"]
 
-                isolationMode = IsolationMode.PROCESS
+                isolationMode = 'processIsolation'
             }
         """
 
@@ -200,16 +200,16 @@ class WorkerDaemonLifecycleTest extends AbstractDaemonWorkerExecutorIntegrationS
     }
 
     def "only compiler daemons are stopped with the build session"() {
-        fixture.withRunnableClassInBuildScript()
+        fixture.withWorkActionClassInBuildScript()
         file('src/main/java').createDir()
         file('src/main/java/Test.java') << "public class Test {}"
         buildFile << """
             apply plugin: "java"
-            
+
             task runInWorker(type: WorkerTask) {
-                isolationMode = IsolationMode.PROCESS
+                isolationMode = 'processIsolation'
             }
-            
+
             tasks.withType(JavaCompile) {
                 options.fork = true
             }
@@ -234,10 +234,10 @@ class WorkerDaemonLifecycleTest extends AbstractDaemonWorkerExecutorIntegrationS
 
     @Requires(TestPrecondition.UNIX)
     def "worker daemons exit when the parent build daemon is killed"() {
-        fixture.withRunnableClassInBuildScript()
+        fixture.withWorkActionClassInBuildScript()
         buildFile << """
             task runInWorker(type: WorkerTask) {
-                isolationMode = IsolationMode.PROCESS
+                isolationMode = 'processIsolation'
             }
         """
 
@@ -274,38 +274,13 @@ class WorkerDaemonLifecycleTest extends AbstractDaemonWorkerExecutorIntegrationS
         return daemons.daemon.log - logSnapshot
     }
 
-    String getRunnableThatCanFailUnexpectedly() {
-        return """
-            import java.io.File;
-            import java.util.List;
-            import org.gradle.other.Foo;
-            import org.gradle.test.FileHelper;
-            import java.util.UUID;
-            import javax.inject.Inject;
-
-            public class TestRunnable implements Runnable {
-                private final List<String> files;
-                protected final File outputDir;
-                private final Foo foo;
-                private static final String id = UUID.randomUUID().toString();
-
-                @Inject
-                public TestRunnable(List<String> files, File outputDir, Foo foo) {
-                    this.files = files;
-                    this.outputDir = outputDir;
-                    this.foo = foo;
-                }
-
-                public void run() {
-                    for (String name : files) {
-                        File outputFile = new File(outputDir, name);
-                        FileHelper.write(id, outputFile);
-                    }
-                    if (files.contains("poisonPill")) {
-                        System.exit(127);
-                    }
-                }
+    WorkerExecutorFixture.WorkActionClass getWorkerExecutorThatCanFailUnexpectedly() {
+        def executionClass = fixture.workActionThatCreatesFiles
+        executionClass.action += """
+            if (getParameters().getFiles().contains("poisonPill")) {
+                System.exit(127);
             }
         """
+        return executionClass
     }
 }

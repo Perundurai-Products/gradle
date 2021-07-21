@@ -19,8 +19,6 @@ import org.gradle.api.DefaultTask
 import org.gradle.api.internal.ConventionTask
 import org.gradle.api.plugins.quality.Checkstyle
 import org.gradle.api.plugins.quality.CodeNarc
-import org.gradle.api.plugins.quality.FindBugs
-import org.gradle.api.plugins.quality.JDepend
 import org.gradle.api.plugins.quality.Pmd
 import org.gradle.api.tasks.Copy
 import org.gradle.api.tasks.SourceTask
@@ -45,6 +43,7 @@ import org.gradle.plugins.ide.idea.GenerateIdeaProject
 import org.gradle.plugins.ide.idea.GenerateIdeaWorkspace
 import org.gradle.plugins.signing.Sign
 import org.gradle.util.GradleVersion
+
 /**
  * Tests that task classes compiled against earlier versions of Gradle are still compatible.
  */
@@ -70,9 +69,7 @@ class TaskSubclassingBinaryCompatibilityCrossVersionSpec extends CrossVersionInt
             CodeNarc,
             Checkstyle,
             Ear,
-            FindBugs,
             Pmd,
-            JDepend,
             Sign,
             org.gradle.api.tasks.application.CreateStartScripts,
             GenerateEclipseJdt,
@@ -106,12 +103,21 @@ class TaskSubclassingBinaryCompatibilityCrossVersionSpec extends CrossVersionInt
         }
 
         Map<String, String> subclasses = taskClasses.collectEntries { ["custom" + it.name.replace(".", "_"), it.name] }
-
+        def apiDepConf = "implementation"
+        if (previous.version < GradleVersion.version("7.0-rc-1")) {
+            apiDepConf = "compile"
+        }
+        def groovyDepConf
+        if (previous.version < GradleVersion.version("1.4-rc-1")) {
+            groovyDepConf = "groovy"
+        } else {
+            groovyDepConf = apiDepConf
+        }
         file("producer/build.gradle") << """
             apply plugin: 'groovy'
             dependencies {
-                ${previous.version < GradleVersion.version("1.4-rc-1") ? "groovy" : "compile"} localGroovy()
-                compile gradleApi()
+                ${groovyDepConf} localGroovy()
+                ${apiDepConf} gradleApi()
             }
         """
 
@@ -147,7 +153,7 @@ apply plugin: SomePlugin
 
         expect:
         version previous withTasks 'assemble' inDirectory(file("producer")) run()
-        version current withTasks 'tasks' requireGradleDistribution() run()
+        version current withTasks 'tasks' requireDaemon() requireIsolatedDaemons() run()
     }
 
     def "task can use all methods declared by Task interface that AbstractTask specialises"() {
@@ -157,11 +163,21 @@ apply plugin: SomePlugin
         file("someDir").createDir()
 
         when:
+        def apiDepConf = "implementation"
+        if (previous.version < GradleVersion.version("7.0-rc-1")) {
+            apiDepConf = "compile"
+        }
+        def groovyDepConf
+        if (previous.version < GradleVersion.version("1.4-rc-1")) {
+            groovyDepConf = "groovy"
+        } else {
+            groovyDepConf = apiDepConf
+        }
         file("producer/build.gradle") << """
             apply plugin: 'groovy'
             dependencies {
-                ${previous.version < GradleVersion.version("1.4-rc-1") ? "groovy" : "compile"} localGroovy()
-                compile gradleApi()
+                ${groovyDepConf} localGroovy()
+                ${apiDepConf} gradleApi()
             }
         """
 
@@ -179,12 +195,14 @@ apply plugin: SomePlugin
                     ${previousVersionLeaksInternal ? "((TaskInputs)getInputs())" : "getInputs()"}.file("someFile");
                     ${previousVersionLeaksInternal ? "((TaskInputs)getInputs())" : "getInputs()"}.files("anotherFile", "yetAnotherFile");
                     ${previousVersionLeaksInternal ? "((TaskInputs)getInputs())" : "getInputs()"}.dir("someDir");
-                    ${previousVersionLeaksInternal ? "((TaskInputs)getInputs())" : "getInputs()"}.property("input", "value");
+                    ${previous.version >= GradleVersion.version("4.3")
+                        ? 'getInputs().property("input", "value");'
+                        : ""}
                     Map<String, Object> mapValues = new HashMap<String, Object>();
                     mapValues.put("mapInput", "mapValue");
                     ${previousVersionLeaksInternal ? "((TaskInputs)getInputs())" : "getInputs()"}.properties(mapValues);
                 }
-                
+
                 @TaskAction
                 public void doGet() {
                     // Note: not all of these specialise at time of writing, but may do in the future
@@ -208,7 +226,7 @@ apply plugin: SomePlugin
         """
 
         then:
-        version previous requireGradleDistribution() withTasks 'assemble' inDirectory(file("producer")) run()
-        version current requireGradleDistribution() withTasks 't' run()
+        version previous withTasks 'assemble' inDirectory(file("producer")) run()
+        version current requireDaemon() requireIsolatedDaemons() withTasks 't' run()
     }
 }

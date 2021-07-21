@@ -17,23 +17,34 @@
 package org.gradle.api.internal.artifacts.transform;
 
 import org.gradle.api.artifacts.component.ComponentIdentifier;
-import org.gradle.api.internal.artifacts.ResolverResults;
-import org.gradle.api.internal.tasks.WorkNodeAction;
-import org.gradle.internal.Factory;
+import org.gradle.api.artifacts.result.ResolutionResult;
+import org.gradle.api.internal.DomainObjectContext;
+import org.gradle.api.internal.artifacts.configurations.ResolutionResultProvider;
+import org.gradle.internal.model.CalculatedValueContainerFactory;
 
 public class DefaultExtraExecutionGraphDependenciesResolverFactory implements ExtraExecutionGraphDependenciesResolverFactory {
-    private final Factory<ResolverResults> graphResults;
-    private final Factory<ResolverResults> artifactResults;
-    private final WorkNodeAction graphResolveAction;
+    public static final TransformUpstreamDependenciesResolver NO_DEPENDENCIES_RESOLVER = transformationStep -> DefaultTransformUpstreamDependenciesResolver.NO_DEPENDENCIES;
 
-    public DefaultExtraExecutionGraphDependenciesResolverFactory(Factory<ResolverResults> graphResults, Factory<ResolverResults> artifactResults, WorkNodeAction graphResolveAction) {
-        this.graphResults = graphResults;
-        this.artifactResults = artifactResults;
-        this.graphResolveAction = graphResolveAction;
+    private final DomainObjectContext owner;
+    private final FilteredResultFactory filteredResultFactory;
+    private final CalculatedValueContainerFactory calculatedValueContainerFactory;
+    private final ResolutionResultProvider<ResolutionResult> resolutionResultProvider;
+
+    public DefaultExtraExecutionGraphDependenciesResolverFactory(ResolutionResultProvider<ResolutionResult> resolutionResultProvider,
+                                                                 DomainObjectContext owner,
+                                                                 CalculatedValueContainerFactory calculatedValueContainerFactory,
+                                                                 FilteredResultFactory filteredResultFactory) {
+        this.resolutionResultProvider = resolutionResultProvider;
+        this.owner = owner;
+        this.filteredResultFactory = filteredResultFactory;
+        this.calculatedValueContainerFactory = calculatedValueContainerFactory;
     }
 
     @Override
-    public ExecutionGraphDependenciesResolver create(ComponentIdentifier componentIdentifier) {
-        return new DefaultExecutionGraphDependenciesResolver(componentIdentifier, graphResults, artifactResults, graphResolveAction);
+    public TransformUpstreamDependenciesResolver create(ComponentIdentifier componentIdentifier, Transformation transformation) {
+        if (!transformation.requiresDependencies()) {
+            return NO_DEPENDENCIES_RESOLVER;
+        }
+        return new DefaultTransformUpstreamDependenciesResolver(componentIdentifier, resolutionResultProvider, owner, filteredResultFactory, calculatedValueContainerFactory);
     }
 }

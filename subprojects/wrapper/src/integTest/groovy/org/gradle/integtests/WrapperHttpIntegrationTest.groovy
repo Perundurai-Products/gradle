@@ -16,16 +16,18 @@
 
 package org.gradle.integtests
 
-import org.gradle.api.JavaVersion
 import org.gradle.integtests.fixtures.TestResources
+import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
 import org.gradle.test.fixtures.server.http.BlockingHttpServer
 import org.gradle.test.fixtures.server.http.TestProxyServer
 import org.junit.Rule
+import spock.lang.IgnoreIf
 import spock.lang.Issue
 
-import static org.hamcrest.Matchers.containsString
-import static org.junit.Assert.assertThat
+import static org.hamcrest.CoreMatchers.containsString
+import static org.hamcrest.MatcherAssert.assertThat
 
+@IgnoreIf({ GradleContextualExecuter.embedded }) // wrapperExecuter requires a real distribution
 class WrapperHttpIntegrationTest extends AbstractWrapperIntegrationSpec {
     @Rule BlockingHttpServer server = new BlockingHttpServer()
     @Rule TestProxyServer proxyServer = new TestProxyServer()
@@ -94,6 +96,38 @@ class WrapperHttpIntegrationTest extends AbstractWrapperIntegrationSpec {
         noExceptionThrown()
     }
 
+    @Issue('https://github.com/gradle/gradle-private/issues/3032')
+    def "fails with reasonable message when download times out"() {
+        given:
+        prepareWrapper("http://localhost:${server.port}")
+        server.expectAndBlock(server.get("/gradlew/dist"))
+
+        when:
+        wrapperExecuter.withStackTraceChecksDisabled()
+        def failure = wrapperExecuter.runWithFailure()
+
+        then:
+        failure.assertHasErrorOutput("Downloading from http://localhost:${server.port}/gradlew/dist failed: timeout")
+        failure.assertHasErrorOutput('Read timed out')
+    }
+
+    @Issue('https://github.com/gradle/gradle-private/issues/3032')
+    def "does not leak credentials when download times out"() {
+        given:
+        prepareWrapper("http://username:password@localhost:${server.port}")
+        server.expectAndBlock(server.get("/gradlew/dist"))
+
+        when:
+        wrapperExecuter.withStackTraceChecksDisabled()
+        def failure = wrapperExecuter.runWithFailure()
+
+        then:
+        failure.assertHasErrorOutput("Downloading from http://localhost:${server.port}/gradlew/dist failed: timeout")
+        failure.assertHasErrorOutput('Read timed out')
+        failure.assertNotOutput("username")
+        failure.assertNotOutput("password")
+    }
+
     def "downloads wrapper via proxy"() {
         given:
         proxyServer.start()
@@ -101,7 +135,7 @@ class WrapperHttpIntegrationTest extends AbstractWrapperIntegrationSpec {
         file("gradle.properties") << """
     systemProp.http.proxyHost=localhost
     systemProp.http.proxyPort=${proxyServer.port}
-    systemProp.http.nonProxyHosts=${JavaVersion.current() >= JavaVersion.VERSION_1_7 ? '' : '~localhost'}
+    systemProp.http.nonProxyHosts=
 """
         server.expect(server.get("/gradlew/dist").sendFile(distribution.binDistribution))
 
@@ -125,7 +159,7 @@ class WrapperHttpIntegrationTest extends AbstractWrapperIntegrationSpec {
         file("gradle.properties") << """
     systemProp.http.proxyHost=localhost
     systemProp.http.proxyPort=${proxyServer.port}
-    systemProp.http.nonProxyHosts=${JavaVersion.current() >= JavaVersion.VERSION_1_7 ? '' : '~localhost'}
+    systemProp.http.nonProxyHosts=
     systemProp.http.proxyUser=my_user
     systemProp.http.proxyPassword=my_password
 """
@@ -225,7 +259,7 @@ class WrapperHttpIntegrationTest extends AbstractWrapperIntegrationSpec {
         file("gradle.properties").writeProperties(
             'systemProp.http.proxyHost': 'localhost',
             'systemProp.http.proxyPort': proxyServer.port as String,
-            'systemProp.http.nonProxyHosts': JavaVersion.current() >= JavaVersion.VERSION_1_7 ? '' : '~localhost',
+            'systemProp.http.nonProxyHosts': '',
             'systemProp.http.proxyUser': proxyUsername,
             'systemProp.http.proxyPassword': proxyPassword
         )

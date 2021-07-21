@@ -16,6 +16,7 @@
 
 package org.gradle.performance.results
 
+import org.gradle.performance.results.report.TestPageGenerator
 import spock.lang.Specification
 
 class TestPageGeneratorTest extends Specification {
@@ -35,6 +36,15 @@ class TestPageGeneratorTest extends Specification {
         then:
         urls[0].url == 'https://github.com/gradle/gradle/commit/123456'
         urls[1].url == 'https://github.com/gradle/dotcom/commit/abcdefg'
+    }
+
+    def "shortens label for commit hash"() {
+        when:
+        def urls = new TestPageGenerator().createGitHubLinks(['d47660cb46163d058f8de40b73b2f99a11a654a7'])
+
+        then:
+        urls[0].label == 'd47660c'
+        urls[0].url == 'https://github.com/gradle/gradle/commit/d47660cb46163d058f8de40b73b2f99a11a654a7'
     }
 
     def "accepts no vcs commit ids"() {

@@ -25,7 +25,13 @@ public interface FileSystemSnapshot {
      */
     FileSystemSnapshot EMPTY = new FileSystemSnapshot() {
         @Override
-        public void accept(FileSystemSnapshotVisitor visitor) {
+        public SnapshotVisitResult accept(FileSystemSnapshotHierarchyVisitor visitor) {
+            return SnapshotVisitResult.CONTINUE;
+        }
+
+        @Override
+        public SnapshotVisitResult accept(RelativePathTracker pathTracker, RelativePathTrackingFileSystemSnapshotHierarchyVisitor visitor) {
+            return SnapshotVisitResult.CONTINUE;
         }
     };
 
@@ -34,5 +40,12 @@ public interface FileSystemSnapshot {
      *
      * The walk is depth first.
      */
-    void accept(FileSystemSnapshotVisitor visitor);
+    SnapshotVisitResult accept(FileSystemSnapshotHierarchyVisitor visitor);
+
+    /**
+     * Walks the whole hierarchy represented by this snapshot.
+     *
+     * The walk is depth first.
+     */
+    SnapshotVisitResult accept(RelativePathTracker pathTracker, RelativePathTrackingFileSystemSnapshotHierarchyVisitor visitor);
 }

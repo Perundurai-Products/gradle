@@ -17,14 +17,14 @@
 package org.gradle.integtests.resolve.maven
 
 import org.gradle.integtests.fixtures.AbstractHttpDependencyResolutionTest
-import org.gradle.integtests.fixtures.FeaturePreviewsFixture
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.integtests.fixtures.resolve.ResolveTestFixture
 import spock.lang.Unroll
 
-import static org.gradle.api.internal.artifacts.ivyservice.ivyresolve.parser.ModuleMetadataParser.FORMAT_VERSION
+import static org.gradle.api.internal.artifacts.ivyservice.ivyresolve.parser.GradleModuleMetadataParser.FORMAT_VERSION
 
 class MavenRemoteDependencyWithGradleMetadataResolutionIntegrationTest extends AbstractHttpDependencyResolutionTest {
-    def resolve = new ResolveTestFixture(buildFile).expectDefaultConfiguration("runtime")
+    def resolve = new ResolveTestFixture(buildFile, "compile").expectDefaultConfiguration("runtime")
 
     def setup() {
         resolve.prepare()
@@ -32,18 +32,18 @@ class MavenRemoteDependencyWithGradleMetadataResolutionIntegrationTest extends A
         server.start()
 
         settingsFile << "rootProject.name = 'test'"
-        FeaturePreviewsFixture.enableGradleMetadata(settingsFile)
 
     }
 
+    @ToBeFixedForConfigurationCache
     def "downloads and caches the module metadata when present"() {
         def m = mavenHttpRepo.module("test", "a", "1.2").withModuleMetadata().publish()
 
         given:
         buildFile << """
 repositories {
-    maven { 
-        url = '${mavenHttpRepo.uri}' 
+    maven {
+        url = '${mavenHttpRepo.uri}'
     }
 }
 configurations { compile }
@@ -52,6 +52,7 @@ dependencies {
 }
 """
 
+        m.pom.expectGet()
         m.moduleMetadata.expectGet()
         m.artifact.expectGet()
 
@@ -78,6 +79,7 @@ dependencies {
 
         when:
         server.resetExpectations()
+        m.pom.expectHead()
         m.moduleMetadata.expectHead()
         m.artifact.expectHead()
 
@@ -92,14 +94,15 @@ dependencies {
         }
     }
 
+    @ToBeFixedForConfigurationCache
     def "skips module metadata when not present and caches result"() {
         def m = mavenHttpRepo.module("test", "a", "1.2").publish()
 
         given:
         buildFile << """
 repositories {
-    maven { 
-        url = '${mavenHttpRepo.uri}' 
+    maven {
+        url = '${mavenHttpRepo.uri}'
     }
 }
 configurations { compile }
@@ -108,7 +111,6 @@ dependencies {
 }
 """
 
-        m.moduleMetadata.expectGetMissing()
         m.pom.expectGet()
         m.artifact.expectGet()
 
@@ -135,7 +137,6 @@ dependencies {
 
         when:
         server.resetExpectations()
-        m.moduleMetadata.expectGetMissing()
         m.pom.expectHead()
         m.artifact.expectHead()
 
@@ -150,6 +151,7 @@ dependencies {
         }
     }
 
+    @ToBeFixedForConfigurationCache
     def "uses dependencies and files from selected variant"() {
         def c = mavenHttpRepo.module("test", "c", "2.2").publish()
         def b = mavenHttpRepo.module("test", "b", "2.0").publish()
@@ -184,15 +186,15 @@ dependencies {
 """
 
         given:
-         "rootProject.name = 'test'"
+        "rootProject.name = 'test'"
         buildFile << """
 repositories {
-    maven { 
-        url = '${mavenHttpRepo.uri}' 
+    maven {
+        url = '${mavenHttpRepo.uri}'
     }
 }
 def attr = Attribute.of("buildType", String)
-configurations { 
+configurations {
     debug { attributes.attribute(attr, "debug") }
     release { attributes.attribute(attr, "release") }
 }
@@ -208,10 +210,10 @@ task checkRelease {
 }
 """
 
+        a.pom.expectGet()
         a.moduleMetadata.expectGet()
         a.artifact(classifier: 'debug').expectGet()
         b.pom.expectGet()
-        b.moduleMetadata.expectGetMissing()
         b.artifact.expectGet()
 
         expect:
@@ -221,7 +223,6 @@ task checkRelease {
         server.resetExpectations()
         a.artifact(classifier: 'release').expectGet()
         c.pom.expectGet()
-        c.moduleMetadata.expectGetMissing()
         c.artifact.expectGet()
 
         and:
@@ -232,6 +233,7 @@ task checkRelease {
         succeeds("checkRelease")
     }
 
+    @ToBeFixedForConfigurationCache
     def "variant can define zero files or multiple files"() {
         def b = mavenHttpRepo.module("test", "b", "2.0").publish()
         def a = mavenHttpRepo.module("test", "a", "1.2")
@@ -248,9 +250,9 @@ task checkRelease {
             "attributes": {
                 "buildType": "debug"
             },
-            "files": [ 
+            "files": [
                 { "name": "a-1.2-api.jar", "url": "a-1.2-api.jar" },
-                { "name": "a-1.2-runtime.jar", "url": "a-1.2-runtime.jar" } 
+                { "name": "a-1.2-runtime.jar", "url": "a-1.2-runtime.jar" }
             ],
             "dependencies": [ { "group": "test", "module": "b", "version": { "prefers": "2.0" } } ]
         },
@@ -268,12 +270,12 @@ task checkRelease {
         given:
         buildFile << """
 repositories {
-    maven { 
-        url = '${mavenHttpRepo.uri}' 
+    maven {
+        url = '${mavenHttpRepo.uri}'
     }
 }
 def attr = Attribute.of("buildType", String)
-configurations { 
+configurations {
     debug { attributes.attribute(attr, "debug") }
     release { attributes.attribute(attr, "release") }
 }
@@ -289,11 +291,11 @@ task checkRelease {
 }
 """
 
+        a.pom.expectGet()
         a.moduleMetadata.expectGet()
         a.artifact(classifier: 'api').expectGet()
         a.artifact(classifier: 'runtime').expectGet()
         b.pom.expectGet()
-        b.moduleMetadata.expectGetMissing()
         b.artifact.expectGet()
 
         expect:
@@ -312,17 +314,18 @@ task checkRelease {
 
         and:
         server.resetExpectations()
+        a.pom.expectHead()
         a.moduleMetadata.expectHead()
         a.artifact(classifier: 'api').expectHead()
         a.artifact(classifier: 'runtime').expectHead()
         b.pom.expectHead()
-        b.moduleMetadata.expectGetMissing()
         b.artifact.expectHead()
 
         executer.withArgument("--refresh-dependencies")
         succeeds("checkDebug")
     }
 
+    @ToBeFixedForConfigurationCache
     def "variant can define files whose names are different to their maven contention location"() {
         def a = mavenHttpRepo.module("test", "a", "1.2")
             .withModuleMetadata()
@@ -335,10 +338,10 @@ task checkRelease {
     "variants": [
         {
             "name": "lot-o-files",
-            "files": [ 
+            "files": [
                 { "name": "a_main.jar", "url": "a-1.2.jar" },
                 { "name": "a_extra.jar", "url": "a-1.2-extra.jar" },
-                { "name": "a.zip", "url": "a-1.2.zip" } 
+                { "name": "a.zip", "url": "a-1.2.zip" }
             ]
         }
     ]
@@ -348,11 +351,11 @@ task checkRelease {
         given:
         buildFile << """
 repositories {
-    maven { 
-        url = '${mavenHttpRepo.uri}' 
+    maven {
+        url = '${mavenHttpRepo.uri}'
     }
 }
-configurations { 
+configurations {
     debug
 }
 dependencies {
@@ -363,6 +366,7 @@ task checkDebug {
 }
 """
 
+        a.pom.expectGet()
         a.moduleMetadata.expectGet()
         a.getArtifact().expectGet()
         a.getArtifact(type: 'zip').expectGet()
@@ -380,6 +384,7 @@ task checkDebug {
 
         and:
         server.resetExpectations()
+        a.pom.expectHead()
         a.moduleMetadata.expectHead()
         a.getArtifact().expectHead()
         a.getArtifact(type: 'zip').expectHead()
@@ -389,6 +394,7 @@ task checkDebug {
         succeeds("checkDebug")
     }
 
+    @ToBeFixedForConfigurationCache
     def "variant can define files whose names and locations do not match maven convention"() {
         def a = mavenHttpRepo.module("test", "a", "1.2")
             .withModuleMetadata()
@@ -404,12 +410,12 @@ task checkDebug {
     "variants": [
         {
             "name": "lot-o-files",
-            "files": [ 
+            "files": [
                 { "name": "file1.jar", "url": "file1.jar" },
                 { "name": "a-1.2.jar", "url": "file2.jar" },
-                { "name": "a-3.jar", "url": "../sibling/file3.jar" }, 
-                { "name": "file4.jar", "url": "child/file4.jar" }, 
-                { "name": "a_5.jar", "url": "/repo/a-1.2-5.jar" } 
+                { "name": "a-3.jar", "url": "../sibling/file3.jar" },
+                { "name": "file4.jar", "url": "child/file4.jar" },
+                { "name": "a_5.jar", "url": "/repo/a-1.2-5.jar" }
             ]
         }
     ]
@@ -419,11 +425,11 @@ task checkDebug {
         given:
         buildFile << """
 repositories {
-    maven { 
-        url = '${mavenHttpRepo.uri}' 
+    maven {
+        url = '${mavenHttpRepo.uri}'
     }
 }
-configurations { 
+configurations {
     debug
 }
 dependencies {
@@ -434,6 +440,7 @@ task checkDebug {
 }
 """
 
+        a.pom.expectGet()
         a.moduleMetadata.expectGet()
         a.getArtifact("file1.jar").expectGet()
         a.getArtifact("file2.jar").expectGet()
@@ -453,6 +460,7 @@ task checkDebug {
 
         and:
         server.resetExpectations()
+        a.pom.expectHead()
         a.moduleMetadata.expectHead()
         a.getArtifact("file1.jar").expectHead()
         a.getArtifact("file2.jar").expectHead()
@@ -525,12 +533,12 @@ task checkDebug {
         given:
         buildFile << """
 repositories {
-    maven { 
-        url = '${mavenHttpRepo.uri}' 
+    maven {
+        url = '${mavenHttpRepo.uri}'
     }
 }
 def attr = Attribute.of("buildType", String)
-configurations { 
+configurations {
     debug { attributes.attribute(attr, "debug") }
     release { attributes.attribute(attr, "release") }
 }
@@ -546,10 +554,13 @@ task checkRelease {
 }
 """
 
+        a.pom.expectGet()
         a.moduleMetadata.expectGet()
         a.artifact(classifier: 'debug').expectGet()
+        b.pom.expectGet()
         b.moduleMetadata.expectGet()
         b.artifact.expectGet()
+        c.pom.expectGet()
         c.moduleMetadata.expectGet()
         c.artifact(classifier: 'debug').expectGet()
 
@@ -564,6 +575,7 @@ task checkRelease {
     }
 
     @Unroll
+    @ToBeFixedForConfigurationCache
     def "consumer can use attribute of type #type"() {
         def a = mavenHttpRepo.module("test", "a", "1.2")
             .withModuleMetadata()
@@ -578,7 +590,7 @@ task checkRelease {
             "attributes": {
                 "buildType": ${encodedDebugValue}
             },
-            "files": [ 
+            "files": [
                 { "name": "a-1.2-debug.jar", "url": "a-1.2-debug.jar" }
             ]
         },
@@ -595,8 +607,8 @@ task checkRelease {
         given:
         buildFile << """
 repositories {
-    maven { 
-        url = '${mavenHttpRepo.uri}' 
+    maven {
+        url = '${mavenHttpRepo.uri}'
     }
 }
 
@@ -607,7 +619,7 @@ interface BuildType extends Named {
 }
 
 def attr = Attribute.of("buildType", ${type})
-configurations { 
+configurations {
     debug { attributes.attribute(attr, ${debugValue}) }
     release { attributes.attribute(attr, ${releaseValue}) }
 }
@@ -623,6 +635,7 @@ task checkRelease {
 }
 """
 
+        a.pom.expectGet()
         a.moduleMetadata.expectGet()
         a.artifact(classifier: 'debug').expectGet()
 
@@ -647,14 +660,15 @@ task checkRelease {
         "true"            | "false"             | "Boolean"       | "true"                              | "false"
     }
 
+    @ToBeFixedForConfigurationCache
     def "reports and recovers from failure to locate module"() {
         def m = mavenHttpRepo.module("test", "a", "1.2").withModuleMetadata()
 
         given:
         buildFile << """
 repositories {
-    maven { 
-        url = '${mavenHttpRepo.uri}' 
+    maven {
+        url = '${mavenHttpRepo.uri}'
     }
 }
 configurations { compile }
@@ -663,24 +677,24 @@ dependencies {
 }
 """
 
-        m.moduleMetadata.expectGetMissing()
         m.pom.expectGetMissing()
 
         when:
         fails("checkDeps")
 
         then:
-        failure.assertHasCause("Could not resolve all dependencies for configuration ':compile'.")
+        failure.assertHasCause("Could not resolve all files for configuration ':compile'.")
         failure.assertHasCause("""Could not find test:a:1.2.
 Searched in the following locations:
-  - ${m.moduleMetadata.uri}
   - ${m.pom.uri}
+If the artifact you are trying to retrieve can be found in the repository but without metadata in 'Maven POM' format, you need to adjust the 'metadataSources { ... }' of the repository declaration.
 Required by:
     project :""")
 
         when:
         server.resetExpectations()
         m.publish()
+        m.pom.expectGet()
         m.moduleMetadata.expectGet()
         m.artifact.expectGet()
 
@@ -694,14 +708,15 @@ Required by:
         }
     }
 
+    @ToBeFixedForConfigurationCache
     def "reports and recovers from failure to download module metadata"() {
         def m = mavenHttpRepo.module("test", "a", "1.2").withModuleMetadata().publish()
 
         given:
         buildFile << """
 repositories {
-    maven { 
-        url = '${mavenHttpRepo.uri}' 
+    maven {
+        url = '${mavenHttpRepo.uri}'
     }
 }
 configurations { compile }
@@ -710,18 +725,20 @@ dependencies {
 }
 """
 
+        m.pom.expectGet()
         m.moduleMetadata.expectGetBroken()
 
         when:
         fails("checkDeps")
 
         then:
-        failure.assertHasCause("Could not resolve all dependencies for configuration ':compile'.")
+        failure.assertHasCause("Could not resolve all files for configuration ':compile'.")
         failure.assertHasCause("Could not resolve test:a:1.2.")
         failure.assertHasCause("Could not get resource '${m.moduleMetadata.uri}'.")
 
         when:
         server.resetExpectations()
+        m.pom.expectHead()
         m.moduleMetadata.expectGet()
         m.artifact.expectGet()
 
@@ -735,6 +752,7 @@ dependencies {
         }
     }
 
+    @ToBeFixedForConfigurationCache
     def "reports failure to parse module metadata"() {
         def m = mavenHttpRepo.module("test", "a", "1.2").withModuleMetadata().publish()
         m.moduleMetadata.file.text = 'not-really-json'
@@ -742,8 +760,8 @@ dependencies {
         given:
         buildFile << """
 repositories {
-    maven { 
-        url = '${mavenHttpRepo.uri}' 
+    maven {
+        url = '${mavenHttpRepo.uri}'
     }
 }
 configurations { compile }
@@ -752,69 +770,31 @@ dependencies {
 }
 """
 
+        m.pom.expectGet()
         m.moduleMetadata.expectGet()
 
         when:
         fails("checkDeps")
 
         then:
-        failure.assertHasCause("Could not resolve all dependencies for configuration ':compile'.")
+        failure.assertHasCause("Could not resolve all files for configuration ':compile'.")
         failure.assertHasCause("Could not resolve test:a:1.2.")
         failure.assertHasCause("Could not parse module metadata ${m.moduleMetadata.uri}")
 
         when:
         server.resetExpectations()
+        m.pom.expectHead()
         m.moduleMetadata.expectHead()
 
         fails("checkDeps")
 
         then:
-        failure.assertHasCause("Could not resolve all dependencies for configuration ':compile'.")
+        failure.assertHasCause("Could not resolve all files for configuration ':compile'.")
         failure.assertHasCause("Could not resolve test:a:1.2.")
         failure.assertHasCause("Could not parse module metadata ${m.moduleMetadata.uri}")
     }
 
-    def "reports failure to accept module metadata with unexpected format version"() {
-        def m = mavenHttpRepo.module("test", "a", "1.2").withModuleMetadata().publish()
-        m.moduleMetadata.file.text = m.moduleMetadata.file.text.replace(FORMAT_VERSION, "123.67")
-
-        given:
-        buildFile << """
-repositories {
-    maven { 
-        url = '${mavenHttpRepo.uri}' 
-    }
-}
-configurations { compile }
-dependencies {
-    compile 'test:a:1.2'
-}
-"""
-
-        m.moduleMetadata.expectGet()
-
-        when:
-        fails("checkDeps")
-
-        then:
-        failure.assertHasCause("Could not resolve all dependencies for configuration ':compile'.")
-        failure.assertHasCause("Could not resolve test:a:1.2.")
-        failure.assertHasCause("Could not parse module metadata ${m.moduleMetadata.uri}")
-        failure.assertHasCause("Unsupported format version '123.67' specified in module metadata. This version of Gradle supports format version ${FORMAT_VERSION} only.")
-
-        when:
-        server.resetExpectations()
-        m.moduleMetadata.expectHead()
-
-        fails("checkDeps")
-
-        then:
-        failure.assertHasCause("Could not resolve all dependencies for configuration ':compile'.")
-        failure.assertHasCause("Could not resolve test:a:1.2.")
-        failure.assertHasCause("Could not parse module metadata ${m.moduleMetadata.uri}")
-        failure.assertHasCause("Unsupported format version '123.67' specified in module metadata. This version of Gradle supports format version ${FORMAT_VERSION} only.")
-    }
-
+    @ToBeFixedForConfigurationCache
     def "reports failure to locate files"() {
         def m = mavenHttpRepo.module("test", "a", "1.2").withModuleMetadata()
         m.artifact(classifier: 'extra')
@@ -827,7 +807,7 @@ dependencies {
     "variants": [
         {
             "name": "lot-o-files",
-            "files": [ 
+            "files": [
                 { "name": "a1.jar", "url": "file1.jar" },
                 { "name": "a2.jar", "url": "../file2.jar" },
                 { "name": "a3.jar", "url": "a-1.2-extra.jar" }
@@ -840,8 +820,8 @@ dependencies {
         given:
         buildFile << """
 repositories {
-    maven { 
-        url = '${mavenHttpRepo.uri}' 
+    maven {
+        url = '${mavenHttpRepo.uri}'
     }
 }
 configurations { compile }
@@ -850,6 +830,7 @@ dependencies {
 }
 """
 
+        m.pom.expectGet()
         m.moduleMetadata.expectGet()
         m.artifact(classifier: 'extra').expectGetMissing()
         m.getArtifact("file1.jar").expectGetMissing()

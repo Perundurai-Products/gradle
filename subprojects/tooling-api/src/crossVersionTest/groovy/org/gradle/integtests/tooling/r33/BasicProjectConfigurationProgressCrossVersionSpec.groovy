@@ -19,12 +19,13 @@ package org.gradle.integtests.tooling.r33
 import org.gradle.integtests.tooling.fixture.ProgressEvents
 import org.gradle.integtests.tooling.fixture.TargetGradleVersion
 import org.gradle.integtests.tooling.fixture.ToolingApiSpecification
+import org.gradle.integtests.tooling.fixture.WithOldConfigurationsSupport
 import org.gradle.tooling.BuildException
 import org.gradle.tooling.ProjectConnection
 import org.gradle.tooling.events.OperationType
 
-@TargetGradleVersion(">=3.3 <5.1")
-class BasicProjectConfigurationProgressCrossVersionSpec extends ToolingApiSpecification {
+@TargetGradleVersion(">=3.3")
+class BasicProjectConfigurationProgressCrossVersionSpec extends ToolingApiSpecification implements WithOldConfigurationsSupport {
 
     def "generates project configuration events for single project build"() {
         given:
@@ -152,8 +153,8 @@ class BasicProjectConfigurationProgressCrossVersionSpec extends ToolingApiSpecif
         buildSrcCompileJava.descriptor.name == ':buildSrc:compileJava'
         buildSrcCompileJava.descriptor.taskPath == ':buildSrc:compileJava'
 
-        buildSrcTasks.child("Task :buildSrc:a:compileJava").child("Resolve dependencies :buildSrc:a:compileClasspath", "Resolve dependencies of :buildSrc:a:compileClasspath")
-        buildSrcTasks.child("Task :buildSrc:b:compileJava").child("Resolve dependencies :buildSrc:b:compileClasspath", "Resolve dependencies of :buildSrc:b:compileClasspath")
+        buildSrcTasks.child("Task :buildSrc:a:compileJava").descendant("Resolve dependencies :buildSrc:a:compileClasspath", "Resolve dependencies of :buildSrc:a:compileClasspath")
+        buildSrcTasks.child("Task :buildSrc:b:compileJava").descendant("Resolve dependencies :buildSrc:b:compileClasspath", "Resolve dependencies of :buildSrc:b:compileClasspath")
 
         buildSrcTasks.child("Task :buildSrc:a:test").descendant("Gradle Test Run :buildSrc:a:test")
         buildSrcTasks.child("Task :buildSrc:b:test")
@@ -195,15 +196,15 @@ class BasicProjectConfigurationProgressCrossVersionSpec extends ToolingApiSpecif
 
     def javaProjectWithTests() {
         buildFile << """
-            allprojects { 
+            allprojects {
                 apply plugin: 'java'
                 ${mavenCentralRepository()}
-                dependencies { testCompile 'junit:junit:4.12' }
+                dependencies { ${testImplementationConfiguration} 'junit:junit:4.13' }
             }
 """
         file("src/main/java/Thing.java") << """class Thing { }"""
         file("src/test/java/ThingTest.java") << """
-            public class ThingTest { 
+            public class ThingTest {
                 @org.junit.Test
                 public void ok() { }
             }
@@ -213,14 +214,14 @@ class BasicProjectConfigurationProgressCrossVersionSpec extends ToolingApiSpecif
     def buildSrc() {
         file("buildSrc/settings.gradle") << "include 'a', 'b'"
         file("buildSrc/build.gradle") << """
-            allprojects {   
+            allprojects {
                 apply plugin: 'java'
                 ${mavenCentralRepository()}
-                dependencies { testCompile 'junit:junit:4.12' }
+                dependencies { ${testImplementationConfiguration} 'junit:junit:4.13' }
             }
             dependencies {
-                compile project(':a')
-                compile project(':b')
+                ${implementationConfiguration} project(':a')
+                ${implementationConfiguration} project(':b')
             }
 """
         file("buildSrc/a/src/main/java/A.java") << "public class A {}"

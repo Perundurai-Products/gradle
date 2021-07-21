@@ -17,8 +17,10 @@
 package org.gradle.vcs.internal
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.integtests.fixtures.build.BuildTestFile
 import org.gradle.test.fixtures.maven.MavenFileRepository
+import org.gradle.test.fixtures.plugin.PluginBuilder
 import org.gradle.vcs.fixtures.GitFileRepository
 import org.junit.Rule
 
@@ -28,7 +30,7 @@ abstract class AbstractSourceDependencyIntegrationTest extends AbstractIntegrati
     def commit
     BuildTestFile depProject
 
-    void mappingFor(GitFileRepository gitRepo , String coords, String repoDef = "") {
+    void mappingFor(GitFileRepository gitRepo, String coords, String repoDef = "") {
         mappingFor(gitRepo.url.toString(), coords, repoDef)
     }
 
@@ -39,9 +41,9 @@ abstract class AbstractSourceDependencyIntegrationTest extends AbstractIntegrati
             apply plugin: 'java'
             group = 'org.gradle'
             version = '2.0'
-            
+
             dependencies {
-                compile "org.test:dep:latest.integration"
+                implementation "org.test:dep:latest.integration"
             }
         """
         file("src/main/java/Main.java") << """
@@ -62,6 +64,7 @@ abstract class AbstractSourceDependencyIntegrationTest extends AbstractIntegrati
         commit = repo.commit('initial')
     }
 
+    @ToBeFixedForConfigurationCache(because = "source dependencies")
     def "can define source repositories in root of composite build when child build has classpath dependencies"() {
         settingsFile << """
             includeBuild 'child'
@@ -88,15 +91,16 @@ abstract class AbstractSourceDependencyIntegrationTest extends AbstractIntegrati
         assertRepoNotCheckedOut()
     }
 
+    @ToBeFixedForConfigurationCache(because = "source dependencies")
     def "can use source dependency in build script classpath"() {
         mappingFor(repo, "org.test:dep")
         file("build.gradle").text = """
-            buildscript { 
+            buildscript {
                 dependencies {
                     classpath "org.test:dep:latest.integration"
                 }
             }
-            def dep = new Dep() 
+            def dep = new Dep()
         """
 
         when:
@@ -118,6 +122,7 @@ abstract class AbstractSourceDependencyIntegrationTest extends AbstractIntegrati
         failure.assertHasCause("Could not locate default branch for Git repository at https://bad.invalid.")
     }
 
+    @ToBeFixedForConfigurationCache
     def "can define unused vcs mappings"() {
         settingsFile << """
             // include the missing dep as a composite
@@ -129,6 +134,7 @@ abstract class AbstractSourceDependencyIntegrationTest extends AbstractIntegrati
         assertRepoNotCheckedOut()
     }
 
+    @ToBeFixedForConfigurationCache
     def "last vcs mapping rule wins"() {
         mappingFor("does-not-exist", "org.test:dep")
         mappingFor(repo, "org.test:dep")
@@ -137,65 +143,51 @@ abstract class AbstractSourceDependencyIntegrationTest extends AbstractIntegrati
         assertRepoCheckedOut()
     }
 
+    @ToBeFixedForConfigurationCache
     def 'main build can request plugins to be applied to source dependency build'() {
-        singleProjectBuild("buildSrc") {
-            file("src/main/groovy/MyPlugin.groovy") << """
-                import org.gradle.api.*
-                import org.gradle.api.initialization.*
-                
-                class MyPlugin implements Plugin<Settings> {
-                    void apply(Settings settings) {
-                        settings.gradle.allprojects {
-                            apply plugin: 'java'
-                            group = 'org.test'
-                            version = '1.0'
-                        }
-                    }
-                }
-            """
-            file("src/main/resources/META-INF/gradle-plugins/com.example.MyPlugin.properties") << """
-                implementation-class=MyPlugin
-            """
-        }
+        def pluginBuilder = new PluginBuilder(file("plugin"))
+        pluginBuilder.addSettingsPlugin """
+            settings.gradle.allprojects {
+                apply plugin: 'java'
+                group = 'org.test'
+                version = '1.0'
+            }
+        """, "org.gradle.test.MyPlugin", "MyPlugin"
+        pluginBuilder.prepareToExecute()
 
-        mappingFor(repo, "org.test:dep", 'plugins { id("com.example.MyPlugin") }')
+        settingsFile << """
+            includeBuild("plugin")
+        """
+
+        mappingFor(repo, "org.test:dep", 'plugins { id("org.gradle.test.MyPlugin") }')
 
         expect:
         succeeds('assemble')
         assertRepoCheckedOut()
     }
 
+    @ToBeFixedForConfigurationCache
     def 'injected plugin can apply other plugins to source dependency build'() {
-        singleProjectBuild("buildSrc") {
-            file("src/main/groovy/MyProjectPlugin.groovy") << """
-                import org.gradle.api.*
-                
-                class MyProjectPlugin implements Plugin<Project> {
-                    void apply(Project project) {
-                        project.apply plugin: 'java'
-                        project.group = 'org.test'
-                        project.version = '1.0'
-                    }
-                }
-            """
-            file("src/main/groovy/MyPlugin.groovy") << """
-                import org.gradle.api.*
-                import org.gradle.api.initialization.*
-                
-                class MyPlugin implements Plugin<Settings> {
-                    void apply(Settings settings) {
-                        settings.gradle.allprojects {
-                            apply plugin: MyProjectPlugin
-                        }
-                    }
-                }
-            """
-            file("src/main/resources/META-INF/gradle-plugins/com.example.MyPlugin.properties") << """
-                implementation-class=MyPlugin
-            """
-        }
+        def pluginBuilder = new PluginBuilder(file("plugin"))
+        pluginBuilder.addPlugin """
+            project.apply plugin: 'java'
+            project.group = 'org.test'
+            project.version = '1.0'
+        """, "org.gradle.test.MyProjectPlugin", "MyProjectPlugin"
 
-        mappingFor(repo, "org.test:dep", 'plugins { id("com.example.MyPlugin") }')
+        pluginBuilder.addSettingsPlugin """
+            settings.gradle.allprojects {
+                apply plugin: MyProjectPlugin
+            }
+        """, "org.gradle.test.MySettingsPlugin", "MySettingsPlugin"
+
+        pluginBuilder.prepareToExecute()
+
+        settingsFile << """
+            includeBuild("plugin")
+        """
+
+        mappingFor(repo, "org.test:dep", 'plugins { id("org.gradle.test.MySettingsPlugin") }')
 
         expect:
         succeeds('assemble')
@@ -208,9 +200,10 @@ abstract class AbstractSourceDependencyIntegrationTest extends AbstractIntegrati
         expect:
         fails('assemble')
         assertRepoCheckedOut()
-        failure.assertHasCause("Plugin with id 'com.example.DoesNotExist' not found.")
+        failure.assertHasDescription("Plugin [id: 'com.example.DoesNotExist'] was not found in any of the following sources:")
     }
 
+    @ToBeFixedForConfigurationCache
     def 'can build from sub-directory of repository'() {
         def subdir = repo.file("subdir")
         repo.workTree.listFiles().each {

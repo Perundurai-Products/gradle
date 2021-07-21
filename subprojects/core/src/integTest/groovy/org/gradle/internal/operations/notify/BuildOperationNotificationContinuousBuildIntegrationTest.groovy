@@ -17,20 +17,19 @@
 package org.gradle.internal.operations.notify
 
 import org.gradle.integtests.fixtures.AbstractContinuousIntegrationTest
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.launcher.exec.RunBuildBuildOperationType
 
 class BuildOperationNotificationContinuousBuildIntegrationTest extends AbstractContinuousIntegrationTest {
 
     def notifications = new BuildOperationNotificationFixture(testDirectory)
 
+    @ToBeFixedForConfigurationCache(because = "run1.id == run2.id")
     def "obtains notifications about init scripts"() {
         when:
+        settingsFile << notifications.registerListener()
         buildScript """
-           ${notifications.registerListener()}
             apply plugin: "java"
-        """
-
-        buildFile << """
         """
         file("src/main/java/Thing.java") << "class Thing {}"
 

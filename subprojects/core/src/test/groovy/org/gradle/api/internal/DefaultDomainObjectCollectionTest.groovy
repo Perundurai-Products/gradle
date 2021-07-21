@@ -19,9 +19,11 @@ package org.gradle.api.internal
 import org.gradle.api.Action
 import org.gradle.api.internal.collections.IterationOrderRetainingSetElementSource
 import org.gradle.api.internal.provider.ProviderInternal
+import org.gradle.api.internal.provider.ValueSupplier
 import org.gradle.api.specs.Spec
+import org.gradle.internal.Describables
 
-import static org.gradle.util.WrapUtil.toList
+import static org.gradle.util.internal.WrapUtil.toList
 
 class DefaultDomainObjectCollectionTest extends AbstractDomainObjectCollectionSpec<CharSequence> {
     DefaultDomainObjectCollection<CharSequence> container = new DefaultDomainObjectCollection<CharSequence>(CharSequence.class, new IterationOrderRetainingSetElementSource<CharSequence>(), callbackActionDecorator)
@@ -30,7 +32,10 @@ class DefaultDomainObjectCollectionTest extends AbstractDomainObjectCollectionSp
     StringBuffer c = new StringBuffer("c")
     StringBuilder d = new StringBuilder("d")
     boolean externalProviderAllowed = true
+    boolean directElementAdditionAllowed = true
+    boolean elementRemovalAllowed = true
     boolean supportsBuildOperations = true
+
     def canGetAllMatchingDomainObjectsOrderedByOrderAdded() {
         def spec = new Spec<CharSequence>() {
             boolean isSatisfiedBy(CharSequence element) {
@@ -172,6 +177,28 @@ class DefaultDomainObjectCollectionTest extends AbstractDomainObjectCollectionSp
         toList(collection) == ["a"]
     }
 
+    def restoresUserCodeApplicationWhenFilterSpecIsEvaluated() {
+        def spec = Mock(Spec)
+        def displayName = Describables.of("plugin")
+        def collection = null
+
+        given:
+        userCodeApplicationContext.apply(displayName) {
+            collection = container.matching(spec)
+        }
+        assert userCodeApplicationContext.current() == null
+        container.add("a")
+
+        when:
+        collection.toList()
+
+        then:
+        1 * spec.isSatisfiedBy("a") >> {
+            assert userCodeApplicationContext.current().displayName == displayName
+            true
+        }
+    }
+
     def findAllRetainsIterationOrder() {
         container.add("a")
         container.add("b")
@@ -296,7 +323,7 @@ class DefaultDomainObjectCollectionTest extends AbstractDomainObjectCollectionSp
     def callsRemoveActionWhenObjectRemovedUsingIteratorNoFlushAndLastElementIsUnrealized() {
         def action = Mock(Action)
         def provider = Mock(ProviderInternal)
-        _ * provider.get() >> "c"
+        _ * provider.calculateValue(_) >> ValueSupplier.Value.of("c")
 
         container.whenObjectRemoved(action)
         container.add("a")

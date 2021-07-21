@@ -16,12 +16,15 @@
 
 package org.gradle.testkit.runner
 
+import org.gradle.initialization.StartParameterBuildOptions
 import org.gradle.integtests.fixtures.AvailableJavaHomes
+import org.gradle.internal.os.OperatingSystem
 import org.gradle.testkit.runner.fixtures.NoDebug
 import org.gradle.testkit.runner.fixtures.NonCrossVersion
 import org.gradle.tooling.GradleConnectionException
 import org.gradle.util.GradleVersion
 import org.gradle.util.Requires
+import spock.lang.Issue
 
 @NonCrossVersion
 class GradleRunnerSupportedBuildJvmIntegrationTest extends BaseGradleRunnerIntegrationTest {
@@ -30,17 +33,40 @@ class GradleRunnerSupportedBuildJvmIntegrationTest extends BaseGradleRunnerInteg
     def "fails when build is configured to use Java 7 or earlier"() {
         given:
         testDirectory.file("gradle.properties").writeProperties("org.gradle.java.home": jdk.javaHome.absolutePath)
+        String args = OperatingSystem.current().windows ? "args '-D${StartParameterBuildOptions.WatchFileSystemOption.GRADLE_PROPERTY}=false'" : 'no args'
 
         when:
         runner().buildAndFail()
 
         then:
         IllegalStateException e = thrown()
-        e.message.startsWith("An error occurred executing build with no args in directory ")
+        e.message.startsWith("An error occurred executing build with ${args} in directory ")
         e.cause instanceof GradleConnectionException
         e.cause.cause.message == "Gradle ${GradleVersion.current().version} requires Java 8 or later to run. Your build is currently configured to use Java ${jdk.javaVersion.majorVersion}."
 
         where:
         jdk << AvailableJavaHomes.getJdks("1.5", "1.6", "1.7")
+    }
+
+
+    @Issue("https://github.com/gradle/gradle/issues/13957")
+    @NoDebug
+    @Requires(adhoc = { AvailableJavaHomes.getJdks("1.8") })
+    def "supports failing builds on older Java versions"() {
+        given:
+        testDirectory.file("gradle.properties").writeProperties("org.gradle.java.home": jdk.javaHome.absolutePath)
+        buildFile << """
+            task myTask {
+                doLast {
+                    throw new RuntimeException("Boom")
+                }
+            }
+        """
+
+        expect:
+        runner().withArguments("myTask").buildAndFail()
+
+        where:
+        jdk << AvailableJavaHomes.getJdks("1.8")
     }
 }

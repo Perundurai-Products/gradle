@@ -20,9 +20,10 @@ import org.gradle.api.Action
 import org.gradle.api.XmlProvider
 import org.gradle.api.artifacts.DependencyArtifact
 import org.gradle.api.artifacts.ExcludeRule
+import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.parser.MetaDataParser
 import org.gradle.api.internal.attributes.ImmutableAttributes
 import org.gradle.api.provider.Property
-import org.gradle.api.publication.maven.internal.VersionRangeMapper
+import org.gradle.api.publish.maven.internal.dependencies.VersionRangeMapper
 import org.gradle.api.publish.internal.versionmapping.VariantVersionMappingStrategyInternal
 import org.gradle.api.publish.internal.versionmapping.VersionMappingStrategyInternal
 import org.gradle.api.publish.maven.internal.dependencies.MavenDependencyInternal
@@ -37,23 +38,24 @@ import org.gradle.api.publish.maven.internal.publication.MavenPomInternal
 import org.gradle.api.publish.maven.internal.publication.ReadableMavenProjectIdentity
 import org.gradle.test.fixtures.file.TestFile
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
-import org.gradle.util.CollectionUtils
+import org.gradle.util.internal.CollectionUtils
 import org.gradle.util.TestUtil
-import org.gradle.util.TextUtil
+import org.gradle.util.internal.TextUtil
 import org.junit.Rule
 import spock.lang.Specification
+import spock.lang.Unroll
 
 class MavenPomFileGeneratorTest extends Specification {
     @Rule
-    TestNameTestDirectoryProvider testDirectoryProvider = new TestNameTestDirectoryProvider()
+    TestNameTestDirectoryProvider testDirectoryProvider = new TestNameTestDirectoryProvider(getClass())
     def projectIdentity = new ReadableMavenProjectIdentity("group-id", "artifact-id", "1.0")
     def rangeMapper = Stub(VersionRangeMapper)
     def strategy = Stub(VersionMappingStrategyInternal) {
-        findStrategyForVariant(_, _) >> Stub(VariantVersionMappingStrategyInternal) {
-            maybeResolveVersion(_, _) >> null
+        findStrategyForVariant(_) >> Stub(VariantVersionMappingStrategyInternal) {
+            maybeResolveVersion(_, _, _) >> null
         }
     }
-    def generator = new MavenPomFileGenerator(projectIdentity, rangeMapper, strategy, ImmutableAttributes.EMPTY, ImmutableAttributes.EMPTY)
+    def generator = new MavenPomFileGenerator(projectIdentity, rangeMapper, strategy, ImmutableAttributes.EMPTY, ImmutableAttributes.EMPTY, false)
     def instantiator = TestUtil.instantiatorFactory().decorateLenient()
     def objectFactory = TestUtil.objectFactory()
 
@@ -61,9 +63,20 @@ class MavenPomFileGeneratorTest extends Specification {
         expect:
         pomFile.text.startsWith(TextUtil.toPlatformLineSeparators(
 """<?xml version="1.0" encoding="UTF-8"?>
-<project xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd" xmlns="http://maven.apache.org/POM/4.0.0"
+<project xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd" xmlns="http://maven.apache.org/POM/4.0.0"
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 """))
+    }
+
+    @Unroll
+    def "writes Gradle metadata marker"() {
+        generator = new MavenPomFileGenerator(projectIdentity, rangeMapper, strategy, ImmutableAttributes.EMPTY, ImmutableAttributes.EMPTY, markerPresent)
+
+        expect:
+        pomFile.text.contains(MetaDataParser.GRADLE_6_METADATA_MARKER) == markerPresent
+
+        where:
+        markerPresent << [true, false]
     }
 
     def "writes configured coordinates"() {
@@ -88,6 +101,7 @@ class MavenPomFileGeneratorTest extends Specification {
             getDevelopers() >> []
             getContributors() >> []
             getMailingLists() >> []
+            getProperties() >> objectFactory.mapProperty(String, String)
         }
 
         when:
@@ -138,6 +152,11 @@ class MavenPomFileGeneratorTest extends Specification {
             getMailingLists() >> [new DefaultMavenPomMailingList(objectFactory) {{
                 getName().set("Users")
             }}]
+            getProperties() >> TestUtil.objectFactory().mapProperty(String, String).with {
+                put("spring-boot.version", "2.1.2.RELEASE")
+                put("hibernate.version", "5.4.1.Final")
+                return it
+            }
         }
 
         when:
@@ -160,6 +179,8 @@ class MavenPomFileGeneratorTest extends Specification {
             ciManagement.system == "Anthill"
             distributionManagement.relocation.groupId == "org.example.new"
             mailingLists.mailingList.name == "Users"
+            properties["spring-boot.version"] == "2.1.2.RELEASE"
+            properties["hibernate.version"] == "5.4.1.Final"
         }
     }
 
@@ -169,12 +190,13 @@ class MavenPomFileGeneratorTest extends Specification {
         return property
     }
 
+    @Unroll
     def "encodes coordinates for XML and unicode"() {
         when:
         def groupId = 'group-ぴ₦ガき∆ç√∫'
         def artifactId = 'artifact-<tag attrib="value"/>-markup'
         def version = 'version-&"'
-        generator = new MavenPomFileGenerator(new ReadableMavenProjectIdentity(groupId, artifactId, version), Stub(VersionRangeMapper), Stub(VersionMappingStrategyInternal), ImmutableAttributes.EMPTY, ImmutableAttributes.EMPTY)
+        generator = new MavenPomFileGenerator(new ReadableMavenProjectIdentity(groupId, artifactId, version), Stub(VersionRangeMapper), Stub(VersionMappingStrategyInternal), ImmutableAttributes.EMPTY, ImmutableAttributes.EMPTY, marker)
 
         then:
         with (pom) {
@@ -182,6 +204,9 @@ class MavenPomFileGeneratorTest extends Specification {
             artifactId == 'artifact-<tag attrib="value"/>-markup'
             version == 'version-&"'
         }
+
+        where:
+        marker << [false, true]
     }
 
     def "writes regular dependency"() {

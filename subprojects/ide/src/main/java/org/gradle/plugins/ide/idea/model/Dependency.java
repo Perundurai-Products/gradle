@@ -16,7 +16,6 @@
 package org.gradle.plugins.ide.idea.model;
 
 import groovy.util.Node;
-import org.gradle.api.Incubating;
 
 /**
  * Represents a dependency of an IDEA module.
@@ -24,17 +23,15 @@ import org.gradle.api.Incubating;
 public interface Dependency {
 
     /**
-     * The scope of this library. If <code>null</code>, the scope attribute is not added.
+     * The scope of this library. If <tt>null</tt>, the scope attribute is not added.
      * @since 4.5
      */
-    @Incubating
     String getScope();
 
     /**
-     * The scope of this library. If <code>null</code>, the scope attribute is not added.
+     * The scope of this library. If <tt>null</tt>, the scope attribute is not added.
      * @since 4.5
      */
-    @Incubating
     void setScope(String scope);
 
     void addToNode(Node parentNode);

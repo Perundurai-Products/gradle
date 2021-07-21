@@ -17,6 +17,7 @@ package org.gradle.api.file;
 
 import groovy.lang.Closure;
 import org.gradle.api.Buildable;
+import org.gradle.api.provider.Provider;
 import org.gradle.api.specs.Spec;
 import org.gradle.api.tasks.AntBuilderAware;
 import org.gradle.internal.HasInternalProtocol;
@@ -25,8 +26,14 @@ import java.io.File;
 import java.util.Set;
 
 /**
- * <p>A {@code FileCollection} represents a collection of files which you can query in certain ways. A file collection
- * is often used to define a classpath, or to add files to a container.</p>
+ * <p>A {@code FileCollection} represents a collection of file system locations which you can query in certain ways. A file collection
+ * is can be used to define a classpath, or a set of source files, or to add files to an archive.</p>
+ *
+ * <p>There are no methods on this interface that allow the contents of the collection to be modified. However, there are a number of sub-interfaces, such as {@link ConfigurableFileCollection} that
+ * allow changes to be made.</p>
+ *
+ * <p>A file collection may contain task outputs. The file collection tracks not just a set of files, but also the tasks that produce those files. When a file collection is used as a task input
+ * property, Gradle will take care of automatically adding dependencies between the consuming task and the producing tasks.</p>
  *
  * <p>You can obtain a {@code FileCollection} instance using {@link org.gradle.api.Project#files}.</p>
  */
@@ -41,7 +48,12 @@ public interface FileCollection extends Iterable<File>, AntBuilderAware, Buildab
     File getSingleFile() throws IllegalStateException;
 
     /**
-     * Returns the contents of this collection as a Set.
+     * Returns the contents of this collection as a {@link Set}. The contents of a file collection may change over time.
+     *
+     * <p>Note that this method returns {@link File} objects that represent locations on the file system. These {@link File} objects do not necessarily refer to regular files.
+     * Depending on the implementation of this file collection and how it has been configured, the returned set may contain directories, or missing files, or any other kind of
+     * file system element.
+     * </p>
      *
      * @return The files. Returns an empty set if this collection is empty.
      */
@@ -90,7 +102,8 @@ public interface FileCollection extends Iterable<File>, AntBuilderAware, Buildab
      * <p>Restricts the contents of this collection to those files which match the given criteria. The filtered
      * collection is live, so that it reflects any changes to this collection.</p>
      *
-     * <p>The given closure is passed the File as a parameter, and should return a boolean value.</p>
+     * <p>The given closure is passed the @{link File} as a parameter, and should return a boolean value. The closure should return {@code true}
+     * to include the file in the result and {@code false} to exclude the file from the result.</p>
      *
      * @param filterClosure The closure to use to select the contents of the filtered collection.
      * @return The filtered collection.
@@ -115,13 +128,24 @@ public interface FileCollection extends Iterable<File>, AntBuilderAware, Buildab
     boolean isEmpty();
 
     /**
-     * Converts this collection to a {@link FileTree}. Generally, for each file in this collection, the resulting file
+     * Converts this collection to a {@link FileTree}, if not already. For each file in this collection, the resulting file
      * tree will contain the source file at the root of the tree. For each directory in this collection, the resulting
      * file tree will contain all the files under the source directory.
+     *
+     * <p>The returned {@link FileTree} is live, and tracks changes to this file collection and the producer tasks of this file collection.</p>
      *
      * @return this collection as a {@link FileTree}. Never returns null.
      */
     FileTree getAsFileTree();
+
+    /**
+     * Returns the contents of this file collection as a {@link Provider} of {@link FileSystemLocation} instances. See {@link #getFiles()} for more details.
+     *
+     * <p>The returned {@link Provider} is live, and tracks changes to this file collection and the producer tasks of this file collection.</p>
+     *
+     * @since 5.6
+     */
+    Provider<Set<FileSystemLocation>> getElements();
 
     /**
      * Ant types which a {@code FileCollection} can be mapped to.
@@ -158,7 +182,8 @@ public interface FileCollection extends Iterable<File>, AntBuilderAware, Buildab
 
     /**
      * Adds this collection to an Ant task as a nested node. Equivalent to calling {@code addToAntBuilder(builder,
-     *nodeName,AntType.ResourceCollection)}.
+     * nodeName,AntType.ResourceCollection)}.
      */
+    @Override
     Object addToAntBuilder(Object builder, String nodeName);
 }

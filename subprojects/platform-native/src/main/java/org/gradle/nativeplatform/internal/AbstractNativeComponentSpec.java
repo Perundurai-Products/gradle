@@ -20,7 +20,7 @@ import org.gradle.nativeplatform.ObjectFile;
 import org.gradle.platform.base.TransformationFileType;
 import org.gradle.platform.base.component.BaseComponentSpec;
 import org.gradle.platform.base.internal.HasIntermediateOutputsComponentSpec;
-import org.gradle.util.GUtil;
+import org.gradle.util.internal.GUtil;
 
 import java.util.Collections;
 import java.util.Set;
@@ -30,7 +30,7 @@ public abstract class AbstractNativeComponentSpec extends BaseComponentSpec impl
 
     @Override
     public String getBaseName() {
-        return GUtil.elvis(baseName, getName());
+        return GUtil.getOrDefault(baseName, this::getName);
     }
 
     @Override

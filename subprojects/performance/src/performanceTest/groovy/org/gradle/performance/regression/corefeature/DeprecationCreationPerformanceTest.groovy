@@ -14,24 +14,28 @@
  * limitations under the License.
  */
 
-package org.gradle.performance.regression.corefeature;
+package org.gradle.performance.regression.corefeature
 
 import org.gradle.performance.AbstractCrossVersionPerformanceTest
+import org.gradle.performance.annotations.RunFor
+import org.gradle.performance.annotations.Scenario
 
+import static org.gradle.performance.annotations.ScenarioType.PER_DAY
+import static org.gradle.performance.results.OperatingSystem.LINUX
+
+@RunFor(
+    @Scenario(type = PER_DAY, operatingSystems = [LINUX], testProjects = ["generateLotsOfDeprecationWarnings"])
+)
 class DeprecationCreationPerformanceTest extends AbstractCrossVersionPerformanceTest {
-
     def "create many deprecation warnings"() {
         given:
-        runner.testProject = "generateLotsOfDeprecationWarnings"
         runner.tasksToRun = ['help']
-        runner.gradleOpts = ["-Xms1g", "-Xmx1g"]
-        runner.minimumVersion = '4.9'
-        runner.targetVersions = ["5.2-20181218000039+0000"]
+        runner.minimumBaseVersion = '6.3'
+        runner.targetVersions = ["7.2-20210713113638+0000"]
         when:
         def result = runner.run()
 
         then:
-
         result.assertCurrentVersionHasNotRegressed()
     }
 }

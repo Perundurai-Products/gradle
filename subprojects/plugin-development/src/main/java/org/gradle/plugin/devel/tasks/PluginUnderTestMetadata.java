@@ -27,19 +27,21 @@ import org.gradle.api.tasks.Input;
 import org.gradle.api.tasks.OutputDirectory;
 import org.gradle.api.tasks.TaskAction;
 import org.gradle.internal.util.PropertiesUtils;
+import org.gradle.work.DisableCachingByDefault;
 
 import java.io.File;
 import java.io.IOException;
 import java.util.List;
 import java.util.Properties;
 
-import static org.gradle.util.CollectionUtils.collect;
+import static org.gradle.util.internal.CollectionUtils.collect;
 
 /**
  * Custom task for generating the metadata for a plugin user test.
  *
  * @since 2.13
  */
+@DisableCachingByDefault(because = "Not worth caching")
 public class PluginUnderTestMetadata extends DefaultTask {
 
     public static final String IMPLEMENTATION_CLASSPATH_PROP_KEY = "implementation-classpath";

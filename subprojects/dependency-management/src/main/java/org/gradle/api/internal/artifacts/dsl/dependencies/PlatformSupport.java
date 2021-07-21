@@ -16,72 +16,90 @@
 package org.gradle.api.internal.artifacts.dsl.dependencies;
 
 import com.google.common.base.Objects;
-import com.google.common.collect.ImmutableSet;
-import org.gradle.api.Action;
-import org.gradle.api.attributes.Attribute;
-import org.gradle.api.attributes.AttributeContainer;
 import org.gradle.api.attributes.AttributeDisambiguationRule;
 import org.gradle.api.attributes.AttributeMatchingStrategy;
 import org.gradle.api.attributes.AttributesSchema;
+import org.gradle.api.attributes.Category;
 import org.gradle.api.attributes.HasConfigurableAttributes;
 import org.gradle.api.attributes.MultipleCandidatesDetails;
 import org.gradle.api.internal.ReusableAction;
+import org.gradle.api.internal.artifacts.repositories.metadata.MavenImmutableAttributesFactory;
+import org.gradle.api.internal.model.NamedObjectInstantiator;
 import org.gradle.internal.component.external.model.ComponentVariant;
 
+import javax.inject.Inject;
 import java.util.Set;
 
-public abstract class PlatformSupport {
-    public static final Attribute<String> COMPONENT_CATEGORY = Attribute.of("org.gradle.component.category", String.class);
-    public static final String LIBRARY = "library";
-    public static final String REGULAR_PLATFORM = "platform";
-    public static final String ENFORCED_PLATFORM = "enforced-platform";
+public class PlatformSupport {
+    private final Category library;
+    private final Category regularPlatform;
+    private final Category enforcedPlatform;
 
-    public static boolean isTargettingPlatform(HasConfigurableAttributes<?> target) {
-        String category = target.getAttributes().getAttribute(COMPONENT_CATEGORY);
-        return REGULAR_PLATFORM.equals(category) || ENFORCED_PLATFORM.equals(category);
+    public PlatformSupport(NamedObjectInstantiator instantiator) {
+        library = instantiator.named(Category.class, Category.LIBRARY);
+        regularPlatform = instantiator.named(Category.class, Category.REGULAR_PLATFORM);
+        enforcedPlatform = instantiator.named(Category.class, Category.ENFORCED_PLATFORM);
     }
 
-    public static void configureSchema(AttributesSchema attributesSchema) {
-        AttributeMatchingStrategy<String> componentTypeMatchingStrategy = attributesSchema.attribute(PlatformSupport.COMPONENT_CATEGORY);
-        componentTypeMatchingStrategy.getDisambiguationRules().add(PlatformSupport.ComponentCategoryDisambiguationRule.class);
+    public boolean isTargetingPlatform(HasConfigurableAttributes<?> target) {
+        Category category = target.getAttributes().getAttribute(Category.CATEGORY_ATTRIBUTE);
+        return regularPlatform.equals(category) || enforcedPlatform.equals(category);
     }
 
-    static <T> void addPlatformAttribute(HasConfigurableAttributes<T> dependency, final String type) {
-        dependency.attributes(new Action<AttributeContainer>() {
-            @Override
-            public void execute(AttributeContainer attributeContainer) {
-                attributeContainer.attribute(COMPONENT_CATEGORY, type);
-            }
+    public Category getRegularPlatformCategory() {
+        return regularPlatform;
+    }
+
+    public void configureSchema(AttributesSchema attributesSchema) {
+        configureCategoryDisambiguationRule(attributesSchema);
+    }
+
+    private void configureCategoryDisambiguationRule(AttributesSchema attributesSchema) {
+        AttributeMatchingStrategy<Category> categorySchema = attributesSchema.attribute(Category.CATEGORY_ATTRIBUTE);
+        categorySchema.getDisambiguationRules().add(ComponentCategoryDisambiguationRule.class, actionConfiguration -> {
+            actionConfiguration.params(library);
+            actionConfiguration.params(regularPlatform);
         });
     }
 
-    public static boolean hasForcedDependencies(ComponentVariant variant) {
-        return Objects.equal(variant.getAttributes().getAttribute(COMPONENT_CATEGORY), ENFORCED_PLATFORM);
+    public <T> void addPlatformAttribute(HasConfigurableAttributes<T> dependency, final Category category) {
+        dependency.attributes(attributeContainer -> attributeContainer.attribute(Category.CATEGORY_ATTRIBUTE, category));
     }
 
-    public static class ComponentCategoryDisambiguationRule implements AttributeDisambiguationRule<String>, ReusableAction {
-        @Override
-        public void execute(MultipleCandidatesDetails<String> details) {
-            String consumerValue = details.getConsumerValue();
-            Set<String> candidateValues = details.getCandidateValues();
-            if (consumerValue == null) {
-                // consumer expressed no preference, defaults to library
-                if (candidateValues.contains(LIBRARY)) {
-                    details.closestMatch(LIBRARY);
-                    return;
-                }
-            }
+    /**
+     * Checks if the variant is an {@code enforced-platform} one.
+     * <p>
+     * This method is designed to be called on parsed metadata and thus interacts with the {@code String} version of the attribute.
+     *
+     * @param variant the variant to test
+     * @return {@code true} if this represents an {@code enforced-platform}, {@code false} otherwise
+     */
+    public static boolean hasForcedDependencies(ComponentVariant variant) {
+        return Objects.equal(variant.getAttributes().getAttribute(MavenImmutableAttributesFactory.CATEGORY_ATTRIBUTE), Category.ENFORCED_PLATFORM);
+    }
+
+    public static class ComponentCategoryDisambiguationRule implements AttributeDisambiguationRule<Category>, ReusableAction {
+        final Category library;
+        final Category platform;
+
+        @Inject
+        ComponentCategoryDisambiguationRule(Category library, Category regularPlatform) {
+            this.library = library;
+            this.platform = regularPlatform;
         }
 
-    }
-
-    public static class PreferRegularPlatform implements AttributeDisambiguationRule<String> {
-        private final static Set<String> PLATFORM_TYPES = ImmutableSet.of(REGULAR_PLATFORM, ENFORCED_PLATFORM);
-
         @Override
-        public void execute(MultipleCandidatesDetails<String> details) {
-            if (details.getCandidateValues().equals(PLATFORM_TYPES)) {
-                details.closestMatch(REGULAR_PLATFORM);
+        public void execute(MultipleCandidatesDetails<Category> details) {
+            Category consumerValue = details.getConsumerValue();
+            if (consumerValue == null) {
+                Set<Category> candidateValues = details.getCandidateValues();
+                if (candidateValues.contains(library)) {
+                    // default to library
+                    details.closestMatch(library);
+                } else if (candidateValues.contains(platform)) {
+                    // default to normal platform when only platforms are available and nothing has been requested
+                    details.closestMatch(platform);
+                }
             }
         }
     }

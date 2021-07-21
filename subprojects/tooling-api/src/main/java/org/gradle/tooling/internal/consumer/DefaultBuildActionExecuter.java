@@ -17,6 +17,7 @@
 package org.gradle.tooling.internal.consumer;
 
 import org.gradle.api.Transformer;
+import org.gradle.internal.Cast;
 import org.gradle.tooling.BuildAction;
 import org.gradle.tooling.BuildActionExecuter;
 import org.gradle.tooling.GradleConnectionException;
@@ -26,7 +27,7 @@ import org.gradle.tooling.internal.consumer.async.AsyncConsumerActionExecutor;
 import org.gradle.tooling.internal.consumer.connection.ConsumerAction;
 import org.gradle.tooling.internal.consumer.connection.ConsumerConnection;
 import org.gradle.tooling.internal.consumer.parameters.ConsumerOperationParameters;
-import org.gradle.util.CollectionUtils;
+import org.gradle.util.internal.CollectionUtils;
 
 import javax.annotation.Nullable;
 import java.util.Arrays;
@@ -59,19 +60,23 @@ class DefaultBuildActionExecuter<T> extends AbstractLongRunningOperation<Default
         return getThis();
     }
 
+    @Override
     public T run() throws GradleConnectionException {
         BlockingResultHandler<Object> handler = new BlockingResultHandler<Object>(Object.class);
         run(handler);
-        return (T) handler.getResult();
+        return Cast.uncheckedNonnullCast(handler.getResult());
     }
 
+    @Override
     public void run(ResultHandler<? super T> handler) throws IllegalStateException {
         final ConsumerOperationParameters operationParameters = getConsumerOperationParameters();
         connection.run(new ConsumerAction<T>() {
+            @Override
             public ConsumerOperationParameters getParameters() {
                 return operationParameters;
             }
 
+            @Override
             public T run(ConsumerConnection connection) {
                 T result = connection.run(buildAction, operationParameters);
                 return result;

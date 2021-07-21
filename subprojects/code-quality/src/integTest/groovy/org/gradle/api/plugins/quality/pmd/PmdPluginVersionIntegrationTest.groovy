@@ -15,27 +15,29 @@
  */
 package org.gradle.api.plugins.quality.pmd
 
-import org.gradle.util.TestPrecondition
-import org.gradle.util.VersionNumber
+import org.gradle.util.internal.VersionNumber
 import org.hamcrest.Matcher
 import spock.lang.Issue
 
 import static org.gradle.util.Matchers.containsLine
-import static org.hamcrest.Matchers.containsString
-import static org.hamcrest.Matchers.not
+import static org.hamcrest.CoreMatchers.containsString
+import static org.hamcrest.CoreMatchers.not
 import static org.junit.Assume.assumeTrue
 
 class PmdPluginVersionIntegrationTest extends AbstractPmdPluginVersionIntegrationTest {
 
     def setup() {
         buildFile << """
-            apply plugin: "java"
-            apply plugin: "pmd"
+            plugins {
+                id("java")
+                id("pmd")
+            }
 
             ${mavenCentralRepository()}
 
             pmd {
                 toolVersion = '$version'
+                ${supportIncrementalAnalysis() ? "" : "incrementalAnalysis = false"}
             }
 
             ${fileLockingIssuesSolved() ? "" : """
@@ -44,7 +46,7 @@ class PmdPluginVersionIntegrationTest extends AbstractPmdPluginVersionIntegratio
                 classpath = files()
             }"""}
 
-            ${!TestPrecondition.FIX_TO_WORK_ON_JAVA9.fulfilled ? "sourceCompatibility = 1.6" : ""}
+            ${requiredSourceCompatibility()}
         """.stripIndent()
     }
 
@@ -83,11 +85,42 @@ class PmdPluginVersionIntegrationTest extends AbstractPmdPluginVersionIntegratio
         output.contains("2 PMD rule violations were found. See the report at:")
     }
 
+    void "can set max failures"() {
+        badCode()
+        buildFile << """
+            pmd {
+                maxFailures = 2
+            }
+        """
+
+        expect:
+        succeeds("check")
+        file("build/reports/pmd/main.xml").assertContents(not(containsClass("org.gradle.Class1")))
+        file("build/reports/pmd/test.xml").assertContents(containsClass("org.gradle.Class1Test"))
+        output.contains("2 PMD rule violations were found. See the report at:")
+    }
+
+    void "does not ignore more than max failures"() {
+        badCode()
+        buildFile << """
+            pmd {
+                maxFailures = 1
+            }
+        """
+
+        expect:
+        fails("check")
+        failure.assertHasDescription("Execution failed for task ':pmdTest'.")
+        failure.assertThatCause(containsString("2 PMD rule violations were found. See the report at:"))
+        file("build/reports/pmd/main.xml").assertContents(not(containsClass("org.gradle.Class1")))
+        file("build/reports/pmd/test.xml").assertContents(containsClass("org.gradle.Class1Test"))
+    }
+
     void "can configure priority level threshold"() {
         badCode()
         buildFile << """
             pmd {
-                rulePriority = 2
+                rulesMinimumPriority = 2
             }
         """
 
@@ -104,24 +137,24 @@ class PmdPluginVersionIntegrationTest extends AbstractPmdPluginVersionIntegratio
         goodCode()
         buildFile << """
         pmd {
-            rulePriority = 11
+            rulesMinimumPriority = 11
         }
 """
         expect:
         fails("check")
-        failure.assertHasCause("Invalid rulePriority '11'.  Valid range 1 (highest) to 5 (lowest).")
+        failure.assertHasCause("Invalid rulesMinimumPriority '11'.  Valid range 1 (highest) to 5 (lowest).")
     }
 
     def "gets reasonable message when priority level threshold is out of range from task"() {
         goodCode()
         buildFile << """
         pmdMain {
-            rulePriority = 11
+            rulesMinimumPriority = 11
         }
 """
         expect:
         fails("check")
-        failure.assertHasCause("Invalid rulePriority '11'.  Valid range 1 (highest) to 5 (lowest).")
+        failure.assertHasCause("Invalid rulesMinimumPriority '11'.  Valid range 1 (highest) to 5 (lowest).")
     }
 
     def "can configure reporting"() {
@@ -129,8 +162,8 @@ class PmdPluginVersionIntegrationTest extends AbstractPmdPluginVersionIntegratio
         buildFile << """
             pmdMain {
                 reports {
-                    xml.enabled false
-                    html.destination file("htmlReport.html")
+                    xml.required = false
+                    html.outputLocation = file("htmlReport.html")
                 }
             }
         """
@@ -231,8 +264,8 @@ class PmdPluginVersionIntegrationTest extends AbstractPmdPluginVersionIntegratio
             }
             tasks.withType(Pmd) {
                 reports {
-                    html.enabled false
-                    xml.enabled false
+                    html.required = false
+                    xml.required = false
                 }
             }
         """
@@ -242,7 +275,7 @@ class PmdPluginVersionIntegrationTest extends AbstractPmdPluginVersionIntegratio
         succeeds('clean', 'check')
 
         then:
-        nonSkippedTasks.contains(':pmdMain')
+        executedAndNotSkipped(':pmdMain')
         output.contains("PMD rule violations were found")
     }
 
@@ -281,12 +314,13 @@ class PmdPluginVersionIntegrationTest extends AbstractPmdPluginVersionIntegratio
     }
 
     private static customRuleSetText() {
-        String pathToRuleset = "category/java/codestyle.xml/IfStmtsMustUseBraces"
+        String pathToRuleset = "category/java/codestyle.xml/ControlStatementBraces"
         if (versionNumber < VersionNumber.version(5)) {
             pathToRuleset = "rulesets/braces.xml"
-        }
-        else if (versionNumber < VersionNumber.version(6)) {
+        } else if (versionNumber < VersionNumber.version(6)) {
             pathToRuleset = "rulesets/java/braces.xml"
+        } else if (versionNumber < VersionNumber.version(6, 13)) {
+            pathToRuleset = "category/java/codestyle.xml/IfStmtsMustUseBraces"
         }
         """
             <ruleset name="custom"

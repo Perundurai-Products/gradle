@@ -41,4 +41,10 @@ public class DirectDependenciesMetadataAdapter extends AbstractDependenciesMetad
     protected boolean isConstraint() {
         return false;
     }
+
+    @Override
+    protected boolean isEndorsingStrictVersions(DirectDependencyMetadata details) {
+        return details.isEndorsingStrictVersions();
+    }
+
 }

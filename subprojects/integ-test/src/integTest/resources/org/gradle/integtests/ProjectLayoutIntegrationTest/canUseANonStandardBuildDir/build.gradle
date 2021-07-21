@@ -1,13 +1,15 @@
-apply plugin: 'java'
+plugins {
+    id("java")
+}
 
 repositories {
     mavenCentral()
 }
 
 dependencies {
-    testCompile 'junit:junit:4.12'
+    testImplementation 'junit:junit:4.13'
 }
 
 buildDir = 'target'
-sourceSets.main.java.outputDir = new File(buildDir, 'main-classes')
-sourceSets.test.java.outputDir = new File(buildDir, 'test-classes')
+sourceSets.main.java.destinationDirectory.set(new File(buildDir, 'main-classes'))
+sourceSets.test.java.destinationDirectory.set(new File(buildDir, 'test-classes'))

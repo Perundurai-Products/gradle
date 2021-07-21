@@ -15,20 +15,23 @@
  */
 package org.gradle.integtests.fixtures.executer;
 
+import junit.framework.AssertionFailedError;
 import org.gradle.internal.Pair;
-import org.gradle.util.TextUtil;
+import org.gradle.util.internal.TextUtil;
 import org.hamcrest.Matcher;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.function.Consumer;
 import java.util.regex.Pattern;
 
-import static org.gradle.util.Matchers.isEmpty;
-import static org.hamcrest.Matchers.containsString;
-import static org.hamcrest.Matchers.equalTo;
-import static org.hamcrest.Matchers.hasItem;
-import static org.hamcrest.Matchers.startsWith;
-import static org.junit.Assert.assertThat;
+import static org.hamcrest.CoreMatchers.containsString;
+import static org.hamcrest.CoreMatchers.equalTo;
+import static org.hamcrest.CoreMatchers.hasItem;
+import static org.hamcrest.CoreMatchers.startsWith;
+import static org.hamcrest.MatcherAssert.assertThat;
 
 public class OutputScrapingExecutionFailure extends OutputScrapingExecutionResult implements ExecutionFailure {
     private static final Pattern FAILURE_PATTERN = Pattern.compile("FAILURE: (.+)");
@@ -37,12 +40,11 @@ public class OutputScrapingExecutionFailure extends OutputScrapingExecutionResul
     private static final Pattern LOCATION_PATTERN = Pattern.compile("(?ms)^\\* Where:((.+?)'.+?') line: (\\d+)$");
     private static final Pattern RESOLUTION_PATTERN = Pattern.compile("(?ms)^\\* Try:$(.+?)^\\* Exception is:$");
     private final String summary;
-    private final List<String> descriptions = new ArrayList<String>();
-    private final List<String> lineNumbers = new ArrayList<String>();
-    private final List<String> fileNames = new ArrayList<String>();
+    private final List<Problem> problems = new ArrayList<>();
+    private final List<Problem> problemsNotChecked = new ArrayList<>();
+    private final List<String> lineNumbers = new ArrayList<>();
+    private final List<String> fileNames = new ArrayList<>();
     private final String resolution;
-    // with normalized line endings
-    private final List<String> causes = new ArrayList<String>();
     private final LogContent mainContent;
 
     static boolean hasFailure(String error) {
@@ -57,19 +59,19 @@ public class OutputScrapingExecutionFailure extends OutputScrapingExecutionResul
      * @return A {@link OutputScrapingExecutionResult} for a successful build, or a {@link OutputScrapingExecutionFailure} for a failed build.
      */
     public static OutputScrapingExecutionFailure from(String output, String error) {
-        return new OutputScrapingExecutionFailure(output, error);
+        return new OutputScrapingExecutionFailure(output, error, true);
     }
 
-    protected OutputScrapingExecutionFailure(String output, String error) {
-        super(LogContent.of(output), LogContent.of(error));
+    protected OutputScrapingExecutionFailure(String output, String error, boolean includeBuildSrc) {
+        super(LogContent.of(output), LogContent.of(error), includeBuildSrc);
 
-        LogContent withoutDebug = LogContent.of(output).removeAnsiChars().removeDebugPrefix();
+        LogContent withoutDebug = LogContent.of(output).ansiCharsToPlainText().removeDebugPrefix();
 
         // Find failure section
         Pair<LogContent, LogContent> match = withoutDebug.splitOnFirstMatchingLine(FAILURE_PATTERN);
         if (match == null) {
             // Not present in output, check error output.
-            match = LogContent.of(error).removeAnsiChars().removeDebugPrefix().splitOnFirstMatchingLine(FAILURE_PATTERN);
+            match = LogContent.of(error).ansiCharsToPlainText().removeDebugPrefix().splitOnFirstMatchingLine(FAILURE_PATTERN);
             if (match != null) {
                 match = Pair.of(withoutDebug, match.getRight());
             } else {
@@ -104,8 +106,8 @@ public class OutputScrapingExecutionFailure extends OutputScrapingExecutionResul
         while (matcher.find()) {
             String problemStr = matcher.group(1);
             Problem problem = extract(problemStr);
-            descriptions.add(problem.description);
-            causes.addAll(problem.causes);
+            problems.add(problem);
+            problemsNotChecked.add(problem);
         }
 
         matcher = RESOLUTION_PATTERN.matcher(failureText);
@@ -117,6 +119,11 @@ public class OutputScrapingExecutionFailure extends OutputScrapingExecutionResul
     }
 
     @Override
+    public ExecutionFailure getIgnoreBuildSrc() {
+        return new OutputScrapingExecutionFailure(getOutput(), getError(), false);
+    }
+
+    @Override
     public LogContent getMainContent() {
         return mainContent;
     }
@@ -124,7 +131,7 @@ public class OutputScrapingExecutionFailure extends OutputScrapingExecutionResul
     private Problem extract(String problem) {
         java.util.regex.Matcher matcher = CAUSE_PATTERN.matcher(problem);
         String description;
-        List<String> causes = new ArrayList<String>();
+        List<String> causes = new ArrayList<>();
         if (!matcher.find()) {
             description = TextUtil.normaliseLineSeparators(problem.trim());
         } else {
@@ -154,11 +161,13 @@ public class OutputScrapingExecutionFailure extends OutputScrapingExecutionResul
         return builder.toString();
     }
 
+    @Override
     public ExecutionFailure assertHasLineNumber(int lineNumber) {
         assertThat(this.lineNumbers, hasItem(equalTo(String.valueOf(lineNumber))));
         return this;
     }
 
+    @Override
     public ExecutionFailure assertHasFileName(String filename) {
         assertThat(this.fileNames, hasItem(equalTo(filename)));
         return this;
@@ -166,7 +175,8 @@ public class OutputScrapingExecutionFailure extends OutputScrapingExecutionResul
 
     @Override
     public ExecutionFailure assertHasFailures(int count) {
-        assertThat(this.descriptions.size(), equalTo(count));
+        problemsNotChecked.clear(); // this is a good enough check for now
+        assertThat(this.problems.size(), equalTo(count));
         if (count == 1) {
             assertThat(summary, equalTo("Build failed with an exception."));
         } else {
@@ -175,21 +185,29 @@ public class OutputScrapingExecutionFailure extends OutputScrapingExecutionResul
         return this;
     }
 
+    @Override
     public ExecutionFailure assertHasCause(String description) {
         assertThatCause(startsWith(description));
         return this;
     }
 
-    public ExecutionFailure assertThatCause(Matcher<String> matcher) {
-        for (String cause : causes) {
-            if (matcher.matches(cause)) {
-                return this;
+    @Override
+    public ExecutionFailure assertThatCause(Matcher<? super String> matcher) {
+        Set<String> seen = new LinkedHashSet<>();
+        for (Problem problem : problems) {
+            for (String cause : problem.causes) {
+                if (matcher.matches(cause)) {
+                    problemsNotChecked.remove(problem);
+                    return this;
+                }
+                seen.add(cause);
             }
         }
-        failureOnUnexpectedOutput(String.format("No matching cause found in %s", causes));
+        failureOnUnexpectedOutput(String.format("No matching cause found in %s", seen));
         return this;
     }
 
+    @Override
     public ExecutionFailure assertHasResolution(String resolution) {
         assertThat(this.resolution, containsString(resolution));
         return this;
@@ -198,50 +216,97 @@ public class OutputScrapingExecutionFailure extends OutputScrapingExecutionResul
     @Override
     public ExecutionFailure assertHasNoCause(String description) {
         Matcher<String> matcher = containsString(description);
-        for (String cause : causes) {
-            if (matcher.matches(cause)) {
-                failureOnUnexpectedOutput(String.format("Expected no failure with description '%s', found: %s", description, cause));
+        for (Problem problem : problems) {
+            for (String cause : problem.causes) {
+                if (matcher.matches(cause)) {
+                    failureOnUnexpectedOutput(String.format("Expected no failure with description '%s', found: %s", description, cause));
+                }
             }
         }
         return this;
     }
 
+    @Override
     public ExecutionFailure assertHasNoCause() {
-        assertThat(causes, isEmpty());
+        for (Problem problem : problems) {
+            if (!problem.causes.isEmpty()) {
+                failureOnUnexpectedOutput(String.format("Expected no failure with a cause, found: %s", problem.causes.get(0)));
+            }
+        }
         return this;
     }
 
+    @Override
     public ExecutionFailure assertHasDescription(String context) {
         assertThatDescription(startsWith(context));
         return this;
     }
 
-    public ExecutionFailure assertThatDescription(Matcher<String> matcher) {
-        for (String description : descriptions) {
-            if (matcher.matches(description)) {
-                return this;
-            }
-        }
-        failureOnUnexpectedOutput(String.format("No matching failure description found in %s", descriptions));
+    @Override
+    public ExecutionFailure assertThatDescription(Matcher<? super String> matcher) {
+        assertHasFailure(matcher, f -> {
+        });
         return this;
     }
 
+    @Override
+    public ExecutionFailure assertHasFailure(String description, Consumer<? super Failure> action) {
+        assertHasFailure(startsWith(description), action);
+        return this;
+    }
+
+    private void assertHasFailure(Matcher<? super String> matcher, Consumer<? super Failure> action) {
+        Set<String> seen = new LinkedHashSet<>();
+        for (Problem problem : problems) {
+            if (matcher.matches(problem.description)) {
+                problemsNotChecked.remove(problem);
+                action.accept(problem);
+                return;
+            }
+            seen.add(problem.description);
+        }
+        failureOnUnexpectedOutput(String.format("No matching failure description found in %s", seen));
+    }
+
+    @Override
     public ExecutionFailure assertTestsFailed() {
         new DetailedExecutionFailure(this).assertTestsFailed();
         return this;
     }
 
+    @Override
     public DependencyResolutionFailure assertResolutionFailure(String configurationPath) {
         return new DependencyResolutionFailure(this, configurationPath);
     }
 
-    private static class Problem {
+    @Override
+    public void assertResultVisited() {
+        super.assertResultVisited();
+        // Ensure that exceptions are not unintentionally introduced.
+        if (problems.size() > 1 && !problemsNotChecked.isEmpty()) {
+            throw new AssertionFailedError("The build failed with multiple exceptions, however not all exceptions where checked during the test. This can be done using assertHasFailures(n), assertHasDescription() or assertHasCause() or one of the variants of these methods.");
+        }
+    }
+
+    private static class Problem implements Failure {
         final String description;
         final List<String> causes;
 
         private Problem(String description, List<String> causes) {
             this.description = description;
             this.causes = causes;
+        }
+
+        @Override
+        public void assertHasCause(String message) {
+            if (!causes.contains(message)) {
+                throw new AssertionFailedError(String.format("Expected cause '%s' not found in %s", message, causes));
+            }
+        }
+
+        @Override
+        public void assertHasCauses(int count) {
+            assert causes.size() == count;
         }
     }
 }

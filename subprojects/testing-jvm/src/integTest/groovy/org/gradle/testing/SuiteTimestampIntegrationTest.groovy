@@ -18,18 +18,16 @@ package org.gradle.testing
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 import org.gradle.integtests.fixtures.JUnitXmlTestExecutionResult
-import org.junit.Test
 import spock.lang.Issue
 
 class SuiteTimestampIntegrationTest extends AbstractIntegrationSpec {
 
     @Issue("GRADLE-2730")
-    @Test
     void "test logging is included in XML results"() {
         file("build.gradle") << """
             apply plugin: 'java'
                 ${mavenCentralRepository()}
-                dependencies { testCompile 'junit:junit:4.12' }
+                dependencies { testImplementation 'junit:junit:4.13' }
         """
 
         file("src/test/java/SomeTest.java") << """

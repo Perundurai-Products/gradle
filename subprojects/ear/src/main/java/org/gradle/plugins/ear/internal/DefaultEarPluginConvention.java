@@ -18,24 +18,26 @@ package org.gradle.plugins.ear.internal;
 import groovy.lang.Closure;
 import org.gradle.api.Action;
 import org.gradle.api.model.ObjectFactory;
+import org.gradle.api.provider.Property;
 import org.gradle.api.reflect.HasPublicType;
 import org.gradle.api.reflect.TypeOf;
-import org.gradle.plugins.ear.EarPluginConvention;
 import org.gradle.plugins.ear.descriptor.DeploymentDescriptor;
 import org.gradle.plugins.ear.descriptor.internal.DefaultDeploymentDescriptor;
-import org.gradle.util.ConfigureUtil;
+import org.gradle.util.internal.ConfigureUtil;
 
 import javax.inject.Inject;
 import java.io.File;
 
 import static org.gradle.api.reflect.TypeOf.typeOf;
 
-public class DefaultEarPluginConvention extends EarPluginConvention implements HasPublicType {
+@Deprecated
+public class DefaultEarPluginConvention extends org.gradle.plugins.ear.EarPluginConvention implements HasPublicType {
     private ObjectFactory objectFactory;
 
     private DeploymentDescriptor deploymentDescriptor;
     private String appDirName;
     private String libDirName;
+    private final Property<Boolean> generateDeploymentDescriptor;
 
     @Inject
     public DefaultEarPluginConvention(ObjectFactory objectFactory) {
@@ -43,11 +45,13 @@ public class DefaultEarPluginConvention extends EarPluginConvention implements H
         deploymentDescriptor = objectFactory.newInstance(DefaultDeploymentDescriptor.class);
         deploymentDescriptor.readFrom("META-INF/application.xml");
         deploymentDescriptor.readFrom(appDirName + "/META-INF/" + deploymentDescriptor.getFileName());
+        generateDeploymentDescriptor = objectFactory.property(Boolean.class);
+        generateDeploymentDescriptor.convention(true);
     }
 
     @Override
     public TypeOf<?> getPublicType() {
-        return typeOf(EarPluginConvention.class);
+        return typeOf(org.gradle.plugins.ear.EarPluginConvention.class);
     }
 
     @Override
@@ -81,6 +85,11 @@ public class DefaultEarPluginConvention extends EarPluginConvention implements H
     @Override
     public void libDirName(String libDirName) {
         this.libDirName = libDirName;
+    }
+
+    @Override
+    public Property<Boolean> getGenerateDeploymentDescriptor() {
+        return generateDeploymentDescriptor;
     }
 
     @Override

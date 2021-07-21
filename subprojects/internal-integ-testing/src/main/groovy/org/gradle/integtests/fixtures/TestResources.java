@@ -18,7 +18,7 @@ package org.gradle.integtests.fixtures;
 
 import org.gradle.test.fixtures.file.TestDirectoryProvider;
 import org.gradle.test.fixtures.file.TestFile;
-import org.gradle.util.Resources;
+import org.gradle.util.internal.Resources;
 import org.junit.rules.MethodRule;
 import org.junit.runners.model.FrameworkMethod;
 import org.junit.runners.model.Statement;
@@ -49,6 +49,7 @@ public class TestResources implements MethodRule {
         return testWorkDirProvider.getTestDirectory();
     }
 
+    @Override
     public Statement apply(Statement base, final FrameworkMethod method, Object target) {
         final Statement statement = resources.apply(base, method, target);
         return new Statement() {
@@ -69,6 +70,11 @@ public class TestResources implements MethodRule {
      * Copies the given resource to the test directory.
      */
     public void maybeCopy(String resource) {
+        // Multi version tests append to the method name, making it miss the resources
+        // Below is a dirty way to strip the added content
+        if (resource.contains(" ")) {
+            resource = resource.substring(0, resource.indexOf(' '));
+        }
         TestFile dir = resources.findResource(resource);
         if (dir != null) {
             logger.debug("Copying test resource '{}' from {} to test directory.", resource, dir);

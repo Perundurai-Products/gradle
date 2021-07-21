@@ -16,9 +16,10 @@
 
 package org.gradle.launcher.continuous
 
-import org.gradle.util.TextUtil
+import org.gradle.integtests.fixtures.AbstractContinuousIntegrationTest
+import org.gradle.util.internal.TextUtil
 
-class ContinuousWorkerDaemonServiceIntegrationTest extends Java7RequiringContinuousIntegrationTest {
+class ContinuousWorkerDaemonServiceIntegrationTest extends AbstractContinuousIntegrationTest {
     def workerDaemonIdentityFileName = "build/workerId"
     def workerDaemonIdentityFile = file(workerDaemonIdentityFileName)
     def inputFile = file("inputFile")
@@ -68,34 +69,35 @@ class ContinuousWorkerDaemonServiceIntegrationTest extends Java7RequiringContinu
 
     String getTaskTypeUsingWorkerDaemon() {
         return """
-            import javax.inject.Inject
-            import org.gradle.workers.WorkerExecutor
+            import org.gradle.api.file.ProjectLayout
+            import org.gradle.workers.WorkParameters
             import org.gradle.workers.internal.WorkerDaemonFactory
 
-            class TestRunnable implements Runnable {
-                void run() {
+            abstract class TestWorkAction implements WorkAction<WorkParameters.None> {
+                void execute() {
                     println "Runnable executed..."
                 }
             }
 
-            class DaemonTask extends DefaultTask {
+            abstract class DaemonTask extends DefaultTask {
                 @InputFile
                 File inputFile = new File("${TextUtil.normaliseFileAndLineSeparators(inputFile.absolutePath)}")
 
                 @Inject
-                WorkerExecutor getWorkerExecutor() {
-                    throw new UnsupportedOperationException()
-                }
+                abstract WorkerExecutor getWorkerExecutor()
+
+                @Inject
+                abstract ProjectLayout getProjectLayout()
 
                 @TaskAction
                 void runInDaemon() {
-                    workerExecutor.submit(TestRunnable.class) {}
+                    workerExecutor.noIsolation().submit(TestWorkAction) {}
                     workerExecutor.await()
                     captureWorkerDaemons()
                 }
 
                 void captureWorkerDaemons() {
-                    def workerDaemonIdentityFile = project.file("$workerDaemonIdentityFileName")
+                    def workerDaemonIdentityFile = projectLayout.projectDirectory.file("$workerDaemonIdentityFileName").asFile
                     def daemonFactory = services.get(WorkerDaemonFactory)
                     workerDaemonIdentityFile << daemonFactory.clientsManager.allClients.collect { System.identityHashCode(it) }.sort().join(" ") + "\\n"
                 }

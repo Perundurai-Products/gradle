@@ -21,11 +21,13 @@ import spock.lang.Unroll
 
 class CollectionPropertyIntegrationTest extends AbstractIntegrationSpec {
     def setup() {
-        buildFile << """
+        buildFile """
             class MyTask extends DefaultTask {
+                @Internal
                 final ListProperty<String> prop = project.objects.listProperty(String)
+                @Internal
                 List<String> expected = []
-                
+
                 @TaskAction
                 void validate() {
                     def actual = prop.getOrNull()
@@ -35,22 +37,58 @@ class CollectionPropertyIntegrationTest extends AbstractIntegrationSpec {
                     actual.each { assert it instanceof String }
                 }
             }
-            
+
             task verify(type: MyTask)
         """
     }
 
-    def "can finalize the value of a property using API"() {
+    @Unroll
+    def "can define task with abstract ListProperty<#type> getter"() {
         given:
         buildFile << """
+            class Param<T> {
+                T display
+                String toString() { display.toString() }
+            }
+
+            abstract class ATask extends DefaultTask {
+                @Input
+                abstract ListProperty<$type> getProp()
+
+                @TaskAction
+                void go() {
+                    println("prop = \${prop.get()}")
+                }
+            }
+
+            tasks.create("thing", ATask) {
+                prop = $value
+            }
+        """
+
+        when:
+        succeeds("thing")
+
+        then:
+        outputContains("prop = $display")
+
+        where:
+        type            | value                                                                | display
+        "String"        | '["a", "b", "c"]'                                                    | '[a, b, c]'
+        "Param<String>" | '[new Param<String>(display: "a"), new Param<String>(display: "b")]' | '[a, b]'
+    }
+
+    def "can finalize the value of a property using API"() {
+        given:
+        buildFile """
 Integer counter = 0
 def provider = providers.provider { [++counter, ++counter] }
 
 def property = objects.listProperty(Integer)
 property.set(provider)
 
-assert property.get() == [1, 2] 
-assert property.get() == [3, 4] 
+assert property.get() == [1, 2]
+assert property.get() == [3, 4]
 property.finalizeValue()
 assert property.get() == [5, 6]
 assert property.get() == [5, 6]
@@ -65,22 +103,43 @@ property.set([1])
         failure.assertHasCause("The value for this property is final and cannot be changed any further.")
     }
 
-    def "task @Input property is implicitly finalized and changes ignored when task starts execution"() {
+    def "can disallow changes to a property using API without finalizing value"() {
         given:
-        buildFile << """
+        buildFile """
+Integer counter = 0
+def provider = providers.provider { [++counter, ++counter] }
+
+def property = objects.listProperty(Integer)
+property.set(provider)
+
+assert property.get() == [1, 2]
+assert property.get() == [3, 4]
+property.disallowChanges()
+assert property.get() == [5, 6]
+assert property.get() == [7, 8]
+
+property.set([1])
+"""
+
+        when:
+        fails()
+
+        then:
+        failure.assertHasCause("The value for this property cannot be changed any further.")
+    }
+
+    def "task @Input property is implicitly finalized when task starts execution"() {
+        given:
+        buildFile """
 class SomeTask extends DefaultTask {
     @Input
     final ListProperty<String> prop = project.objects.listProperty(String)
-    
+
     @OutputFile
     final Property<RegularFile> outputFile = project.objects.fileProperty()
-    
+
     @TaskAction
     void go() {
-        prop.set(["ignored"])
-        prop.add("ignored")
-        prop.addAll(["ignored"])
-        prop.empty()
         outputFile.get().asFile.text = prop.get()
     }
 }
@@ -88,8 +147,8 @@ class SomeTask extends DefaultTask {
 task thing(type: SomeTask) {
     prop = ["value 1"]
     outputFile = layout.buildDirectory.file("out.txt")
-    doLast {
-        prop.set(["ignored"])
+    doFirst {
+        prop.set(["broken"])
     }
 }
 
@@ -99,31 +158,23 @@ afterEvaluate {
 
 task before {
     doLast {
-        thing.prop = providers.provider { ["final value"] }
+        thing.prop = providers.provider { ["value 3"] }
     }
 }
 thing.dependsOn before
-
-task after {
-    dependsOn thing
-    doLast {
-        thing.prop = ["ignore"]
-        assert thing.prop.get() == ["final value"]
-    }
-}
 """
 
         when:
-        executer.expectDeprecationWarning()
-        run("after")
+        fails("thing")
 
         then:
-        file("build/out.txt").text == "[final value]"
+        failure.assertHasDescription("Execution failed for task ':thing'.")
+        failure.assertHasCause("The value for task ':thing' property 'prop' is final and cannot be changed any further.")
     }
 
-    def "task ad hoc input property is implicitly finalized and changes ignored when task starts execution"() {
+    def "task ad hoc input property is implicitly finalized when task starts execution"() {
         given:
-        buildFile << """
+        buildFile """
 
 def prop = project.objects.listProperty(String)
 
@@ -138,16 +189,16 @@ task thing {
 """
 
         when:
-        executer.expectDeprecationWarning()
-        run("thing")
+        fails("thing")
 
         then:
-        output.contains("prop = [value 1]")
+        failure.assertHasDescription("Execution failed for task ':thing'.")
+        failure.assertHasCause("The value for this property is final and cannot be changed any further.")
     }
 
     def "can use property with no value as optional ad hoc task input property"() {
         given:
-        buildFile << """
+        buildFile """
 
 def prop = project.objects.listProperty(String)
 prop.set((List)null)
@@ -402,4 +453,30 @@ task wrongPropertyElementTypeApi {
         expect:
         succeeds("verify")
     }
+
+    def "fails when property with no value is queried"() {
+        given:
+        buildFile << """
+            abstract class SomeTask extends DefaultTask {
+                @Internal
+                abstract ListProperty<String> getProp()
+
+                @TaskAction
+                def go() {
+                    prop.set((Iterable<String>)null)
+                    prop.get()
+                }
+            }
+
+            tasks.register('thing', SomeTask)
+        """
+
+        when:
+        fails("thing")
+
+        then:
+        failure.assertHasDescription("Execution failed for task ':thing'.")
+        failure.assertHasCause("Cannot query the value of task ':thing' property 'prop' because it has no value available.")
+    }
+
 }

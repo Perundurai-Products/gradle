@@ -16,6 +16,8 @@
 
 
 package org.gradle.nativeplatform.test.googletest
+
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.integtests.fixtures.Sample
 import org.gradle.internal.os.OperatingSystem
 import org.gradle.nativeplatform.fixtures.AbstractInstalledToolChainIntegrationSpec
@@ -33,9 +35,10 @@ class GoogleTestSamplesIntegrationTest extends AbstractInstalledToolChainIntegra
     @Rule public final Sample googleTest = sample(temporaryFolder, 'google-test')
 
     private static Sample sample(TestDirectoryProvider testDirectoryProvider, String name) {
-        return new Sample(testDirectoryProvider, "native-binaries/${name}", name)
+        return new Sample(testDirectoryProvider, "native-binaries/${name}/groovy", name)
     }
 
+    @ToBeFixedForConfigurationCache
     def "googleTest"() {
         given:
         // On windows, GoogleTest sample only works out of the box with VS2015

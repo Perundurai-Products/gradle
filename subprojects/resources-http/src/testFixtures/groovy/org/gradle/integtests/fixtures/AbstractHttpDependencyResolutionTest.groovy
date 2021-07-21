@@ -27,7 +27,8 @@ import static org.gradle.internal.resource.transport.http.JavaSystemPropertiesHt
 import static org.gradle.internal.resource.transport.http.JavaSystemPropertiesHttpTimeoutSettings.SOCKET_TIMEOUT_SYSTEM_PROPERTY
 
 abstract class AbstractHttpDependencyResolutionTest extends AbstractDependencyResolutionTest {
-    @Rule public final RepositoryHttpServer server = new RepositoryHttpServer(temporaryFolder)
+    @Rule
+    public final RepositoryHttpServer server = new RepositoryHttpServer(temporaryFolder)
 
     def setup() {
         executer.beforeExecute {
@@ -36,17 +37,17 @@ abstract class AbstractHttpDependencyResolutionTest extends AbstractDependencyRe
         }
     }
 
-    IvyHttpRepository getIvyHttpRepo() {
-        return new IvyHttpRepository(server, "/repo", ivyRepo)
+    IvyHttpRepository getIvyHttpRepo(HttpRepository.MetadataType metadataType = HttpRepository.MetadataType.DEFAULT) {
+        return new IvyHttpRepository(server, "/repo", metadataType, ivyRepo)
     }
 
     IvyHttpRepository ivyHttpRepo(String name, HttpRepository.MetadataType metadataType = HttpRepository.MetadataType.DEFAULT) {
-        assert ! name.startsWith("/")
+        assert !name.startsWith("/")
         return new IvyHttpRepository(server, "/${name}", metadataType, ivyRepo(name))
     }
 
-    MavenHttpRepository getMavenHttpRepo() {
-        return new MavenHttpRepository(server, "/repo", mavenRepo)
+    MavenHttpRepository getMavenHttpRepo(HttpRepository.MetadataType metadataType = HttpRepository.MetadataType.DEFAULT) {
+        return new MavenHttpRepository(server, "/repo", metadataType, mavenRepo)
     }
 
     MavenHttpRepository mavenHttpRepo(String name, HttpRepository.MetadataType metadataType = HttpRepository.MetadataType.DEFAULT) {

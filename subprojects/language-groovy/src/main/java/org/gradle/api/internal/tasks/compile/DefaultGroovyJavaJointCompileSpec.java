@@ -16,22 +16,20 @@
 
 package org.gradle.api.internal.tasks.compile;
 
-import org.gradle.api.tasks.compile.GroovyCompileOptions;
-
 import java.io.File;
 import java.util.List;
 
 public class DefaultGroovyJavaJointCompileSpec extends DefaultJavaCompileSpec implements GroovyJavaJointCompileSpec {
-    private GroovyCompileOptions compileOptions;
+    private MinimalGroovyCompileOptions groovyCompileOptions;
     private List<File> groovyClasspath;
 
     @Override
-    public GroovyCompileOptions getGroovyCompileOptions() {
-        return compileOptions;
+    public MinimalGroovyCompileOptions getGroovyCompileOptions() {
+        return groovyCompileOptions;
     }
 
-    public void setGroovyCompileOptions(GroovyCompileOptions compileOptions) {
-        this.compileOptions = compileOptions;
+    public void setGroovyCompileOptions(MinimalGroovyCompileOptions groovyCompileOptions) {
+        this.groovyCompileOptions = groovyCompileOptions;
     }
 
     @Override
@@ -42,5 +40,10 @@ public class DefaultGroovyJavaJointCompileSpec extends DefaultJavaCompileSpec im
     @Override
     public void setGroovyClasspath(List<File> groovyClasspath) {
         this.groovyClasspath = groovyClasspath;
+    }
+
+    @Override
+    public boolean incrementalCompilationEnabled() {
+        return getCompileOptions().getPreviousCompilationDataFile() != null;
     }
 }

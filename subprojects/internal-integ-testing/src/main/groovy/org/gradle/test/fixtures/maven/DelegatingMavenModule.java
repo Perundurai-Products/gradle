@@ -24,6 +24,7 @@ import org.gradle.test.fixtures.ModuleArtifact;
 import org.gradle.test.fixtures.file.TestFile;
 import org.gradle.test.fixtures.gradle.VariantMetadataSpec;
 
+import java.io.File;
 import java.util.Map;
 
 public abstract class DelegatingMavenModule<T extends MavenModule> implements MavenModule {
@@ -110,6 +111,24 @@ public abstract class DelegatingMavenModule<T extends MavenModule> implements Ma
     }
 
     @Override
+    public MavenModule withoutGradleMetadataRedirection() {
+        backingModule.withoutGradleMetadataRedirection();
+        return t();
+    }
+
+    @Override
+    public MavenModule withoutExtraChecksums() {
+        backingModule.withoutExtraChecksums();
+        return t();
+    }
+
+    @Override
+    public MavenModule withExtraChecksums() {
+        backingModule.withoutGradleMetadataRedirection();
+        return t();
+    }
+
+    @Override
     public TestFile getArtifactFile() {
         return backingModule.getArtifactFile();
     }
@@ -164,6 +183,7 @@ public abstract class DelegatingMavenModule<T extends MavenModule> implements Ma
         return backingModule.getRootMetaData();
     }
 
+    @Override
     public ModuleArtifact getSnapshotMetaData() {
         return backingModule.getSnapshotMetaData();
     }
@@ -214,6 +234,12 @@ public abstract class DelegatingMavenModule<T extends MavenModule> implements Ma
     @Override
     public MavenModule variant(String variant, Map<String, String> attributes, @DelegatesTo(value=VariantMetadataSpec.class, strategy=Closure.DELEGATE_FIRST) Closure<?> variantConfiguration) {
         backingModule.variant(variant, attributes, variantConfiguration);
+        return t();
+    }
+
+    @Override
+    public MavenModule adhocVariants() {
+        backingModule.adhocVariants();
         return t();
     }
 
@@ -270,12 +296,25 @@ public abstract class DelegatingMavenModule<T extends MavenModule> implements Ma
     }
 
     @Override
-    public void withVariant(String name, Closure<?> action) {
+    public MavenModule withVariant(String name, Closure<?> action) {
         backingModule.withVariant(name, action);
+        return this;
     }
 
     @Override
     public Map<String, String> getAttributes() {
         return backingModule.getAttributes();
+    }
+
+    @Override
+    public T withoutDefaultVariants() {
+        backingModule.withoutDefaultVariants();
+        return t();
+    }
+
+    @Override
+    public Module withSignature(@DelegatesTo(value = File.class, strategy = Closure.DELEGATE_FIRST) Closure<?> signer) {
+        backingModule.withSignature(signer);
+        return t();
     }
 }

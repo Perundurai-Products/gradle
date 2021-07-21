@@ -16,8 +16,6 @@
 
 package org.gradle.integtests.tooling.fixture;
 
-import org.gradle.api.specs.Spec;
-import org.gradle.api.specs.Specs;
 import org.gradle.util.GradleVersion;
 
 import java.util.ArrayList;
@@ -28,6 +26,7 @@ public class GradleVersionSpec {
         String trimmed = constraint.trim();
         if (trimmed.equals("current")) {
             return new Spec<GradleVersion>() {
+                @Override
                 public boolean isSatisfiedBy(GradleVersion element) {
                     return element.equals(GradleVersion.current());
                 }
@@ -35,6 +34,7 @@ public class GradleVersionSpec {
         }
         if (trimmed.equals("!current")) {
             return new Spec<GradleVersion>() {
+                @Override
                 public boolean isSatisfiedBy(GradleVersion element) {
                     return !element.equals(GradleVersion.current());
                 }
@@ -43,6 +43,7 @@ public class GradleVersionSpec {
         if (trimmed.startsWith("=")) {
             final GradleVersion target = GradleVersion.version(trimmed.substring(1)).getBaseVersion();
             return new Spec<GradleVersion>() {
+                @Override
                 public boolean isSatisfiedBy(GradleVersion element) {
                     return element.getBaseVersion().equals(target);
                 }
@@ -55,6 +56,7 @@ public class GradleVersionSpec {
             if (value.startsWith(">=")) {
                 final GradleVersion minVersion = GradleVersion.version(value.substring(2));
                 specs.add(new Spec<GradleVersion>() {
+                    @Override
                     public boolean isSatisfiedBy(GradleVersion element) {
                         return element.getBaseVersion().compareTo(minVersion) >= 0;
                     }
@@ -62,6 +64,7 @@ public class GradleVersionSpec {
             } else if (value.startsWith(">")) {
                 final GradleVersion minVersion = GradleVersion.version(value.substring(1));
                 specs.add(new Spec<GradleVersion>() {
+                    @Override
                     public boolean isSatisfiedBy(GradleVersion element) {
                         return element.getBaseVersion().compareTo(minVersion) > 0;
                     }
@@ -69,6 +72,7 @@ public class GradleVersionSpec {
             } else if (value.startsWith("<=")) {
                 final GradleVersion maxVersion = GradleVersion.version(value.substring(2));
                 specs.add(new Spec<GradleVersion>() {
+                    @Override
                     public boolean isSatisfiedBy(GradleVersion element) {
                         return element.getBaseVersion().compareTo(maxVersion) <= 0;
                     }
@@ -76,6 +80,7 @@ public class GradleVersionSpec {
             } else if (value.startsWith("<")) {
                 final GradleVersion maxVersion = GradleVersion.version(value.substring(1));
                 specs.add(new Spec<GradleVersion>() {
+                    @Override
                     public boolean isSatisfiedBy(GradleVersion element) {
                         return element.getBaseVersion().compareTo(maxVersion) < 0;
                     }
@@ -83,6 +88,7 @@ public class GradleVersionSpec {
             } else if (value.startsWith("!")) {
                 final GradleVersion excludedVersion = GradleVersion.version(value.substring(1));
                 specs.add(new Spec<GradleVersion>() {
+                    @Override
                     public boolean isSatisfiedBy(GradleVersion element) {
                         return !element.getBaseVersion().equals(excludedVersion);
                     }

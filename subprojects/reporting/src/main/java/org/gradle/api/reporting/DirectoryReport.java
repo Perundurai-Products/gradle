@@ -16,6 +16,7 @@
 
 package org.gradle.api.reporting;
 
+import org.gradle.api.file.DirectoryProperty;
 import org.gradle.api.tasks.Internal;
 import org.gradle.api.tasks.OutputDirectory;
 
@@ -32,7 +33,7 @@ public interface DirectoryReport extends ConfigurableReport {
      * This can be the index.html file in a HTML report
      *
      * @return the entry point of the report or
-     * {@link org.gradle.api.reporting.DirectoryReport#getDestination()}
+     * {@link DirectoryReport#getOutputLocation()}
      * if no entry point defined
      *
      */
@@ -41,7 +42,7 @@ public interface DirectoryReport extends ConfigurableReport {
 
     @OutputDirectory
     @Override
-    File getDestination();
+    DirectoryProperty getOutputLocation();
 
     /**
      * Always returns {@link Report.OutputType#DIRECTORY}

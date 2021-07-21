@@ -27,7 +27,7 @@ import org.gradle.api.resources.TextResource;
 import org.gradle.internal.io.IoUtils;
 import org.gradle.jvm.application.scripts.JavaAppStartScriptGenerationDetails;
 import org.gradle.jvm.application.scripts.TemplateBasedScriptGenerator;
-import org.gradle.util.TextUtil;
+import org.gradle.util.internal.TextUtil;
 
 import java.io.*;
 import java.util.Map;
@@ -45,6 +45,7 @@ public class DefaultTemplateBasedStartScriptGenerator implements TemplateBasedSc
         this.template = template;
     }
 
+    @Override
     public void generateScript(JavaAppStartScriptGenerationDetails details, Writer destination) {
         try {
             Map<String, String> binding = bindingFactory.transform(details);
@@ -55,10 +56,12 @@ public class DefaultTemplateBasedStartScriptGenerator implements TemplateBasedSc
         }
     }
 
+    @Override
     public void setTemplate(TextResource template) {
         this.template = template;
     }
 
+    @Override
     public TextResource getTemplate() {
         return template;
     }

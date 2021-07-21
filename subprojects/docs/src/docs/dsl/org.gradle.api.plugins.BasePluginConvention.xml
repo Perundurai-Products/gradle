@@ -9,7 +9,7 @@
                 </tr>
             </thead>
             <tr>
-                <td>distsDir</td>
+                <td>distsDirectory</td>
                 <td><literal><replaceable>${project.buildDir}</replaceable>/<replaceable>${project.distsDirName}</replaceable></literal></td>
             </tr>
             <tr>
@@ -17,7 +17,7 @@
                 <td><literal>'distributions'</literal></td>
             </tr>
             <tr>
-                <td>libsDir</td>
+                <td>libsDirectory</td>
                 <td><literal><replaceable>${project.buildDir}</replaceable>/<replaceable>${project.libsDirName}</replaceable></literal></td>
             </tr>
             <tr>

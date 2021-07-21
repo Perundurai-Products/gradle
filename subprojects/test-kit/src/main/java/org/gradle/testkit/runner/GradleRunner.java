@@ -18,10 +18,12 @@ package org.gradle.testkit.runner;
 
 import org.gradle.testkit.runner.internal.DefaultGradleRunner;
 
+import javax.annotation.Nullable;
 import java.io.File;
 import java.io.Writer;
 import java.net.URI;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Executes a Gradle build, allowing inspection of the outcome.
@@ -44,6 +46,10 @@ import java.util.List;
  * <p>
  * GradleRunner instances are not thread safe and cannot be used concurrently.
  * However, multiple instances are able to be used concurrently.
+ * <p>
+ * On Windows, Gradle runner disables file system watching for the executed build, since the Windows watchers add a file lock
+ * on the root project directory, causing problems when trying to delete it. You can still enable file system watching manually
+ * for your test by adding the `--watch-fs` command line argument via {@link #withArguments(String...)}.
  * <p>
  * Please see the Gradle <a href="https://docs.gradle.org/current/userguide/test_kit.html" target="_top">TestKit</a> User Manual chapter for more information.
  *
@@ -116,7 +122,7 @@ public abstract class GradleRunner {
      * <p>
      * The given URI must point to a valid Gradle distribution ZIP file.
      * This method is typically used as an alternative to {@link #withGradleVersion(String)},
-     * where it is preferable to obtain the Gradle runtime from “local” servers.
+     * where it is preferable to obtain the Gradle runtime from "local" servers.
      * <p>
      * Unless previously downloaded, this method will cause the Gradle runtime at the given URI to be downloaded.
      * The download will be cached beneath the Gradle User Home directory, the location of which is determined by the following in order of precedence:
@@ -143,11 +149,17 @@ public abstract class GradleRunner {
      * If no explicit Gradle user home is specified via the build arguments (i.e. the {@code -g «dir»} option}),
      * this directory will also be used for the Gradle user home for the test build.
      * <p>
-     * If no value has been specified when the build is initiated, a directory unique to the current operating system
-     * user will be created and used within the JVM's temporary directory as advertised by the {@code java.io.tmpdir} system property.
+     * If no value has been specified when the build is initiated, a directory will be created within a temporary directory.
+     * <ul>
+     * <li>When executed from a Gradle Test task, the Test task's temporary directory is used (see {@link org.gradle.api.Task#getTemporaryDir()}).</li>
+     * <li>When executed from somewhere else, the system's temporary directory is used (based on {@code java.io.tmpdir}).</li>
+     * </ul>
+     * <p>
      * This directory is not deleted by the runner after the test build.
      * <p>
      * You may wish to specify a location that is within your project and regularly cleaned, such as the project's build directory.
+     * <p>
+     * It can be set using the system property {@code org.gradle.testkit.dir} for the test process,
      * <p>
      * The actual contents of this directory are an internal implementation detail and may change at any time.
      *
@@ -281,6 +293,9 @@ public abstract class GradleRunner {
      * Debug support is off (i.e. {@code false}) by default.
      * It can be enabled by setting the system property {@code org.gradle.testkit.debug} to {@code true} for the test process,
      * or by using the {@link #withDebug(boolean)} method.
+     * <p>
+     * When {@link #withEnvironment(Map)} is specified, running with debug is not allowed.
+     * Debug mode runs "in process" and we need to fork a separate process to pass environment variables.
      *
      * @return whether the build should be executed in the same process
      * @since 2.9
@@ -296,6 +311,29 @@ public abstract class GradleRunner {
      * @since 2.9
      */
     public abstract GradleRunner withDebug(boolean flag);
+
+    /**
+     * Environment variables for the build.
+     * {@code null} is valid and indicates the build will use the system environment.
+     *
+     * @return environment variables
+     * @since 5.2
+     */
+    @Nullable
+    public abstract Map<String, String> getEnvironment();
+
+    /**
+     * Sets the environment variables for the build.
+     * {@code null} is permitted and will make the build use the system environment.
+     * <p>
+     * When environment is specified, running with {@link #isDebug()} is not allowed.
+     * Debug mode runs in-process and TestKit must fork a separate process to pass environment variables.
+     *
+     * @param environmentVariables the variables to use, {@code null} is allowed.
+     * @return this
+     * @since 5.2
+     */
+    public abstract GradleRunner withEnvironment(@Nullable Map<String, String> environmentVariables);
 
     /**
      * Configures the runner to forward standard output from builds to the given writer.

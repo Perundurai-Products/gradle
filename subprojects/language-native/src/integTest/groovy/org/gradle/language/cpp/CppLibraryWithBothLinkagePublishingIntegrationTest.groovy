@@ -16,6 +16,7 @@
 
 package org.gradle.language.cpp
 
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.nativeplatform.fixtures.AbstractInstalledToolChainIntegrationSpec
 import org.gradle.nativeplatform.fixtures.app.CppAppWithLibraryAndOptionalFeature
 import org.gradle.nativeplatform.fixtures.app.CppLib
@@ -24,6 +25,7 @@ import org.gradle.test.fixtures.maven.MavenFileRepository
 
 class CppLibraryWithBothLinkagePublishingIntegrationTest extends AbstractInstalledToolChainIntegrationSpec implements CppTaskNames {
 
+    @ToBeFixedForConfigurationCache
     def "can publish the binaries and headers of a library to a Maven repository"() {
         def lib = new CppLib()
         assert !lib.publicHeaders.files.empty
@@ -33,7 +35,7 @@ class CppLibraryWithBothLinkagePublishingIntegrationTest extends AbstractInstall
         buildFile << """
             apply plugin: 'cpp-library'
             apply plugin: 'maven-publish'
-            
+
             group = 'some.group'
             version = '1.2'
             library {
@@ -153,6 +155,7 @@ class CppLibraryWithBothLinkagePublishingIntegrationTest extends AbstractInstall
         releaseStaticMetadata.variant('releaseStaticRuntime')
     }
 
+    @ToBeFixedForConfigurationCache
     def "correct variant of published library is selected when resolving"() {
         def app = new CppAppWithLibraryAndOptionalFeature()
 
@@ -162,13 +165,13 @@ class CppLibraryWithBothLinkagePublishingIntegrationTest extends AbstractInstall
         producer.file("build.gradle") << """
             apply plugin: 'cpp-library'
             apply plugin: 'maven-publish'
-            
+
             group = 'some.group'
             version = '1.2'
             publishing {
                 repositories { maven { url '${repoDir.toURI()}' } }
             }
-            
+
             library {
                 linkage = [Linkage.STATIC, Linkage.SHARED]
                 binaries.configureEach {

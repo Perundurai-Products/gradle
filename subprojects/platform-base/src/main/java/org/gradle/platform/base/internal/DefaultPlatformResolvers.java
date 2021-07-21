@@ -21,7 +21,7 @@ import org.gradle.api.NamedDomainObjectSet;
 import org.gradle.api.specs.Spec;
 import org.gradle.platform.base.Platform;
 import org.gradle.platform.base.PlatformContainer;
-import org.gradle.util.CollectionUtils;
+import org.gradle.util.internal.CollectionUtils;
 
 import java.util.List;
 
@@ -57,6 +57,7 @@ public class DefaultPlatformResolvers implements PlatformResolvers {
 
         NamedDomainObjectSet<T> allWithType = platforms.withType(type);
         T matching = CollectionUtils.findFirst(allWithType, new Spec<T>() {
+            @Override
             public boolean isSatisfiedBy(T element) {
                 return element.getName().equals(target);
             }

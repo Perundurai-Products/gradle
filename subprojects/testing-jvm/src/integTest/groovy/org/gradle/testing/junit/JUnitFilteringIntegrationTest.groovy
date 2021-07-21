@@ -30,17 +30,21 @@ import static org.gradle.testing.fixture.JUnitMultiVersionIntegrationSpec.*
 class JUnitFilteringIntegrationTest extends AbstractTestFilteringIntegrationTest {
 
     String imports = "org.junit.*"
-    String framework = version.toString().startsWith('Vintage') ? "JUnitPlatform" : "JUnit"
+
+    @Override
+    String getFramework() {
+        return version.toString().startsWith('Vintage') ? "JUnitPlatform" : "JUnit"
+    }
 
     @Override
     String getDependencies() {
         if (version.toString().startsWith('Vintage')) {
             """
-                testCompileOnly 'junit:junit:4.12'
+                testCompileOnly 'junit:junit:4.13'
                 testRuntimeOnly 'org.junit.vintage:junit-vintage-engine:${dependencyVersion}'
-"""
+            """
         } else {
-            "testCompile 'junit:junit:${dependencyVersion}'"
+            "testImplementation 'junit:junit:${dependencyVersion}'"
         }
     }
 
@@ -219,12 +223,12 @@ class JUnitFilteringIntegrationTest extends AbstractTestFilteringIntegrationTest
                 @Test public void test() {}
             }
         """
-        buildFile << """ 
+        buildFile << """
             test {
                 filter {
-                    includeTestsMatching "$pattern" 
+                    includeTestsMatching "$pattern"
                 }
-                afterSuite { descriptor, result -> 
+                afterSuite { descriptor, result ->
                     println descriptor
                 }
             }

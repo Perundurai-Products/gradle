@@ -17,9 +17,7 @@
 package org.gradle.api.tasks
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
 import org.gradle.test.fixtures.file.TestFile
-import spock.lang.IgnoreIf
 import spock.lang.Issue
 
 class JavaExecIntegrationTest extends AbstractIntegrationSpec {
@@ -47,7 +45,7 @@ class JavaExecIntegrationTest extends AbstractIntegrationSpec {
 
             task run(type: JavaExec) {
                 classpath = project.layout.files(compileJava)
-                main "driver.Driver"
+                mainClass = "driver.Driver"
                 args "1"
             }
         """
@@ -68,7 +66,6 @@ class JavaExecIntegrationTest extends AbstractIntegrationSpec {
         """
     }
 
-    @IgnoreIf({ GradleContextualExecuter.parallel })
     def "java exec is not incremental by default"() {
         when:
         run "run"
@@ -171,31 +168,43 @@ class JavaExecIntegrationTest extends AbstractIntegrationSpec {
         def inputFile = file("input.txt")
         def outputFile = file("out.txt")
         buildFile << """
-            class MyApplicationJvmArguments implements CommandLineArgumentProvider {
+            abstract class MyApplicationJvmArguments implements CommandLineArgumentProvider {
                 @InputFile
                 @PathSensitive(PathSensitivity.NONE)
-                File inputFile
-            
-                @Override
-                Iterable<String> asArguments() {
-                    return ["-Dinput.file=\${inputFile.absolutePath}".toString()]
-                }            
-            }
-            
-            class MyApplicationCommandLineArguments implements CommandLineArgumentProvider {
-                @OutputFile
-                File outputFile
+                abstract RegularFileProperty getInputFile()
 
                 @Override
                 Iterable<String> asArguments() {
-                    return [outputFile.absolutePath]
-                }            
+                    return ["-Dinput.file=\${inputFile.get().asFile.absolutePath}".toString()]
+                }
             }
-            
-            run.jvmArgumentProviders << new MyApplicationJvmArguments(inputFile: new File(project.property('inputFile')))
-            
-            run.argumentProviders << new MyApplicationCommandLineArguments(outputFile: new File(project.property('outputFile')))
-             
+
+            abstract class MyApplicationCommandLineArguments implements CommandLineArgumentProvider {
+                @OutputFile
+                abstract RegularFileProperty getOutputFile()
+
+                @Override
+                Iterable<String> asArguments() {
+                    return [outputFile.get().asFile.absolutePath]
+                }
+            }
+
+            def projectDir = layout.projectDirectory
+
+            def input = providers.gradleProperty('inputFile').forUseAtConfigurationTime().map {
+                projectDir.file(it)
+            }
+            run.jvmArgumentProviders << objects.newInstance(MyApplicationJvmArguments).tap {
+                it.inputFile.set(input)
+            }
+
+            def output = providers.gradleProperty('outputFile').forUseAtConfigurationTime().map {
+                projectDir.file(it)
+            }
+            run.argumentProviders << objects.newInstance(MyApplicationCommandLineArguments).tap {
+                it.outputFile.set(output)
+            }
+
         """
         inputFile.text = "first"
         mainJavaFile.text = mainClass("""
@@ -210,7 +219,7 @@ class JavaExecIntegrationTest extends AbstractIntegrationSpec {
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
-            
+
         """)
 
         when:
@@ -232,6 +241,89 @@ class JavaExecIntegrationTest extends AbstractIntegrationSpec {
         then:
         executedAndNotSkipped ":run"
         outputFile.text == "different"
+    }
+
+    def "main class can be configured through a convention mapping"() {
+        given:
+        buildFile.text = """
+            apply plugin: "java"
+
+            task run(type: JavaExec) {
+                classpath = project.layout.files(compileJava)
+                conventionMapping("main") { "driver.Driver" }
+            }
+        """
+
+        when:
+        run "run"
+
+        then:
+        executedAndNotSkipped ":run"
+    }
+
+    @Issue("https://github.com/gradle/gradle/issues/12832")
+    def "classpath can be replaced with a file collection including the replaced value"() {
+        given:
+        buildFile.text = """
+            apply plugin: "java"
+
+            task run(type: JavaExec) {
+                classpath = project.layout.files(compileJava)
+                classpath = files(classpath, "someOtherFile.jar").filter(Specs.SATISFIES_ALL)
+                mainClass = "driver.Driver"
+            }
+        """
+
+        when:
+        run "run"
+
+        then:
+        executedAndNotSkipped ":run"
+    }
+
+    def "main setter method is deprecated"() {
+        given:
+        buildFile.text = """
+            plugins {
+                id("java")
+            }
+
+            task run(type: JavaExec) {
+                classpath = project.layout.files(compileJava)
+                main = "driver.Driver"
+            }
+        """
+
+        executer.expectDocumentedDeprecationWarning("The JavaExec.main property has been deprecated. This is scheduled to be removed in Gradle 8.0. Please use the mainClass property instead. See https://docs.gradle.org/current/dsl/org.gradle.api.tasks.JavaExec.html#org.gradle.api.tasks.JavaExec:main for more details.")
+        when:
+        run "run"
+
+        then:
+        executedAndNotSkipped ":run"
+    }
+
+    def "main getter method is deprecated"() {
+        given:
+        buildFile.text = """
+            plugins {
+                id("java")
+            }
+
+            task run(type: JavaExec) {
+                classpath = project.layout.files(compileJava)
+                mainClass = "driver.Driver"
+                doLast {
+                    println main
+                }
+            }
+        """
+
+        executer.expectDocumentedDeprecationWarning("The JavaExec.main property has been deprecated. This is scheduled to be removed in Gradle 8.0. Please use the mainClass property instead. See https://docs.gradle.org/current/dsl/org.gradle.api.tasks.JavaExec.html#org.gradle.api.tasks.JavaExec:main for more details.")
+        when:
+        run "run"
+
+        then:
+        executedAndNotSkipped ":run"
     }
 
     private void assertOutputFileIs(String text) {

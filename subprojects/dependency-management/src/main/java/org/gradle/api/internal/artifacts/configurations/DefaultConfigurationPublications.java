@@ -30,11 +30,10 @@ import org.gradle.api.artifacts.PublishArtifact;
 import org.gradle.api.artifacts.PublishArtifactSet;
 import org.gradle.api.attributes.AttributeContainer;
 import org.gradle.api.capabilities.Capability;
-import org.gradle.api.internal.CollectionCallbackActionDecorator;
-import org.gradle.api.internal.FactoryNamedDomainObjectContainer;
 import org.gradle.api.internal.artifacts.ConfigurationVariantInternal;
 import org.gradle.api.internal.attributes.AttributeContainerInternal;
 import org.gradle.api.internal.attributes.ImmutableAttributesFactory;
+import org.gradle.api.internal.collections.DomainObjectCollectionFactory;
 import org.gradle.api.internal.file.FileCollectionFactory;
 import org.gradle.internal.DisplayName;
 import org.gradle.internal.reflect.Instantiator;
@@ -56,8 +55,8 @@ public class DefaultConfigurationPublications implements ConfigurationPublicatio
     private final NotationParser<Object, Capability> capabilityNotationParser;
     private final FileCollectionFactory fileCollectionFactory;
     private final ImmutableAttributesFactory attributesFactory;
-    private CollectionCallbackActionDecorator collectionCallbackActionDecorator;
-    private FactoryNamedDomainObjectContainer<ConfigurationVariant> variants;
+    private final DomainObjectCollectionFactory domainObjectCollectionFactory;
+    private NamedDomainObjectContainer<ConfigurationVariant> variants;
     private ConfigurationVariantFactory variantFactory;
     private List<Capability> capabilities;
     private boolean canCreate = true;
@@ -71,7 +70,7 @@ public class DefaultConfigurationPublications implements ConfigurationPublicatio
                                             NotationParser<Object, Capability> capabilityNotationParser,
                                             FileCollectionFactory fileCollectionFactory,
                                             ImmutableAttributesFactory attributesFactory,
-                                            CollectionCallbackActionDecorator collectionCallbackActionDecorator) {
+                                            DomainObjectCollectionFactory domainObjectCollectionFactory) {
         this.displayName = displayName;
         this.artifacts = artifacts;
         this.allArtifacts = allArtifacts;
@@ -81,8 +80,21 @@ public class DefaultConfigurationPublications implements ConfigurationPublicatio
         this.capabilityNotationParser = capabilityNotationParser;
         this.fileCollectionFactory = fileCollectionFactory;
         this.attributesFactory = attributesFactory;
-        this.collectionCallbackActionDecorator = collectionCallbackActionDecorator;
+        this.domainObjectCollectionFactory = domainObjectCollectionFactory;
         this.attributes = attributesFactory.mutable(parentAttributes);
+    }
+
+    public void collectVariants(ConfigurationInternal.VariantVisitor visitor) {
+        visitor.visitArtifacts(artifacts);
+        PublishArtifactSet allArtifactSet = allArtifacts.getPublishArtifactSet();
+        if (variants == null || variants.isEmpty() || !allArtifactSet.isEmpty()) {
+            visitor.visitOwnVariant(displayName, attributes.asImmutable(), allArtifactSet);
+        }
+        if (variants != null) {
+            for (DefaultVariant variant : variants.withType(DefaultVariant.class)) {
+                variant.visit(visitor);
+            }
+        }
     }
 
     public OutgoingVariant convertToOutgoingVariant() {
@@ -106,7 +118,7 @@ public class DefaultConfigurationPublications implements ConfigurationPublicatio
             public Set<? extends OutgoingVariant> getChildren() {
                 PublishArtifactSet allArtifactSet = allArtifacts.getPublishArtifactSet();
                 LeafOutgoingVariant leafOutgoingVariant = new LeafOutgoingVariant(displayName, attributes, allArtifactSet);
-                if (variants == null) {
+                if (variants == null || variants.isEmpty()) {
                     return Collections.singleton(leafOutgoingVariant);
                 }
                 boolean hasArtifacts = !allArtifactSet.isEmpty();
@@ -155,7 +167,7 @@ public class DefaultConfigurationPublications implements ConfigurationPublicatio
         if (variants == null) {
             // Create variants container only as required
             variantFactory = new ConfigurationVariantFactory();
-            variants = new FactoryNamedDomainObjectContainer<ConfigurationVariant>(ConfigurationVariant.class, instantiator, variantFactory, collectionCallbackActionDecorator);
+            variants = domainObjectCollectionFactory.newNamedDomainObjectContainer(ConfigurationVariant.class, variantFactory);
         }
         return variants;
     }
@@ -174,20 +186,20 @@ public class DefaultConfigurationPublications implements ConfigurationPublicatio
             }
             capabilities.add(descriptor);
         } else {
-            throw new InvalidUserCodeException("Cannot declare capability '" + notation + "' after " + displayName + " has been resolved");
+            throw new InvalidUserCodeException("Cannot declare capability '" + notation + "' after dependency " + displayName + " has been resolved");
         }
     }
 
     @Override
     public Collection<? extends Capability> getCapabilities() {
-        return capabilities == null ? Collections.<Capability>emptyList() : ImmutableList.copyOf(capabilities);
+        return capabilities == null ? Collections.emptyList() : ImmutableList.copyOf(capabilities);
     }
 
     void preventFromFurtherMutation() {
         canCreate = false;
         if (variants != null) {
             for (ConfigurationVariant variant : variants) {
-                ((ConfigurationVariantInternal)variant).preventFurtherMutation();
+                ((ConfigurationVariantInternal) variant).preventFurtherMutation();
             }
         }
     }
@@ -196,9 +208,9 @@ public class DefaultConfigurationPublications implements ConfigurationPublicatio
         @Override
         public ConfigurationVariant create(String name) {
             if (canCreate) {
-                return instantiator.newInstance(DefaultVariant.class, displayName, name, parentAttributes, artifactNotationParser, fileCollectionFactory, attributesFactory, collectionCallbackActionDecorator);
+                return instantiator.newInstance(DefaultVariant.class, displayName, name, parentAttributes, artifactNotationParser, fileCollectionFactory, attributesFactory, domainObjectCollectionFactory);
             } else {
-                throw new InvalidUserCodeException("Cannot create variant '" + name + "' after " + displayName + " has been resolved");
+                throw new InvalidUserCodeException("Cannot create variant '" + name + "' after dependency " + displayName + " has been resolved");
             }
         }
     }

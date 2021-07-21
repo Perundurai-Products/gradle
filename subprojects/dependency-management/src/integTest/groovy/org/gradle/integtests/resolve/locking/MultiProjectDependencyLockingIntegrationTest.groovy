@@ -17,6 +17,7 @@
 package org.gradle.integtests.resolve.locking
 
 import org.gradle.integtests.fixtures.AbstractDependencyResolutionTest
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 
 class MultiProjectDependencyLockingIntegrationTest  extends AbstractDependencyResolutionTest {
 
@@ -29,6 +30,7 @@ include 'first', 'second'
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def 'does not apply lock defined in a dependent project'() {
         mavenRepo.module('org', 'foo', '1.0').publish()
         mavenRepo.module('org', 'foo', '1.1').publish()
@@ -56,7 +58,7 @@ project(':second') {
     }
 }
 """
-        firstLockFileFixture.createLockfile('compileClasspath', ['org:foo:1.0'])
+        firstLockFileFixture.createLockfile('compileClasspath', ['org:foo:1.0'], false)
 
         when:
         succeeds ':first:dependencyInsight', '--configuration', 'compileClasspath', '--dependency', 'foo'
@@ -71,6 +73,7 @@ project(':second') {
         outputContains('org:foo:1.1')
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def 'does apply lock to transitive dependencies from dependent project'() {
         mavenRepo.module('org', 'foo', '1.0').publish()
         mavenRepo.module('org', 'foo', '1.1').publish()
@@ -98,7 +101,7 @@ project(':second') {
     }
 }
 """
-        firstLockFileFixture.createLockfile('compileClasspath', ['org:foo:1.0'])
+        firstLockFileFixture.createLockfile('compileClasspath', ['org:foo:1.0'], false)
 
         when:
         succeeds ':first:dependencyInsight', '--configuration', 'compileClasspath', '--dependency', 'foo'
@@ -113,6 +116,7 @@ project(':second') {
         outputContains('org:foo:1.1')
     }
 
+    @ToBeFixedForConfigurationCache
     def 'creates a lock file including transitive dependencies of dependent project'() {
         mavenRepo.module('org', 'foo', '1.0').publish()
         mavenRepo.module('org', 'foo', '1.1').publish()
@@ -144,7 +148,7 @@ project(':second') {
         succeeds ':first:dependencies', '--configuration', 'compileClasspath', '--write-locks'
 
         then:
-        outputContains('Persisted dependency lock state for configuration \':first:compileClasspath\'')
+        outputContains('Persisted dependency lock state for project \':first\'')
         firstLockFileFixture.verifyLockfile('compileClasspath', ['org:foo:1.1'])
     }
 }

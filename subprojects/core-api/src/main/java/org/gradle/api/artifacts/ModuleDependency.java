@@ -18,11 +18,12 @@ package org.gradle.api.artifacts;
 import groovy.lang.Closure;
 import groovy.lang.DelegatesTo;
 import org.gradle.api.Action;
-import org.gradle.api.Incubating;
 import org.gradle.api.attributes.AttributeContainer;
 import org.gradle.api.attributes.HasConfigurableAttributes;
+import org.gradle.api.capabilities.Capability;
 
 import javax.annotation.Nullable;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -52,10 +53,12 @@ public interface ModuleDependency extends Dependency, HasConfigurableAttributes<
      * then consider using forced versions' feature: {@link ResolutionStrategy#force(Object...)}.
      *
      * <pre class='autoTested'>
-     * apply plugin: 'java' //so that I can declare 'compile' dependencies
+     * plugins {
+     *     id 'java' // so that I can declare 'implementation' dependencies
+     * }
      *
      * dependencies {
-     *   compile('org.hibernate:hibernate:3.1') {
+     *   implementation('org.hibernate:hibernate:3.1') {
      *     //excluding a particular transitive dependency:
      *     exclude module: 'cglib' //by artifact name
      *     exclude group: 'org.jmock' //by group
@@ -87,7 +90,7 @@ public interface ModuleDependency extends Dependency, HasConfigurableAttributes<
      * <p>Adds an artifact to this dependency.</p>
      *
      * <p>If no artifact is added to a dependency, an implicit default artifact is used. This default artifact has the
-     * same name as the module and its type and extension is <em>jar</em>. If at least one artifact is explicitly added,
+     * same name as the module and its type and extension is {@code jar}. If at least one artifact is explicitly added,
      * the implicit default artifact won't be used any longer.</p>
      *
      * @return this
@@ -99,10 +102,12 @@ public interface ModuleDependency extends Dependency, HasConfigurableAttributes<
      * org.gradle.api.artifacts.DependencyArtifact} instance, which it can configure.</p>
      *
      * <p>If no artifact is added to a dependency, an implicit default artifact is used. This default artifact has the
-     * same name as the module and its type and extension is <em>jar</em>. If at least one artifact is explicitly added,
+     * same name as the module and its type and extension is {@code jar}. If at least one artifact is explicitly added,
      * the implicit default artifact won't be used any longer.</p>
      *
-     * @return this
+     * @return the added artifact
+     *
+     * @see DependencyArtifact
      */
     DependencyArtifact artifact(@DelegatesTo(value = DependencyArtifact.class, strategy = DELEGATE_FIRST) Closure configureClosure);
 
@@ -111,10 +116,12 @@ public interface ModuleDependency extends Dependency, HasConfigurableAttributes<
      * org.gradle.api.artifacts.DependencyArtifact} instance, which it can configure.</p>
      *
      * <p>If no artifact is added to a dependency, an implicit default artifact is used. This default artifact has the
-     * same name as the module and its type and extension is <em>jar</em>. If at least one artifact is explicitly added,
+     * same name as the module and its type and extension is {@code jar}. If at least one artifact is explicitly added,
      * the implicit default artifact won't be used any longer.</p>
      *
-     * @return this
+     * @return the added artifact
+     *
+     * @see DependencyArtifact
      *
      * @since 3.1
      */
@@ -150,12 +157,12 @@ public interface ModuleDependency extends Dependency, HasConfigurableAttributes<
      *
      * @since 4.0
      */
-    @Incubating
     void setTargetConfiguration(@Nullable String name);
 
     /**
      * {@inheritDoc}
      */
+    @Override
     ModuleDependency copy();
 
     /**
@@ -166,7 +173,7 @@ public interface ModuleDependency extends Dependency, HasConfigurableAttributes<
      *
      * @since 4.8
      */
-    @Incubating
+    @Override
     AttributeContainer getAttributes();
 
     /**
@@ -174,9 +181,52 @@ public interface ModuleDependency extends Dependency, HasConfigurableAttributes<
      * target variant, in particular when a single component provides different variants.
      *
      * @param configureAction the attributes mutation action
+     * @return this
      *
      * @since 4.8
      */
-    @Incubating
+    @Override
     ModuleDependency attributes(Action<? super AttributeContainer> configureAction);
+
+    /**
+     * Configures the requested capabilities of this dependency.
+     *
+     * @param configureAction the configuration action
+     * @return this
+     *
+     * @since 5.3
+     */
+    ModuleDependency capabilities(Action<? super ModuleDependencyCapabilitiesHandler> configureAction);
+
+    /**
+     * Returns the set of requested capabilities for this dependency.
+     * @return An immutable view of requested capabilities. Updates must be done calling {@link #capabilities(Action)}.
+     *
+     * @since 5.3
+     */
+    List<Capability> getRequestedCapabilities();
+
+    /**
+     * Endorse version constraints with {@link VersionConstraint#getStrictVersion()} strict versions} from the target module.
+     *
+     * Endorsing strict versions of another module/platform means that all strict versions will be interpreted during dependency
+     * resolution as if they where defined by the endorsing module itself.
+     *
+     * @since 6.0
+     */
+    void endorseStrictVersions();
+
+    /**
+     * Resets the {@link #isEndorsingStrictVersions()} state of this dependency.
+     *
+     * @since 6.0
+     */
+    void doNotEndorseStrictVersions();
+
+    /**
+     * Are the {@link VersionConstraint#getStrictVersion()} strict version} dependency constraints of the target module endorsed?
+     *
+     * @since 6.0
+     */
+    boolean isEndorsingStrictVersions();
 }

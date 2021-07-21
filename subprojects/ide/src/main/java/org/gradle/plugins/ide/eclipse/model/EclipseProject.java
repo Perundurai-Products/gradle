@@ -24,7 +24,7 @@ import org.gradle.api.Action;
 import org.gradle.api.InvalidUserDataException;
 import org.gradle.plugins.ide.api.XmlFileContentMerger;
 import org.gradle.plugins.ide.eclipse.model.internal.DefaultResourceFilter;
-import org.gradle.util.ClosureBackedAction;
+import org.gradle.util.internal.ClosureBackedAction;
 
 import javax.inject.Inject;
 import java.util.Arrays;
@@ -32,7 +32,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import static org.gradle.util.ConfigureUtil.configure;
+import static org.gradle.util.internal.ConfigureUtil.configure;
 
 /**
  * Enables fine-tuning project details (.project file) of the Eclipse plugin
@@ -41,8 +41,10 @@ import static org.gradle.util.ConfigureUtil.configure;
  * Bear in mind that usually you don't have configure eclipse project directly because Gradle configures it for free!
  *
  * <pre class='autoTested'>
- * apply plugin: 'java'
- * apply plugin: 'eclipse'
+ * plugins {
+ *     id 'java'
+ *     id 'eclipse'
+ * }
  *
  * eclipse {
  *   project {
@@ -95,8 +97,10 @@ import static org.gradle.util.ConfigureUtil.configure;
  * Examples of advanced configuration:
  *
  * <pre class='autoTested'>
- * apply plugin: 'java'
- * apply plugin: 'eclipse'
+ * plugins {
+ *     id 'java'
+ *     id 'eclipse'
+ * }
  *
  * eclipse {
  *   project {

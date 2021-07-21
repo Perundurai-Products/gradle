@@ -15,7 +15,8 @@
  */
 package org.gradle.initialization.layout
 
-import org.gradle.StartParameter
+
+import org.gradle.api.internal.StartParameterInternal
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.junit.Rule
 import spock.lang.Specification
@@ -29,10 +30,10 @@ class BuildLayoutFactoryTest extends Specification {
     ]
 
     @Rule
-    public final TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
+    public final TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider(getClass())
 
     @Unroll
-    def "returns current directory when it contains a #settingsFilename file when script languages #extensions"() {
+    def "returns current directory when it contains a #settingsFilename file when script languages"() {
         given:
         def locator = buildLayoutFactoryFor()
 
@@ -72,67 +73,6 @@ class BuildLayoutFactoryTest extends Specification {
     }
 
     @Unroll
-    def "looks for sibling directory called 'master' that it contains a #settingsFilename file"() {
-        given:
-        def locator = buildLayoutFactoryFor()
-
-        and:
-        def currentDir = tmpDir.createDir("current")
-        def masterDir = tmpDir.createDir("master")
-        def settingsFile = masterDir.createFile(settingsFilename)
-
-        expect:
-        def layout = locator.getLayoutFor(currentDir, true)
-        layout.rootDirectory == masterDir.parentFile
-        layout.settingsDir == masterDir
-        refersTo(layout, settingsFile)
-
-        where:
-        settingsFilename << TEST_CASES
-    }
-
-    @Unroll
-    def "searches ancestors for a directory called 'master' that contains a #settingsFilename file"() {
-        given:
-        def locator = buildLayoutFactoryFor()
-
-        and:
-        def currentDir = tmpDir.createDir("sub/current")
-        def masterDir = tmpDir.createDir("master")
-        def settingsFile = masterDir.createFile("settings.gradle")
-
-        expect:
-        def layout = locator.getLayoutFor(currentDir, true)
-        layout.rootDirectory == masterDir.parentFile
-        layout.settingsDir == masterDir
-        refersTo(layout, settingsFile)
-
-        where:
-        settingsFilename << TEST_CASES
-    }
-
-    @Unroll
-    def "ignores 'master' directory when it does not contain a #settingsFilename file"() {
-        given:
-        def locator = buildLayoutFactoryFor()
-
-        and:
-        def currentDir = tmpDir.createDir("sub/current")
-        def masterDir = tmpDir.createDir("sub/master")
-        masterDir.createFile("gradle.properties")
-        def settingsFile = tmpDir.createFile(settingsFilename)
-
-        expect:
-        def layout = locator.getLayoutFor(currentDir, true)
-        layout.rootDirectory == tmpDir.testDirectory
-        layout.settingsDir == tmpDir.testDirectory
-        refersTo(layout, settingsFile)
-
-        where:
-        settingsFilename << TEST_CASES
-    }
-
-    @Unroll
     def "returns closest ancestor directory that contains a #settingsFilename file"() {
         given:
         def locator = buildLayoutFactoryFor()
@@ -168,27 +108,6 @@ class BuildLayoutFactoryTest extends Specification {
         def layout = locator.getLayoutFor(currentDir, true)
         layout.rootDirectory == currentDir
         layout.settingsDir == currentDir
-        refersTo(layout, settingsFile)
-
-        where:
-        settingsFilename << TEST_CASES
-    }
-
-    @Unroll
-    def "prefers the 'master' directory over ancestor directory with a #settingsFilename file"() {
-        given:
-        def locator = buildLayoutFactoryFor()
-
-        and:
-        def currentDir = tmpDir.createDir("sub/current")
-        def masterDir = tmpDir.createDir("sub/master")
-        def settingsFile = masterDir.createFile(settingsFilename)
-        tmpDir.createFile(settingsFilename)
-
-        expect:
-        def layout = locator.getLayoutFor(currentDir, true)
-        layout.rootDirectory == masterDir.parentFile
-        layout.settingsDir == masterDir
         refersTo(layout, settingsFile)
 
         where:
@@ -240,7 +159,7 @@ class BuildLayoutFactoryTest extends Specification {
         currentDir.createFile(settingsFilename)
         def rootDir = tmpDir.createDir("root")
         def settingsFile = rootDir.createFile(overrideSettingsFilename)
-        def startParameter = new StartParameter()
+        def startParameter = new StartParameterInternal()
         startParameter.currentDir = currentDir
         startParameter.settingsFile = settingsFile
         def config = new BuildLayoutConfiguration(startParameter)
@@ -264,9 +183,9 @@ class BuildLayoutFactoryTest extends Specification {
         and:
         def currentDir = tmpDir.createDir("current")
         currentDir.createFile(settingsFilename)
-        def startParameter = new StartParameter()
+        def startParameter = new StartParameterInternal()
         startParameter.currentDir = currentDir
-        startParameter.useEmptySettings()
+        startParameter.settingsFile = null
         def config = new BuildLayoutConfiguration(startParameter)
 
         expect:

@@ -18,8 +18,9 @@ package org.gradle.testkit.runner
 
 import org.gradle.api.Action
 import org.gradle.integtests.fixtures.daemon.DaemonsFixture
+import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
 import org.gradle.testkit.runner.fixtures.NonCrossVersion
-import org.gradle.util.DistributionLocator
+import org.gradle.util.internal.DistributionLocator
 import org.gradle.util.GradleVersion
 import org.gradle.util.Requires
 import org.gradle.util.TestPrecondition
@@ -60,7 +61,7 @@ class GradleRunnerGradleVersionIntegrationTest extends BaseGradleRunnerIntegrati
         """
 
         when:
-        def runner = runner('writeVersion')
+        def runner = this.runner('writeVersion')
         configurer.execute(runner)
         runner.build()
 
@@ -72,7 +73,7 @@ class GradleRunnerGradleVersionIntegrationTest extends BaseGradleRunnerIntegrati
 
         where:
         version                      | configurer
-        buildContext.version.version | { it.withGradleInstallation(buildContext.gradleHomeDir) }
+        buildContext.version.version | { if (!GradleContextualExecuter.embedded) { it.withGradleInstallation(buildContext.gradleHomeDir) }}
         VERSION                      | { it.withGradleDistribution(locator.getDistributionFor(GradleVersion.version(VERSION))) }
         VERSION                      | { it.withGradleVersion(VERSION) }
     }

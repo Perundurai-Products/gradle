@@ -30,7 +30,7 @@ import org.gradle.internal.serialize.Serializer;
 import org.gradle.internal.service.DefaultServiceRegistry;
 import org.gradle.internal.service.ServiceRegistry;
 import org.gradle.internal.service.scopes.GlobalScopeServices;
-import org.gradle.launcher.cli.action.BuildActionSerializer;
+import org.gradle.internal.service.scopes.GradleUserHomeScopeServiceRegistry;
 import org.gradle.launcher.daemon.configuration.DaemonServerConfiguration;
 import org.gradle.launcher.daemon.context.DaemonContext;
 import org.gradle.launcher.daemon.context.DaemonContextBuilder;
@@ -40,6 +40,7 @@ import org.gradle.launcher.daemon.registry.DaemonDir;
 import org.gradle.launcher.daemon.registry.DaemonRegistry;
 import org.gradle.launcher.daemon.registry.DaemonRegistryServices;
 import org.gradle.launcher.daemon.server.api.DaemonCommandAction;
+import org.gradle.launcher.daemon.server.api.HandleInvalidateVirtualFileSystem;
 import org.gradle.launcher.daemon.server.api.HandleReportStatus;
 import org.gradle.launcher.daemon.server.api.HandleStop;
 import org.gradle.launcher.daemon.server.exec.DaemonCommandExecuter;
@@ -58,10 +59,12 @@ import org.gradle.launcher.daemon.server.health.DaemonHealthCheck;
 import org.gradle.launcher.daemon.server.health.DaemonHealthStats;
 import org.gradle.launcher.daemon.server.health.DaemonMemoryStatus;
 import org.gradle.launcher.daemon.server.health.HealthExpirationStrategy;
+import org.gradle.launcher.daemon.server.health.gc.GarbageCollectorMonitoringStrategy;
 import org.gradle.launcher.daemon.server.scaninfo.DaemonScanInfo;
 import org.gradle.launcher.daemon.server.scaninfo.DefaultDaemonScanInfo;
 import org.gradle.launcher.daemon.server.stats.DaemonRunningStats;
 import org.gradle.launcher.exec.BuildExecuter;
+import org.gradle.tooling.internal.provider.action.BuildActionSerializer;
 
 import java.io.File;
 import java.util.UUID;
@@ -104,8 +107,8 @@ public class DaemonServices extends DefaultServiceRegistry {
         return new File(get(DaemonDir.class).getVersionedDir(), fileName);
     }
 
-    protected DaemonMemoryStatus createDaemonMemoryStatus(DaemonHealthStats healthStats) {
-        return new DaemonMemoryStatus(healthStats);
+    protected DaemonMemoryStatus createDaemonMemoryStatus(DaemonHealthStats healthStats, GarbageCollectorMonitoringStrategy strategy) {
+        return new DaemonMemoryStatus(healthStats, strategy.getHeapUsageThreshold(), strategy.getGcRateThreshold(), strategy.getNonHeapUsageThreshold(), strategy.getThrashingThreshold());
     }
 
     protected DaemonHealthCheck createDaemonHealthCheck(ListenerManager listenerManager, HealthExpirationStrategy healthExpirationStrategy) {
@@ -128,8 +131,12 @@ public class DaemonServices extends DefaultServiceRegistry {
         return new HealthExpirationStrategy(memoryStatus);
     }
 
-    protected DaemonHealthStats createDaemonHealthStats(DaemonRunningStats runningStats, ExecutorFactory executorFactory) {
-        return new DaemonHealthStats(runningStats, executorFactory);
+    protected DaemonHealthStats createDaemonHealthStats(DaemonRunningStats runningStats, GarbageCollectorMonitoringStrategy strategy, ExecutorFactory executorFactory) {
+        return new DaemonHealthStats(runningStats, strategy, executorFactory);
+    }
+
+    protected GarbageCollectorMonitoringStrategy createGarbageCollectorMonitoringStrategy() {
+        return GarbageCollectorMonitoringStrategy.determineGcStrategy();
     }
 
     protected ImmutableList<DaemonCommandAction> createDaemonCommandActions(DaemonContext daemonContext, ProcessEnvironment processEnvironment, DaemonHealthStats healthStats, DaemonHealthCheck healthCheck, BuildExecuter buildActionExecuter, DaemonRunningStats runningStats) {
@@ -137,6 +144,7 @@ public class DaemonServices extends DefaultServiceRegistry {
         DaemonDiagnostics daemonDiagnostics = new DaemonDiagnostics(daemonLog, daemonContext.getPid());
         return ImmutableList.of(
             new HandleStop(get(ListenerManager.class)),
+            new HandleInvalidateVirtualFileSystem(get(GradleUserHomeScopeServiceRegistry.class)),
             new HandleCancel(),
             new HandleReportStatus(),
             new ReturnResult(),
@@ -148,7 +156,7 @@ public class DaemonServices extends DefaultServiceRegistry {
             new RequestStopIfSingleUsedDaemon(),
             new ResetDeprecationLogger(),
             new WatchForDisconnection(),
-            new ExecuteBuild(buildActionExecuter, runningStats, this)
+            new ExecuteBuild(buildActionExecuter, runningStats)
         );
 
     }

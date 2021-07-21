@@ -17,18 +17,20 @@ package org.gradle.api.artifacts.dsl;
 
 import groovy.lang.Closure;
 import org.gradle.api.Action;
-import org.gradle.api.Incubating;
 import org.gradle.api.artifacts.ArtifactRepositoryContainer;
 import org.gradle.api.artifacts.repositories.ArtifactRepository;
+import org.gradle.api.artifacts.repositories.ExclusiveContentRepository;
 import org.gradle.api.artifacts.repositories.FlatDirectoryArtifactRepository;
 import org.gradle.api.artifacts.repositories.IvyArtifactRepository;
 import org.gradle.api.artifacts.repositories.MavenArtifactRepository;
+import org.gradle.internal.HasInternalProtocol;
 
 import java.util.Map;
 
 /**
  * A {@code RepositoryHandler} manages a set of repositories, allowing repositories to be defined and queried.
  */
+@HasInternalProtocol
 public interface RepositoryHandler extends ArtifactRepositoryContainer {
 
     /**
@@ -39,8 +41,7 @@ public interface RepositoryHandler extends ArtifactRepositoryContainer {
      *
      * The following parameter are accepted as keys for the map:
      *
-     * <table>
-     * <caption>Shows property keys and associated values</caption>
+     * <table summary="Shows property keys and associated values">
      * <tr><th>Key</th>
      *     <th>Description of Associated Value</th></tr>
      * <tr><td><code>name</code></td>
@@ -88,8 +89,16 @@ public interface RepositoryHandler extends ArtifactRepositoryContainer {
      * @return The Gradle Central Plugin Repository
      * @since 4.4
      */
-    @Incubating
     ArtifactRepository gradlePluginPortal();
+
+    /**
+     * Adds a repository which looks in Gradle Central Plugin Repository for dependencies.
+     *
+     * @param action a configuration action
+     * @return the added resolver
+     * @since 5.4
+     */
+    ArtifactRepository gradlePluginPortal(Action<? super ArtifactRepository> action);
 
     /**
      * Adds a repository which looks in Bintray's JCenter repository for dependencies.
@@ -98,7 +107,7 @@ public interface RepositoryHandler extends ArtifactRepositoryContainer {
      * The behavior of this repository is otherwise the same as those added by {@link #maven(org.gradle.api.Action)}.
      * <p>
      * Examples:
-     * <pre class='autoTested'>
+     * <pre class='autoTestedWithDeprecations'>
      * repositories {
      *   jcenter {
      *     artifactUrls = ["http://www.mycompany.com/artifacts1", "http://www.mycompany.com/artifacts2"]
@@ -112,7 +121,9 @@ public interface RepositoryHandler extends ArtifactRepositoryContainer {
      *
      * @param action a configuration action
      * @return the added repository
+     * @deprecated JFrog announced JCenter's <a href="https://blog.gradle.org/jcenter-shutdown">sunset</a> in February 2021. Use {@link #mavenCentral()} instead.
      */
+    @Deprecated
     MavenArtifactRepository jcenter(Action<? super MavenArtifactRepository> action);
 
     /**
@@ -122,7 +133,7 @@ public interface RepositoryHandler extends ArtifactRepositoryContainer {
      * The behavior of this repository is otherwise the same as those added by {@link #maven(org.gradle.api.Action)}.
      * <p>
      * Examples:
-     * <pre class='autoTested'>
+     * <pre class='autoTestedWithDeprecations'>
      * repositories {
      *     jcenter()
      * }
@@ -130,7 +141,9 @@ public interface RepositoryHandler extends ArtifactRepositoryContainer {
      *
      * @return the added resolver
      * @see #jcenter(Action)
+     * @deprecated JFrog announced JCenter's <a href="https://blog.gradle.org/jcenter-shutdown">sunset</a> in February 2021. Use {@link #mavenCentral()} instead.
      */
+    @Deprecated
     MavenArtifactRepository jcenter();
 
     /**
@@ -139,8 +152,7 @@ public interface RepositoryHandler extends ArtifactRepositoryContainer {
      *
      * <p>The following parameter are accepted as keys for the map:
      *
-     * <table>
-     * <caption>Shows property keys and associated values</caption>
+     * <table summary="Shows property keys and associated values">
      * <tr><th>Key</th>
      *     <th>Description of Associated Value</th></tr>
      * <tr><td><code>name</code></td>
@@ -185,6 +197,24 @@ public interface RepositoryHandler extends ArtifactRepositoryContainer {
     MavenArtifactRepository mavenCentral();
 
     /**
+     * Adds a repository which looks in the Maven central repository for dependencies. The URL used to access this repository is
+     * {@value org.gradle.api.artifacts.ArtifactRepositoryContainer#MAVEN_CENTRAL_URL}. The name of the repository is
+     * {@value org.gradle.api.artifacts.ArtifactRepositoryContainer#DEFAULT_MAVEN_CENTRAL_REPO_NAME}.
+     *
+     * <p>Examples:</p>
+     * <pre class='autoTested'>
+     * repositories {
+     *     mavenCentral()
+     * }
+     * </pre>
+     *
+     * @param action a configuration action
+     * @return the added resolver
+     * @since 5.3
+     */
+    MavenArtifactRepository mavenCentral(Action<? super MavenArtifactRepository> action);
+
+    /**
      * Adds a repository which looks in the local Maven cache for dependencies. The name of the repository is
      * {@value org.gradle.api.artifacts.ArtifactRepositoryContainer#DEFAULT_MAVEN_LOCAL_REPO_NAME}.
      *
@@ -209,6 +239,32 @@ public interface RepositoryHandler extends ArtifactRepositoryContainer {
     MavenArtifactRepository mavenLocal();
 
     /**
+     * Adds a repository which looks in the local Maven cache for dependencies. The name of the repository is
+     * {@value org.gradle.api.artifacts.ArtifactRepositoryContainer#DEFAULT_MAVEN_LOCAL_REPO_NAME}.
+     *
+     * <p>Examples:</p>
+     * <pre class='autoTested'>
+     * repositories {
+     *     mavenLocal()
+     * }
+     * </pre>
+     * <p>
+     * The location for the repository is determined as follows (in order of precedence):
+     * </p>
+     * <ol>
+     * <li>The value of system property 'maven.repo.local' if set;</li>
+     * <li>The value of element &lt;localRepository&gt; of <code>~/.m2/settings.xml</code> if this file exists and element is set;</li>
+     * <li>The value of element &lt;localRepository&gt; of <code>$M2_HOME/conf/settings.xml</code> (where <code>$M2_HOME</code> is the value of the environment variable with that name) if this file exists and element is set;</li>
+     * <li>The path <code>~/.m2/repository</code>.</li>
+     * </ol>
+     *
+     * @param action a configuration action
+     * @return the added resolver
+     * @since 5.3
+     */
+    MavenArtifactRepository mavenLocal(Action<? super MavenArtifactRepository> action);
+
+    /**
      * Adds a repository which looks in Google's Maven repository for dependencies.
      * <p>
      * The URL used to access this repository is {@literal "https://dl.google.com/dl/android/maven2/"}.
@@ -224,6 +280,24 @@ public interface RepositoryHandler extends ArtifactRepositoryContainer {
      * @since 4.0
      */
     MavenArtifactRepository google();
+
+    /**
+     * Adds a repository which looks in Google's Maven repository for dependencies.
+     * <p>
+     * The URL used to access this repository is {@literal "https://dl.google.com/dl/android/maven2/"}.
+     * <p>
+     * Examples:
+     * <pre class='autoTested'>
+     * repositories {
+     *     google()
+     * }
+     * </pre>
+     *
+     * @param action a configuration action
+     * @return the added resolver
+     * @since 5.3
+     */
+    MavenArtifactRepository google(Action<? super MavenArtifactRepository> action);
 
     /**
      * Adds and configures a Maven repository. Newly created instance of {@code MavenArtifactRepository} is passed as an argument to the closure.
@@ -257,4 +331,15 @@ public interface RepositoryHandler extends ArtifactRepositoryContainer {
      */
     IvyArtifactRepository ivy(Action<? super IvyArtifactRepository> action);
 
+    /**
+     * Declares exclusive content repositories. Exclusive content repositories are
+     * repositories for which you can declare an inclusive content filter. Artifacts
+     * matching the filter will then only be searched in the repositories which
+     * exclusively match it.
+     *
+     * @param action the configuration of the repositories
+     *
+     * @since 6.2
+     */
+    void exclusiveContent(Action<? super ExclusiveContentRepository> action);
 }

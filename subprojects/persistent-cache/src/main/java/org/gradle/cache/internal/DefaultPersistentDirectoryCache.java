@@ -25,8 +25,8 @@ import org.gradle.cache.LockOptions;
 import org.gradle.cache.PersistentCache;
 import org.gradle.internal.concurrent.ExecutorFactory;
 import org.gradle.internal.logging.progress.ProgressLoggerFactory;
-import org.gradle.util.GFileUtils;
-import org.gradle.util.GUtil;
+import org.gradle.util.internal.GFileUtils;
+import org.gradle.util.internal.GUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -57,6 +57,7 @@ public class DefaultPersistentDirectoryCache extends DefaultPersistentDirectoryS
     }
 
     private class Initializer implements CacheInitializationAction {
+        @Override
         public boolean requiresInitialization(FileLock lock) {
             if (!lock.getUnlockedCleanly()) {
                 if (lock.getState().canDetectChanges() && !lock.getState().isInInitialState()) {
@@ -83,6 +84,7 @@ public class DefaultPersistentDirectoryCache extends DefaultPersistentDirectoryS
             return false;
         }
 
+        @Override
         public void initialize(FileLock fileLock) {
             File[] files = getBaseDir().listFiles();
             if (files == null) {

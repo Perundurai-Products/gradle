@@ -30,6 +30,7 @@ import org.gradle.internal.operations.BuildOperationExecutor;
 import org.gradle.internal.operations.BuildOperationQueue;
 import org.gradle.internal.os.OperatingSystem;
 import org.gradle.internal.work.WorkerLeaseService;
+import org.gradle.language.swift.SwiftVersion;
 import org.gradle.nativeplatform.internal.CompilerOutputFileNamingSchemeFactory;
 import org.gradle.nativeplatform.toolchain.internal.AbstractCompiler;
 import org.gradle.nativeplatform.toolchain.internal.ArgsTransformer;
@@ -37,9 +38,9 @@ import org.gradle.nativeplatform.toolchain.internal.CommandLineToolContext;
 import org.gradle.nativeplatform.toolchain.internal.CommandLineToolInvocation;
 import org.gradle.nativeplatform.toolchain.internal.CommandLineToolInvocationWorker;
 import org.gradle.nativeplatform.toolchain.internal.compilespec.SwiftCompileSpec;
-import org.gradle.util.CollectionUtils;
-import org.gradle.util.GFileUtils;
-import org.gradle.util.VersionNumber;
+import org.gradle.util.internal.CollectionUtils;
+import org.gradle.util.internal.GFileUtils;
+import org.gradle.util.internal.VersionNumber;
 
 import java.io.File;
 import java.io.IOException;
@@ -71,7 +72,7 @@ class SwiftCompiler extends AbstractCompiler<SwiftCompileSpec> {
 
     @Override
     public WorkResult execute(SwiftCompileSpec spec) {
-        if (swiftCompilerVersion.getMajor() < spec.getSourceCompatibility().getVersion()) {
+        if (swiftCompilerVersion.getMajor() < spec.getSourceCompatibility().getVersion() || (swiftCompilerVersion.getMajor() >= 5 && spec.getSourceCompatibility().equals(SwiftVersion.SWIFT3))) {
             throw new IllegalArgumentException(String.format("Swift compiler version '%s' doesn't support Swift language version '%d'", swiftCompilerVersion.toString(), spec.getSourceCompatibility().getVersion()));
         }
         return super.execute(spec);

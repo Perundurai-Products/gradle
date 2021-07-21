@@ -19,7 +19,7 @@ package org.gradle.internal.typeconversion
 import org.gradle.internal.exceptions.DiagnosticsVisitor
 import spock.lang.Specification
 
-import static org.gradle.util.TextUtil.toPlatformLineSeparators
+import static org.gradle.util.internal.TextUtil.toPlatformLineSeparators
 
 class NotationParserBuilderSpec extends Specification {
 
@@ -42,6 +42,22 @@ class NotationParserBuilderSpec extends Specification {
 
         expect:
         parser.parseNotation(12) == "[12]"
+    }
+
+    def "can add multiple converters"() {
+        def converter1 = Mock(NotationConverter)
+        def converter2 = Mock(NotationConverter)
+
+        given:
+        _ * converter1.convert(12, _) >> { Object n, NotationConvertResult result -> result.converted("[12]") }
+        converter2.convert(true, _) >> { Object n, NotationConvertResult result -> result.converted("True") }
+
+        and:
+        def parser = NotationParserBuilder.toType(String.class).converter(converter1).converter(converter2).toComposite()
+
+        expect:
+        parser.parseNotation(12) == "[12]"
+        parser.parseNotation(true) == "True"
     }
 
     def "can add a converter that converts notations of a given type"() {

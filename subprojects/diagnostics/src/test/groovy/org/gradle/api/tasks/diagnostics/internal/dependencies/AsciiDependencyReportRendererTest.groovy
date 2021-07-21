@@ -15,9 +15,10 @@
  */
 package org.gradle.api.tasks.diagnostics.internal.dependencies
 
-import org.gradle.api.artifacts.Configuration
+import org.gradle.api.tasks.diagnostics.internal.ProjectDetails
 import org.gradle.api.tasks.diagnostics.internal.graph.DependencyGraphsRenderer
 import org.gradle.api.tasks.diagnostics.internal.graph.nodes.SimpleDependency
+import org.gradle.internal.deprecation.DeprecatableConfiguration
 import org.gradle.internal.logging.text.TestStyledTextOutput
 import org.gradle.test.fixtures.AbstractProjectBuilderSpec
 
@@ -30,20 +31,23 @@ class AsciiDependencyReportRendererTest extends AbstractProjectBuilderSpec {
     }
 
     def "informs if no configurations"() {
+        given:
+        def projectDetails = ProjectDetails.of(project)
+
         when:
-        renderer.startProject(project);
-        renderer.completeProject(project);
+        renderer.startProject(projectDetails)
+        renderer.completeProject(projectDetails)
 
         then:
         textOutput.value.contains('No configurations')
     }
 
     def "shows configuration header"() {
-        Configuration configuration1 = Mock()
+        DeprecatableConfiguration configuration1 = Mock()
         configuration1.getName() >> 'config1'
         configuration1.getDescription() >> 'description'
         configuration1.isCanBeResolved() >> true
-        Configuration configuration2 = Mock()
+        DeprecatableConfiguration configuration2 = Mock()
         configuration2.getName() >> 'config2'
         configuration2.isCanBeResolved() >> true
 

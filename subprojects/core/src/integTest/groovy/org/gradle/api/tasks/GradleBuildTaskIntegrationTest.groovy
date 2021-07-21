@@ -19,6 +19,7 @@ package org.gradle.api.tasks
 import org.gradle.initialization.RunNestedBuildBuildOperationType
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 import org.gradle.integtests.fixtures.BuildOperationsFixture
+import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
 import org.gradle.test.fixtures.server.http.BlockingHttpServer
 import org.junit.Rule
 
@@ -31,11 +32,12 @@ class GradleBuildTaskIntegrationTest extends AbstractIntegrationSpec {
         settingsFile << "rootProject.name = 'parent'"
         buildFile << """
             task buildInBuild(type:GradleBuild) {
-                buildFile = 'other.gradle'
+                dir = 'other'
                 startParameter.projectProperties['foo'] = true // not a String
             }
         """
-        file('other.gradle') << 'assert foo==true'
+        file('other/settings.gradle').createFile()
+        file('other/build.gradle') << 'assert foo==true'
 
         when:
         run 'buildInBuild'
@@ -44,21 +46,85 @@ class GradleBuildTaskIntegrationTest extends AbstractIntegrationSpec {
         noExceptionThrown()
     }
 
+    def "can set build path"() {
+        given:
+        settingsFile << "rootProject.name = 'parent'"
+        buildFile << """
+            task b1(type:GradleBuild) {
+                tasks = ["t"]
+                buildName = 'bp'
+            }
+            task t
+        """
+
+        when:
+        run 'b1'
+
+        then:
+        executed(":bp:t")
+    }
+
+    def "fails when build path is not unique"() {
+        given:
+        settingsFile << "rootProject.name = 'parent'"
+        buildFile << """
+            task b1(type:GradleBuild) {
+                tasks = ["t"]
+                buildName = 'bp'
+            }
+            task b2(type:GradleBuild) {
+                tasks = ["t"]
+                buildName = 'bp'
+            }
+            task t
+        """
+
+        when:
+        fails 'b1', 'b2'
+
+        then:
+        failure.assertHasDescription("Execution failed for task ':b2'")
+        failure.assertHasCause("Included build $testDirectory has build path :bp which is the same as included build $testDirectory")
+    }
+
+    def "setting custom build file is deprecated"() {
+        given:
+        settingsFile << "rootProject.name = 'parent'"
+        buildFile << """
+            task otherBuild(type:GradleBuild) {
+                buildFile = 'other.gradle'
+            }
+        """
+
+        file('other.gradle') << '''
+            println "other build file"
+        '''
+
+        executer.expectDocumentedDeprecationWarning("Specifying custom build file location has been deprecated. This is scheduled to be removed in Gradle 8.0. Consult the upgrading guide for further information: https://docs.gradle.org/current/userguide/upgrading_version_7.html#configuring_custom_build_layout");
+
+        when:
+        run 'otherBuild'
+
+        then:
+        output.contains("other build file")
+    }
+
     def "nested build can use Gradle home directory that is different to outer build"() {
         given:
         def dir = file("other-home")
         settingsFile << "rootProject.name = 'parent'"
         buildFile << """
             task otherBuild(type:GradleBuild) {
-                buildFile = 'other.gradle'
+                dir = 'other-build'
                 startParameter.gradleUserHomeDir = file("${dir.toURI()}")
             }
         """
 
-        file('other.gradle') << '''
-println "user home dir: " + gradle.gradleUserHomeDir
-println "build script code source: " + getClass().protectionDomain.codeSource.location
-'''
+        file('other-build/settings.gradle').createFile()
+        file('other-build/build.gradle') << '''
+            println "user home dir: " + gradle.gradleUserHomeDir
+            println "build script code source: " + getClass().protectionDomain.codeSource.location
+        '''
 
         when:
         run 'otherBuild'
@@ -85,8 +151,7 @@ println "build script code source: " + getClass().protectionDomain.codeSource.lo
         run 'otherBuild'
 
         then:
-        // TODO - Fix test fixtures to allow assertions on buildSrc tasks rather than relying on output scraping in tests
-        outputContains(":other:buildSrc:assemble")
+        result.assertTaskExecuted(":other:buildSrc:assemble")
     }
 
     def "buildSrc can have nested build"() {
@@ -108,9 +173,8 @@ println "build script code source: " + getClass().protectionDomain.codeSource.lo
         run()
 
         then:
-        // TODO - Fix test fixtures to allow assertions on buildSrc tasks rather than relying on output scraping in tests
-        outputContains(":buildSrc:other:build")
-        outputContains(":buildSrc:otherBuild")
+        result.assertTaskExecuted(":buildSrc:other:build")
+        result.assertTaskExecuted(":buildSrc:otherBuild")
     }
 
     def "nested build can nest more builds"() {
@@ -185,18 +249,21 @@ println "build script code source: " + getClass().protectionDomain.codeSource.lo
         settingsFile << """
             rootProject.name = 'root'
             include '1', '2'
-"""
+        """
         buildFile << """
             subprojects {
                 task otherBuild(type:GradleBuild) {
                     dir = "\${rootProject.file('subprojects')}"
                     tasks = ['log']
-                }
-                otherBuild.doFirst {
-                    ${barrier.callFromBuildUsingExpression('project.name + "-started"')}
-                }
-                otherBuild.doLast {
-                    ${barrier.callFromBuildUsingExpression('project.name + "-finished"')}
+                    buildName = project.name + "nested"
+                    def startEvent = project.name + "-started"
+                    def finishEvent = project.name + "-finished"
+                    doFirst {
+                        ${barrier.callFromBuildUsingExpression('startEvent')}
+                    }
+                    doLast {
+                        ${barrier.callFromBuildUsingExpression('finishEvent')}
+                    }
                 }
             }
             task otherBuild(type:GradleBuild) {
@@ -218,12 +285,17 @@ println "build script code source: " + getClass().protectionDomain.codeSource.lo
             task log { }
         """
 
-        barrier.expectConcurrent("child-build-started", "1-started", "2-started")
-        barrier.expectConcurrent("child-build-finished", "1-finished", "2-finished")
+        def runs = GradleContextualExecuter.isConfigCache() ? 2 : 1
+        runs.times {
+            barrier.expectConcurrent("child-build-started", "1-started", "2-started")
+            barrier.expectConcurrent("child-build-finished", "1-finished", "2-finished")
+        }
 
         when:
-        executer.withArgument("--parallel")
-        run 'otherBuild'
+        runs.times {
+            executer.withArgument("--parallel")
+            run 'otherBuild'
+        }
 
         then:
         noExceptionThrown()

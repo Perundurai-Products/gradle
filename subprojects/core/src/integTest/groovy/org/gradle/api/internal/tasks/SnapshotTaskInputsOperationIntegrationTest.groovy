@@ -18,6 +18,7 @@ package org.gradle.api.internal.tasks
 
 import org.gradle.api.Action
 import org.gradle.api.DefaultTask
+import org.gradle.api.internal.tasks.execution.ExecuteTaskBuildOperationType
 import org.gradle.api.tasks.CacheableTask
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.Nested
@@ -26,14 +27,15 @@ import org.gradle.api.tasks.OutputFile
 import org.gradle.api.tasks.TaskAction
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 import org.gradle.integtests.fixtures.BuildOperationsFixture
-import org.gradle.api.internal.tasks.execution.ExecuteTaskBuildOperationType
-import org.gradle.plugin.management.internal.autoapply.AutoAppliedBuildScanPlugin
+import org.gradle.internal.enterprise.core.GradleEnterprisePluginAdapter
+import org.gradle.internal.enterprise.core.GradleEnterprisePluginManager
+import org.gradle.internal.reflect.problems.ValidationProblemId
+import org.gradle.internal.reflect.validation.ValidationMessageChecker
+import org.gradle.internal.reflect.validation.ValidationTestFor
 import spock.lang.Unroll
 
-import static org.gradle.integtests.fixtures.RepoScriptBlockUtil.gradlePluginRepositoryDefinition
-
 @Unroll
-class SnapshotTaskInputsOperationIntegrationTest extends AbstractIntegrationSpec {
+class SnapshotTaskInputsOperationIntegrationTest extends AbstractIntegrationSpec implements ValidationMessageChecker {
 
     def operations = new BuildOperationsFixture(executer, temporaryFolder)
 
@@ -56,26 +58,14 @@ class SnapshotTaskInputsOperationIntegrationTest extends AbstractIntegrationSpec
 
     def "task output caching key is exposed when scan plugin is applied"() {
         given:
+        settingsFile << """
+            services.get($GradleEnterprisePluginManager.name).registerAdapter([buildFinished: {}, shouldSaveToConfigurationCache: { false }] as $GradleEnterprisePluginAdapter.name)
+        """
+
         buildFile << customTaskCode('foo', 'bar')
-        buildFile << """
-            buildscript {
-                repositories {
-                    ${gradlePluginRepositoryDefinition()}
-                }
-                dependencies {
-                    classpath "${AutoAppliedBuildScanPlugin.GROUP}:${AutoAppliedBuildScanPlugin.NAME}:${AutoAppliedBuildScanPlugin.VERSION}"
-                }
-            }
-            
-            apply plugin: "com.gradle.build-scan"
-            buildScan {
-                termsOfServiceUrl = 'https://gradle.com/terms-of-service'
-                termsOfServiceAgree = 'yes'
-            }
-        """.stripIndent()
 
         when:
-        succeeds('customTask', '-Dscan.dump')
+        succeeds('customTask')
 
         then:
         def result = operations.first(SnapshotTaskInputsBuildOperationType).result
@@ -98,7 +88,7 @@ class SnapshotTaskInputsOperationIntegrationTest extends AbstractIntegrationSpec
     def "handles task with no outputs"() {
         when:
         buildScript """
-            task noOutputs { 
+            task noOutputs {
                 doLast {}
             }
         """
@@ -118,7 +108,7 @@ class SnapshotTaskInputsOperationIntegrationTest extends AbstractIntegrationSpec
     def "handles task with no inputs"() {
         when:
         buildScript """
-            task noInputs { 
+            task noInputs {
                 outputs.file "foo.txt"
                 doLast {}
             }
@@ -139,7 +129,7 @@ class SnapshotTaskInputsOperationIntegrationTest extends AbstractIntegrationSpec
     def "not sent for task with no actions"() {
         when:
         buildScript """
-            task noActions { 
+            task noActions {
             }
         """
         succeeds('noActions', "--build-cache")
@@ -148,10 +138,13 @@ class SnapshotTaskInputsOperationIntegrationTest extends AbstractIntegrationSpec
         !operations.hasOperation(SnapshotTaskInputsBuildOperationType)
     }
 
+    @ValidationTestFor(
+        ValidationProblemId.UNKNOWN_IMPLEMENTATION
+    )
     def "handles invalid implementation classloader"() {
         given:
         buildScript """
-            def classLoader = new GroovyClassLoader(this.class.classLoader) 
+            def classLoader = new GroovyClassLoader(this.class.classLoader)
             def clazz = classLoader.parseClass(\"\"\"${customTaskImpl()}\"\"\")
             task customTask(type: clazz){
                 input1 = 'foo'
@@ -160,25 +153,38 @@ class SnapshotTaskInputsOperationIntegrationTest extends AbstractIntegrationSpec
         """
 
         when:
+        expectThatExecutionOptimizationDisabledWarningIsDisplayed(executer, implementationUnknown {
+            implementationOfTask(':customTask')
+            unknownClassloader('CustomTask_Decorated')
+            includeLink()
+        })
+        expectThatExecutionOptimizationDisabledWarningIsDisplayed(executer, implementationUnknown {
+            additionalTaskAction(':customTask')
+            unknownClassloader('CustomTask_Decorated')
+            includeLink()
+        })
         succeeds('customTask', '--build-cache')
 
         then:
         def result = operations.first(SnapshotTaskInputsBuildOperationType).result
         result.hash == null
         result.classLoaderHash == null
-        result.actionClassLoaderHashes.last() == null
-        result.actionClassNames != null
-        result.inputValueHashes != null
+        result.actionClassLoaderHashes == null
+        result.actionClassNames == null
+        result.inputValueHashes == null
         result.inputPropertiesLoadedByUnknownClassLoader == null
-        result.outputPropertyNames != null
+        result.outputPropertyNames == null
     }
 
+    @ValidationTestFor(
+        ValidationProblemId.UNKNOWN_IMPLEMENTATION
+    )
     def "handles invalid action classloader"() {
         given:
         buildScript """
             ${customTaskCode('foo', 'bar')}
             def classLoader = new GroovyClassLoader(this.class.classLoader)
-            def c = classLoader.parseClass ''' 
+            def c = classLoader.parseClass '''
                 class A implements $Action.name {
                     void execute(task) {}
                 }
@@ -187,17 +193,22 @@ class SnapshotTaskInputsOperationIntegrationTest extends AbstractIntegrationSpec
         """
 
         when:
+        expectThatExecutionOptimizationDisabledWarningIsDisplayed(executer, implementationUnknown {
+            additionalTaskAction(':customTask')
+            unknownClassloader('A')
+            includeLink()
+        })
         succeeds('customTask', '--build-cache')
 
         then:
         def result = operations.first(SnapshotTaskInputsBuildOperationType).result
         result.hash == null
-        result.classLoaderHash != null
-        result.actionClassLoaderHashes.last() == null
-        result.actionClassNames != null
-        result.inputValueHashes != null
+        result.classLoaderHash == null
+        result.actionClassLoaderHashes == null
+        result.actionClassNames == null
+        result.inputValueHashes == null
         result.inputPropertiesLoadedByUnknownClassLoader == null
-        result.outputPropertyNames != null
+        result.outputPropertyNames == null
     }
 
     def "exposes file inputs"() {
@@ -221,7 +232,7 @@ class SnapshotTaskInputsOperationIntegrationTest extends AbstractIntegrationSpec
         createDir("b") {
             file("build.gradle") << """
                 plugins { id 'java' }
-                dependencies { compile project(":a") }
+                dependencies { implementation project(":a") }
                 sourceSets.main.java.srcDir "other"
             """
             dir("src/main/java") {
@@ -261,29 +272,17 @@ class SnapshotTaskInputsOperationIntegrationTest extends AbstractIntegrationSpec
             normalization == "CLASSPATH"
         }
 
-        with(aCompileJava.source) {
+        with(aCompileJava.stableSources) {
             hash != null
-            normalization == "NAME_ONLY"
+            normalization == "RELATIVE_PATH"
             roots.size() == 1
             with(roots[0]) {
                 path == file("a/src/main/java").absolutePath
                 children.size() == 3
                 with(children[0]) {
-                    path == "A.java"
-                    hash != null
-                }
-                with(children[1]) {
-                    path == "B.java"
-                    hash != null
-                }
-                with(children[2]) {
                     path == "a"
                     children.size() == 2
                     with(children[0]) {
-                        path == "A.java"
-                        hash != null
-                    }
-                    with(children[1]) {
                         path == "a"
                         children.size() == 1
                         with(children[0]) {
@@ -291,6 +290,18 @@ class SnapshotTaskInputsOperationIntegrationTest extends AbstractIntegrationSpec
                             hash != null
                         }
                     }
+                    with(children[1]) {
+                        path == "A.java"
+                        hash != null
+                    }
+                }
+                with(children[1]) {
+                    path == "A.java"
+                    hash != null
+                }
+                with(children[2]) {
+                    path == "B.java"
+                    hash != null
                 }
             }
         }
@@ -304,7 +315,7 @@ class SnapshotTaskInputsOperationIntegrationTest extends AbstractIntegrationSpec
                 !containsKey("children")
             }
         }
-        with(bCompileJava.source) {
+        with(bCompileJava.stableSources) {
             hash != null
             roots.size() == 2
             with(roots[0]) {
@@ -360,12 +371,15 @@ class SnapshotTaskInputsOperationIntegrationTest extends AbstractIntegrationSpec
         }
     }
 
+    @ValidationTestFor(
+        ValidationProblemId.UNKNOWN_IMPLEMENTATION
+    )
     def "handles invalid nested bean classloader"() {
         given:
         buildScript """
             ${customTaskCode('foo', 'bar')}
             def classLoader = new GroovyClassLoader(this.class.classLoader)
-            def c = classLoader.parseClass ''' 
+            def c = classLoader.parseClass '''
                 class A {
                     @$Input.name
                     String input = 'nested'
@@ -375,17 +389,22 @@ class SnapshotTaskInputsOperationIntegrationTest extends AbstractIntegrationSpec
         """
 
         when:
+        expectThatExecutionOptimizationDisabledWarningIsDisplayed(executer, implementationUnknown {
+            nestedProperty('bean')
+            unknownClassloader('A')
+            includeLink()
+        })
         succeeds('customTask', '--build-cache')
 
         then:
         def result = operations.first(SnapshotTaskInputsBuildOperationType).result
         result.hash == null
-        result.inputPropertiesLoadedByUnknownClassLoader == ["bean"]
-        result.classLoaderHash != null
-        result.actionClassLoaderHashes != null
-        result.actionClassNames != null
-        result.inputValueHashes != null
-        result.outputPropertyNames != null
+        result.inputPropertiesLoadedByUnknownClassLoader == null
+        result.classLoaderHash == null
+        result.actionClassLoaderHashes == null
+        result.actionClassNames == null
+        result.inputValueHashes == null
+        result.outputPropertyNames == null
     }
 
     private static String customTaskCode(String input1, String input2) {
@@ -394,7 +413,7 @@ class SnapshotTaskInputsOperationIntegrationTest extends AbstractIntegrationSpec
             task customTask(type: CustomTask){
                 input1 = '$input1'
                 input2 = '$input2'
-            }            
+            }
         """
     }
 
@@ -405,13 +424,13 @@ class SnapshotTaskInputsOperationIntegrationTest extends AbstractIntegrationSpec
 
                 @$Input.name
                 String input2
-                
+
                 @$Input.name
                 String input1
-                
+
                 @$OutputFile.name
                 File outputFile2 = new File(temporaryDir, "output2.txt")
-                
+
                 @$OutputFile.name
                 File outputFile1 = new File(temporaryDir, "output1.txt")
 
@@ -419,7 +438,7 @@ class SnapshotTaskInputsOperationIntegrationTest extends AbstractIntegrationSpec
                 void generate() {
                     outputFile1.text = "done1"
                     outputFile2.text = "done2"
-                }   
+                }
 
                 @$Nested.name
                 @$Optional.name

@@ -22,7 +22,7 @@ import org.gradle.util.Requires
 import org.gradle.util.TestPrecondition
 
 class MavenRealProjectsDependencyResolveIntegrationTest extends AbstractDependencyResolutionTest {
-    def resolve = new ResolveTestFixture(buildFile)
+    def resolve = new ResolveTestFixture(buildFile, "compile")
 
     def setup() {
         resolve.prepare()
@@ -97,7 +97,7 @@ task check {
                     }
                 }
                 edge('commons-collections:commons-collections:3.0', 'commons-collections:commons-collections:3.1') {
-                    byConflictResolution("between versions 3.0 and 3.1")
+                    byConflictResolution("between versions 3.1 and 3.0")
                 }
             }
         }

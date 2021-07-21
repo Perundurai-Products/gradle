@@ -29,12 +29,16 @@ import java.util.Map;
  * One example where this comparator is inappropriate is if versions should be retained in a TreeMap/TreeSet.
  */
 class StaticVersionComparator implements Comparator<Version> {
-    private static final Map<String, Integer> SPECIAL_MEANINGS =
-            ImmutableMap.of("dev", -1, "rc", 1, "release", 2, "final", 3);
-
+    static final Map<String, Integer> SPECIAL_MEANINGS = ImmutableMap.<String, Integer>builderWithExpectedSize(7)
+                                                                            .put("dev", -1)
+                                                                            .put("rc", 1)
+                                                                            .put("snapshot", 2)
+                                                                            .put("final", 3).put("ga", 4).put("release", 5)
+                                                                            .put("sp", 6).build();
     /**
      * Compares 2 versions. Algorithm is inspired by PHP version_compare one.
      */
+    @Override
     public int compare(Version version1, Version version2) {
         if (version1.equals(version2)) {
             return 0;

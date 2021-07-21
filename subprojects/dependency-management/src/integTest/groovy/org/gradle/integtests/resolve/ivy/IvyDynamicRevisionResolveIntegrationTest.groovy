@@ -17,21 +17,19 @@ package org.gradle.integtests.resolve.ivy
 
 import org.gradle.integtests.fixtures.GradleMetadataResolveRunner
 import org.gradle.integtests.fixtures.RequiredFeature
-import org.gradle.integtests.fixtures.RequiredFeatures
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
 import org.gradle.integtests.resolve.AbstractModuleDependencyResolveTest
 import spock.lang.IgnoreIf
 import spock.lang.Issue
 
-@RequiredFeatures([
-    // this test is specific to Ivy
-    @RequiredFeature(feature = GradleMetadataResolveRunner.REPOSITORY_TYPE, value = "ivy"),
-]
-)
+// this test is specific to Ivy
+@RequiredFeature(feature = GradleMetadataResolveRunner.REPOSITORY_TYPE, value = "ivy")
 @IgnoreIf({ GradleContextualExecuter.parallel })
 class IvyDynamicRevisionResolveIntegrationTest extends AbstractModuleDependencyResolveTest {
 
     @Issue("GRADLE-2502")
+    @ToBeFixedForConfigurationCache
     def "latest.integration selects highest version regardless of status"() {
         given:
         buildFile << """
@@ -116,6 +114,7 @@ class IvyDynamicRevisionResolveIntegrationTest extends AbstractModuleDependencyR
     }
 
     @Issue("GRADLE-2502")
+    @ToBeFixedForConfigurationCache
     def "latest.milestone selects highest version with milestone or release status"() {
         given:
         buildFile << """
@@ -258,6 +257,7 @@ Searched in the following locations:
     }
 
     @Issue("GRADLE-2502")
+    @ToBeFixedForConfigurationCache
     void "latest.release selects highest version with release status"() {
         given:
         buildFile << """
@@ -392,6 +392,7 @@ Searched in the following locations:
     }
 
     @Issue(["GRADLE-2502", "GRADLE-2794"])
+    @ToBeFixedForConfigurationCache
     def "version selector ending in + selects highest matching version"() {
         given:
         buildFile << """
@@ -487,6 +488,7 @@ Searched in the following locations:
     }
 
     @Issue("GRADLE-2502")
+    @ToBeFixedForConfigurationCache
     def "version range selects highest matching version"() {
         given:
         buildFile << """
@@ -635,18 +637,9 @@ dependencies {
 
         when:
         repositoryInteractions {
-            'org.test:projectA' {
-                expectVersionListing()
-            }
             'org.test:projectA:1.1' {
                 expectGetMetadata()
                 expectGetArtifact()
-            }
-            if (GradleMetadataResolveRunner.isGradleMetadataEnabled()) {
-                // todo: is single version in range something we want to allow in Gradle metadata?
-                'org.test:projectB' {
-                    expectVersionListing()
-                }
             }
             'org.test:projectB:2.0' {
                 expectGetMetadata()
@@ -659,7 +652,7 @@ dependencies {
         resolve.expectGraph {
             root(":", ":test:") {
                 edge("org.test:projectA:[1.1]", "org.test:projectA:1.1") {
-                    if (GradleMetadataResolveRunner.isGradleMetadataEnabled()) {
+                    if (GradleMetadataResolveRunner.isGradleMetadataPublished()) {
                         edge("org.test:projectB:[2.0]", "org.test:projectB:2.0")
                     } else {
                         edge("org.test:projectB:2.0", "org.test:projectB:2.0") // Transitive version range is lost when converting to Ivy ModuleDescriptor

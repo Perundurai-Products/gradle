@@ -19,35 +19,32 @@ import org.gradle.api.Action;
 import org.gradle.api.distribution.Distribution;
 import org.gradle.api.file.CopySpec;
 
+import javax.inject.Inject;
+
 /**
  * Allow user to declare a distribution.
  */
-public class DefaultDistribution implements Distribution {
+public abstract class DefaultDistribution implements Distribution {
     private final String name;
-    private String baseName;
     private final CopySpec contents;
 
+    @Inject
     public DefaultDistribution(String name, CopySpec contents) {
         this.name = name;
         this.contents = contents;
     }
 
+    @Override
     public String getName() {
         return name;
     }
 
-    public String getBaseName() {
-        return baseName;
-    }
-
-    public void setBaseName(String baseName) {
-        this.baseName = baseName;
-    }
-
+    @Override
     public CopySpec getContents() {
         return contents;
     }
 
+    @Override
     public CopySpec contents(Action<? super CopySpec> action) {
         action.execute(contents);
         return contents;

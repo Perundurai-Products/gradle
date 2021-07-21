@@ -16,13 +16,14 @@
 
 package org.gradle.nativeplatform.fixtures.msvcpp;
 
-import org.gradle.util.VersionNumber;
+import org.gradle.util.internal.VersionNumber;
 
 public enum VisualStudioVersion {
     VISUALSTUDIO_2012("11.0", "2012"),
     VISUALSTUDIO_2013("12.0", "2013"),
     VISUALSTUDIO_2015("14.0", "2015"),
-    VISUALSTUDIO_2017("15.0", "2017");
+    VISUALSTUDIO_2017("15.0", "2017"),
+    VISUALSTUDIO_2019("16.0", "2019");
 
     private final VersionNumber version;
     private final String year;

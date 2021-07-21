@@ -17,14 +17,22 @@
 package org.gradle.api.plugins.internal;
 
 import org.gradle.api.file.CopySpec;
+import org.gradle.api.model.ObjectFactory;
 import org.gradle.api.plugins.ApplicationPluginConvention;
 import org.gradle.api.plugins.JavaApplication;
+import org.gradle.api.provider.Property;
+import org.gradle.api.provider.ProviderFactory;
+import org.gradle.internal.deprecation.DeprecationLogger;
 
 public class DefaultJavaApplication implements JavaApplication {
     private final ApplicationPluginConvention convention;
+    private final Property<String> mainModule;
+    private final Property<String> mainClass;
 
-    public DefaultJavaApplication(ApplicationPluginConvention convention) {
+    public DefaultJavaApplication(ApplicationPluginConvention convention, ObjectFactory objectFactory, ProviderFactory providerFactory) {
         this.convention = convention;
+        this.mainModule = objectFactory.property(String.class);
+        this.mainClass = objectFactory.property(String.class).convention(providerFactory.provider(convention::getMainClassName));
     }
 
     @Override
@@ -38,12 +46,33 @@ public class DefaultJavaApplication implements JavaApplication {
     }
 
     @Override
+    public Property<String> getMainModule() {
+        return mainModule;
+    }
+
+    @Override
+    public Property<String> getMainClass() {
+        return mainClass;
+    }
+
+    @Override
     public String getMainClassName() {
-        return convention.getMainClassName();
+        DeprecationLogger.deprecateMethod(JavaApplication.class, "getMainClassName()")
+            .withAdvice("Use #getMainClass() instead.")
+            .willBeRemovedInGradle8()
+            .withDslReference(JavaApplication.class, "mainClass")
+            .nagUser();
+        return mainClass.getOrNull();
     }
 
     @Override
     public void setMainClassName(String mainClassName) {
+        DeprecationLogger.deprecateMethod(JavaApplication.class, "setMainClassName(String)")
+            .withAdvice("Use #getMainClass().set(...) instead.")
+            .willBeRemovedInGradle8()
+            .withDslReference(JavaApplication.class, "mainClass")
+            .nagUser();
+        mainClass.set(mainClassName);
         convention.setMainClassName(mainClassName);
     }
 

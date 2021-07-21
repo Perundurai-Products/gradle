@@ -44,7 +44,7 @@ import org.gradle.tooling.events.task.TaskSuccessResult;
 import org.gradle.tooling.internal.consumer.DefaultBuildLauncher;
 import org.gradle.tooling.internal.consumer.DefaultGradleConnector;
 import org.gradle.tooling.model.build.BuildEnvironment;
-import org.gradle.util.CollectionUtils;
+import org.gradle.util.internal.CollectionUtils;
 import org.gradle.util.GradleVersion;
 import org.gradle.wrapper.GradleUserHomeLookup;
 
@@ -57,7 +57,12 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static org.gradle.testkit.runner.TaskOutcome.*;
+import static org.gradle.testkit.runner.TaskOutcome.FAILED;
+import static org.gradle.testkit.runner.TaskOutcome.FROM_CACHE;
+import static org.gradle.testkit.runner.TaskOutcome.NO_SOURCE;
+import static org.gradle.testkit.runner.TaskOutcome.SKIPPED;
+import static org.gradle.testkit.runner.TaskOutcome.SUCCESS;
+import static org.gradle.testkit.runner.TaskOutcome.UP_TO_DATE;
 
 public class ToolingApiGradleExecutor implements GradleExecutor {
 
@@ -70,6 +75,7 @@ public class ToolingApiGradleExecutor implements GradleExecutor {
     private static void maybeRegisterCleanup() {
         if (SHUTDOWN_REGISTERED.compareAndSet(false, true)) {
             Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
+                @Override
                 public void run() {
                     try {
                         DefaultGradleConnector.close();
@@ -81,6 +87,7 @@ public class ToolingApiGradleExecutor implements GradleExecutor {
         }
     }
 
+    @Override
     public GradleExecutionResult run(GradleExecutionParameters parameters) {
         final StreamByteBuffer outputBuffer = new StreamByteBuffer();
         final OutputStream syncOutput = new SynchronizedOutputStream(outputBuffer.getOutputStream());
@@ -119,6 +126,7 @@ public class ToolingApiGradleExecutor implements GradleExecutor {
 
             launcher.withArguments(parameters.getBuildArgs().toArray(new String[0]));
             launcher.setJvmArguments(parameters.getJvmArgs().toArray(new String[0]));
+            launcher.setEnvironmentVariables(parameters.getEnvironment());
 
             if (!parameters.getInjectedClassPath().isEmpty()) {
                 if (targetGradleVersion.compareTo(TestKitFeature.PLUGIN_CLASSPATH_INJECTION.getSince()) < 0) {
@@ -186,7 +194,7 @@ public class ToolingApiGradleExecutor implements GradleExecutor {
         return gradleConnector;
     }
 
-    private class TaskExecutionProgressListener implements ProgressListener {
+    private static class TaskExecutionProgressListener implements ProgressListener {
         private final List<BuildTask> tasks;
         private final Map<String, Integer> order = new HashMap<String, Integer>();
 
@@ -194,6 +202,7 @@ public class ToolingApiGradleExecutor implements GradleExecutor {
             this.tasks = tasks;
         }
 
+        @Override
         public void statusChanged(ProgressEvent event) {
             if (event instanceof TaskStartEvent) {
                 TaskStartEvent taskStartEvent = (TaskStartEvent) event;

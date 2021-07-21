@@ -16,10 +16,20 @@
 
 package org.gradle.smoketests
 
+import org.gradle.integtests.fixtures.UnsupportedWithConfigurationCache
+import org.gradle.util.GradleVersion
+import org.gradle.util.Requires
+import org.gradle.util.TestPrecondition
+
 import static org.gradle.testkit.runner.TaskOutcome.SUCCESS
 
-class GrettySmokeTest extends AbstractSmokeTest {
+@UnsupportedWithConfigurationCache(
+    because = "The Gretty plugin does not support configuration caching"
+)
+class GrettySmokeTest extends AbstractPluginValidatingSmokeTest {
 
+    // Jetty 9 only works with Java 8
+    @Requires(TestPrecondition.JDK8)
     def 'run with jetty'() {
         given:
         useSample('gretty-example')
@@ -28,13 +38,13 @@ class GrettySmokeTest extends AbstractSmokeTest {
                 id "war"
                 id "org.gretty" version "${TestedVersions.gretty}"
             }
-            
+
             ${jcenterRepository()}
 
             dependencies {
-                compile group: 'log4j', name: 'log4j', version: '1.2.15', ext: 'jar'
+                implementation group: 'log4j', name: 'log4j', version: '1.2.15', ext: 'jar'
             }
-            
+
             gretty {
                 contextPath = 'quickstart'
 
@@ -57,9 +67,21 @@ class GrettySmokeTest extends AbstractSmokeTest {
         """
 
         when:
-        def result = runner('checkContainerUp').build()
+        def result = runner('checkContainerUp')
+            .expectDeprecationWarning("The JavaExecHandleBuilder.setMain(String) method has been deprecated. " +
+                "This is scheduled to be removed in Gradle 8.0. Please use the mainClass property instead. " +
+                "Consult the upgrading guide for further information: https://docs.gradle.org/${GradleVersion.current().version}/userguide/upgrading_version_7.html#java_exec_properties",
+                "https://github.com/gretty-gradle-plugin/gretty/pull/221")
+            .build()
 
         then:
         result.task(':checkContainerUp').outcome == SUCCESS
+    }
+
+    @Override
+    Map<String, Versions> getPluginsToValidate() {
+        [
+            'org.gretty': Versions.of(TestedVersions.gretty)
+        ]
     }
 }

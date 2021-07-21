@@ -16,45 +16,57 @@
 
 package org.gradle.composite.internal
 
-import org.gradle.api.Transformer
 import org.gradle.api.internal.BuildDefinition
 import org.gradle.api.internal.GradleInternal
 import org.gradle.api.internal.artifacts.DefaultBuildIdentifier
 import org.gradle.api.internal.project.ProjectStateRegistry
-import org.gradle.initialization.GradleLauncher
-import org.gradle.initialization.GradleLauncherFactory
+import org.gradle.deployment.internal.DefaultDeploymentRegistry
 import org.gradle.initialization.RootBuildLifecycleListener
+import org.gradle.initialization.exception.ExceptionAnalyser
+import org.gradle.internal.build.BuildLifecycleController
+import org.gradle.internal.build.BuildLifecycleControllerFactory
+import org.gradle.internal.build.BuildStateRegistry
+import org.gradle.internal.build.ExecutionResult
+import org.gradle.internal.buildtree.BuildTreeLifecycleController
+import org.gradle.internal.buildtree.BuildTreeState
 import org.gradle.internal.event.ListenerManager
-import org.gradle.internal.invocation.BuildController
-import org.gradle.internal.operations.BuildOperationExecutor
-import org.gradle.internal.service.scopes.BuildTreeScopeServices
-import org.gradle.internal.work.WorkerLeaseService
-import org.gradle.test.fixtures.work.TestWorkerLeaseService
+import org.gradle.internal.operations.TestBuildOperationExecutor
+import org.gradle.internal.service.DefaultServiceRegistry
 import spock.lang.Specification
 
+import java.util.function.Function
+
 class DefaultRootBuildStateTest extends Specification {
-    def factory = Mock(GradleLauncherFactory)
-    def launcher = Mock(GradleLauncher)
+    def factory = Mock(BuildLifecycleControllerFactory)
+    def controller = Mock(BuildLifecycleController)
     def gradle = Mock(GradleInternal)
     def listenerManager = Mock(ListenerManager)
     def lifecycleListener = Mock(RootBuildLifecycleListener)
-    def action = Mock(Transformer)
-    def sessionServices = Mock(BuildTreeScopeServices)
+    def action = Mock(Function)
+    def buildTree = Mock(BuildTreeState)
     def buildDefinition = Mock(BuildDefinition)
     def projectStateRegistry = Mock(ProjectStateRegistry)
+    def includedBuildTaskGraph = Mock(IncludedBuildTaskGraph)
+    def exceptionAnalyzer = Mock(ExceptionAnalyser)
     DefaultRootBuildState build
 
     def setup() {
-        _ * factory.newInstance(buildDefinition, _, sessionServices) >> launcher
+        _ * factory.newInstance(buildDefinition, _, null, _) >> controller
         _ * listenerManager.getBroadcaster(RootBuildLifecycleListener) >> lifecycleListener
-        _ * sessionServices.get(ProjectStateRegistry) >> projectStateRegistry
-        _ * sessionServices.get(BuildOperationExecutor) >> Stub(BuildOperationExecutor)
-        _ * sessionServices.get(WorkerLeaseService) >> new TestWorkerLeaseService()
-        _ * launcher.gradle >> gradle
+        def sessionServices = new DefaultServiceRegistry()
+        sessionServices.add(new TestBuildOperationExecutor())
+        sessionServices.add(includedBuildTaskGraph)
+        sessionServices.add(exceptionAnalyzer)
+        sessionServices.add(Stub(DefaultDeploymentRegistry))
+        sessionServices.add(Stub(BuildStateRegistry))
+        sessionServices.add(new TestBuildTreeLifecycleControllerFactory())
+
+        _ * controller.gradle >> gradle
         _ * gradle.services >> sessionServices
+        _ * buildTree.services >> sessionServices
         _ * projectStateRegistry.withLenientState(_) >> { args -> return args[0].create() }
 
-        build = new DefaultRootBuildState(buildDefinition, factory, listenerManager, sessionServices)
+        build = new DefaultRootBuildState(buildDefinition, buildTree, factory, listenerManager, projectStateRegistry)
     }
 
     def "has identifier"() {
@@ -67,26 +79,27 @@ class DefaultRootBuildStateTest extends Specification {
         build.stop()
 
         then:
-        1 * launcher.stop()
+        1 * controller.stop()
     }
 
-    def "runs action after notifying listeners"() {
+    def "runs action that does nothing"() {
         when:
         def result = build.run(action)
 
         then:
         result == '<result>'
 
-        then:
         1 * lifecycleListener.afterStart()
+        1 * controller.gradle >> gradle
 
-        then:
-        1 * action.transform(!null) >> { BuildController controller ->
+        1 * action.apply(!null) >> { BuildTreeLifecycleController controller ->
             '<result>'
         }
 
-        then:
         1 * lifecycleListener.beforeComplete()
+        0 * controller._
+        0 * includedBuildTaskGraph._
+        0 * lifecycleListener._
     }
 
     def "can have null result"() {
@@ -97,12 +110,12 @@ class DefaultRootBuildStateTest extends Specification {
         result == null
 
         and:
-        1 * action.transform(!null) >> { BuildController controller ->
+        1 * action.apply(!null) >> { BuildTreeLifecycleController controller ->
             return null
         }
     }
 
-    def "runs build when requested by action"() {
+    def "runs tasks and finishes build when requested by action"() {
         when:
         def result = build.run(action)
 
@@ -110,14 +123,27 @@ class DefaultRootBuildStateTest extends Specification {
         result == '<result>'
 
         and:
-        1 * launcher.executeTasks() >> gradle
-        1 * action.transform(!null) >> { BuildController controller ->
-            assert controller.run() == gradle
+        1 * action.apply(!null) >> { BuildTreeLifecycleController controller ->
+            controller.scheduleAndRunTasks()
             return '<result>'
         }
+
+        and:
+        1 * lifecycleListener.afterStart()
+
+        and:
+        1 * controller.scheduleRequestedTasks()
+        1 * includedBuildTaskGraph.startTaskExecution()
+        1 * controller.executeTasks() >> ExecutionResult.succeeded()
+        1 * includedBuildTaskGraph.awaitTaskCompletion() >> ExecutionResult.succeeded()
+        1 * controller.finishBuild(null) >> ExecutionResult.succeeded()
+
+        and:
+        1 * lifecycleListener.beforeComplete()
+        0 * lifecycleListener._
     }
 
-    def "configures build when requested by action"() {
+    def "configures and finishes build when requested by action"() {
         when:
         def result = build.run(action)
 
@@ -125,29 +151,20 @@ class DefaultRootBuildStateTest extends Specification {
         result == '<result>'
 
         and:
-        1 * launcher.getConfiguredBuild() >> gradle
-        1 * action.transform(!null) >> { BuildController controller ->
-            assert controller.configure() == gradle
-            return '<result>'
+        1 * action.apply(!null) >> { BuildTreeLifecycleController controller ->
+            controller.fromBuildModel(false) { '<result>' }
         }
-    }
-
-    def "cannot request configuration after build has been run"() {
-        given:
-        action.transform(!null) >> { BuildController controller ->
-            controller.run()
-            controller.configure()
-        }
-
-        when:
-        build.run(action)
-
-        then:
-        IllegalStateException e = thrown()
-        e.message == 'Cannot use launcher after build has completed.'
 
         and:
-        1 * launcher.executeTasks() >> gradle
+        1 * lifecycleListener.afterStart()
+
+        and:
+        1 * controller.getConfiguredBuild() >> gradle
+        1 * controller.finishBuild(null) >> ExecutionResult.succeeded()
+
+        and:
+        1 * lifecycleListener.beforeComplete()
+        0 * lifecycleListener._
     }
 
     def "forwards action failure and cleans up"() {
@@ -161,8 +178,10 @@ class DefaultRootBuildStateTest extends Specification {
         e == failure
 
         and:
-        1 * action.transform(!null) >> { BuildController controller -> throw failure }
+        1 * action.apply(!null) >> { BuildTreeLifecycleController controller -> throw failure }
+        1 * lifecycleListener.afterStart()
         1 * lifecycleListener.beforeComplete()
+        0 * lifecycleListener._
     }
 
     def "forwards build failure and cleans up"() {
@@ -176,49 +195,43 @@ class DefaultRootBuildStateTest extends Specification {
         e == failure
 
         and:
-        1 * launcher.executeTasks() >> { throw failure }
-        1 * action.transform(!null) >> { BuildController controller ->
-            controller.run()
+        1 * action.apply(!null) >> { BuildTreeLifecycleController controller ->
+            controller.scheduleAndRunTasks()
         }
-        1 * lifecycleListener.beforeComplete()
-    }
-
-    def "forwards configure failure and cleans up"() {
-        def failure = new RuntimeException()
-
-        when:
-        build.run(action)
-
-        then:
-        RuntimeException e = thrown()
-        e == failure
 
         and:
-        1 * launcher.getConfiguredBuild() >> { throw failure }
-        1 * action.transform(!null) >> { BuildController controller ->
-            controller.configure()
-        }
+        1 * lifecycleListener.afterStart()
+
+        and:
+        1 * controller.executeTasks() >> ExecutionResult.failed(failure)
+        1 * includedBuildTaskGraph.awaitTaskCompletion() >> ExecutionResult.succeeded()
+        1 * controller.finishBuild(_) >> ExecutionResult.succeeded()
+
+        and:
         1 * lifecycleListener.beforeComplete()
+        0 * lifecycleListener._
     }
 
-    def "cannot run after configuration failure"() {
+    def "cannot run multiple actions"() {
+        given:
+        action.apply(!null) >> { BuildTreeLifecycleController controller ->
+            controller.scheduleAndRunTasks()
+        }
+        1 * controller.executeTasks() >> ExecutionResult.succeeded()
+        1 * includedBuildTaskGraph.awaitTaskCompletion() >> ExecutionResult.succeeded()
+        1 * controller.finishBuild(null) >> ExecutionResult.succeeded()
+
+        build.run(action)
+
         when:
         build.run(action)
 
         then:
         IllegalStateException e = thrown()
-        e.message == 'Cannot use launcher after build has completed.'
+        e.message == 'Cannot run more than one action for a build.'
 
         and:
-        1 * launcher.configuredBuild >> { throw new RuntimeException() }
-        1 * action.transform(!null) >> { BuildController controller ->
-            try {
-                controller.configure()
-            } catch (RuntimeException) {
-                // Ignore
-            }
-            controller.run()
-        }
-        1 * lifecycleListener.beforeComplete()
+        0 * lifecycleListener._
     }
+
 }

@@ -15,8 +15,6 @@
  */
 package org.gradle.internal.io;
 
-import org.gradle.internal.SystemProperties;
-
 import java.io.IOException;
 import java.io.OutputStream;
 
@@ -33,21 +31,21 @@ public class LineBufferingOutputStream extends OutputStream {
     private final int lineMaxLength;
     private int counter;
 
-    public LineBufferingOutputStream(TextStream handler) {
-        this(handler, 2048);
+    public LineBufferingOutputStream(TextStream handler, String lineSeparator) {
+        this(handler, lineSeparator, 8192);
     }
 
-    public LineBufferingOutputStream(TextStream handler, int bufferLength) {
-        this(handler, bufferLength, LINE_MAX_LENGTH);
+    public LineBufferingOutputStream(TextStream handler, String lineSeparator, int bufferLength) {
+        this(handler, lineSeparator, bufferLength, LINE_MAX_LENGTH);
     }
 
-    public LineBufferingOutputStream(TextStream handler, int bufferLength, int lineMaxLength) {
+    public LineBufferingOutputStream(TextStream handler, String lineSeparator, int bufferLength, int lineMaxLength) {
         this.handler = handler;
         buffer = new StreamByteBuffer(bufferLength);
         this.lineMaxLength = lineMaxLength;
         output = buffer.getOutputStream();
-        byte[] lineSeparator = SystemProperties.getInstance().getLineSeparator().getBytes();
-        lastLineSeparatorByte = lineSeparator[lineSeparator.length - 1];
+        byte[] lineSeparatorBytes = lineSeparator.getBytes();
+        lastLineSeparatorByte = lineSeparatorBytes[lineSeparatorBytes.length - 1];
     }
 
     /**
@@ -55,6 +53,7 @@ public class LineBufferingOutputStream extends OutputStream {
      * <code>close</code> is that it closes the output stream. A closed stream cannot perform output operations and
      * cannot be reopened.
      */
+    @Override
     public void close() throws IOException {
         hasBeenClosed = true;
         flush();
@@ -70,6 +69,7 @@ public class LineBufferingOutputStream extends OutputStream {
      * @throws java.io.IOException if an I/O error occurs. In particular, an <code>IOException</code> may be thrown if
      * the output stream has been closed.
      */
+    @Override
     public void write(final int b) throws IOException {
         if (hasBeenClosed) {
             throw new IOException("The stream has been closed.");
@@ -89,6 +89,7 @@ public class LineBufferingOutputStream extends OutputStream {
         return currentByte == lastLineSeparatorByte || currentByte == '\n';
     }
 
+    @Override
     public void flush() {
         String text = buffer.readAsString();
         if (text.length() > 0) {

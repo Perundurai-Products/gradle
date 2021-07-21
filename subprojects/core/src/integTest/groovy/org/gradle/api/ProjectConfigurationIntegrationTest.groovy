@@ -32,4 +32,72 @@ class ProjectConfigurationIntegrationTest extends AbstractIntegrationSpec {
         then:
         output.contains "the name: foobar"
     }
+
+    def "shows deprecation warning when calling Project#afterEvaluate(Closure) after the project was evaluated"() {
+        buildFile << '''
+            allprojects { p ->
+                println "[1] Adding afterEvaluate for $p.name"
+                p.afterEvaluate {
+                    println "[1] afterEvaluate $p.name"
+                }
+            }
+
+            project(':a') {
+                println "[2] Adding evaluationDependsOn"
+                evaluationDependsOn(':b')
+            }
+
+            allprojects { p ->
+                println "[3] Adding afterEvaluate for $p.name"
+                p.afterEvaluate {
+                    println "[3] afterEvaluate $p.name"
+                }
+            }
+        '''
+        settingsFile << """
+            rootProject.name = 'root'
+            include 'a', 'b'
+        """
+
+        expect:
+        def result = fails()
+        result.assertHasDescription("A problem occurred evaluating root project 'root'.")
+        failure.assertHasCause("Cannot run Project.afterEvaluate(Closure) when the project is already evaluated.")
+    }
+
+    def "shows deprecation warning when calling Project#afterEvaluate(Action) after the project was evaluated"() {
+        buildFile '''
+            allprojects { p ->
+                println "[1] Adding afterEvaluate for $p.name"
+                p.afterEvaluate new Action<Project>() {
+                    void execute(Project proj) {
+                        println "[1] afterEvaluate $proj.name"
+                    }
+                }
+            }
+
+            project(':a') {
+                println "[2] Adding evaluationDependsOn"
+                evaluationDependsOn(':b')
+            }
+
+            allprojects { p ->
+                println "[3] Adding afterEvaluate for $p.name"
+                p.afterEvaluate new Action<Project>() {
+                    void execute(Project proj) {
+                        println "[3] afterEvaluate $proj.name"
+                    }
+                }
+            }
+        '''
+        settingsFile << """
+            rootProject.name = 'root'
+            include 'a', 'b'
+        """
+
+        expect:
+        def result = fails()
+        result.assertHasDescription("A problem occurred evaluating root project 'root'.")
+        failure.assertHasCause("Cannot run Project.afterEvaluate(Action) when the project is already evaluated.")
+    }
 }

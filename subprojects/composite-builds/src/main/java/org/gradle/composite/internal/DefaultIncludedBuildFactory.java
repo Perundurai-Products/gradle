@@ -19,21 +19,31 @@ package org.gradle.composite.internal;
 import org.gradle.api.InvalidUserDataException;
 import org.gradle.api.artifacts.component.BuildIdentifier;
 import org.gradle.api.internal.BuildDefinition;
+import org.gradle.api.internal.project.ProjectStateRegistry;
+import org.gradle.internal.build.BuildLifecycleControllerFactory;
 import org.gradle.internal.build.BuildState;
+import org.gradle.internal.build.IncludedBuildFactory;
 import org.gradle.internal.build.IncludedBuildState;
+import org.gradle.internal.buildtree.BuildTreeState;
 import org.gradle.internal.reflect.Instantiator;
-import org.gradle.internal.work.WorkerLeaseService;
 import org.gradle.util.Path;
 
 import java.io.File;
 
 public class DefaultIncludedBuildFactory implements IncludedBuildFactory {
+    private final BuildTreeState buildTree;
     private final Instantiator instantiator;
-    private final WorkerLeaseService workerLeaseService;
+    private final BuildLifecycleControllerFactory buildLifecycleControllerFactory;
+    private final ProjectStateRegistry projectStateRegistry;
 
-    public DefaultIncludedBuildFactory(Instantiator instantiator, WorkerLeaseService workerLeaseService) {
+    public DefaultIncludedBuildFactory(BuildTreeState buildTree,
+                                       Instantiator instantiator,
+                                       BuildLifecycleControllerFactory buildLifecycleControllerFactory,
+                                       ProjectStateRegistry projectStateRegistry) {
+        this.buildTree = buildTree;
         this.instantiator = instantiator;
-        this.workerLeaseService = workerLeaseService;
+        this.buildLifecycleControllerFactory = buildLifecycleControllerFactory;
+        this.projectStateRegistry = projectStateRegistry;
     }
 
     private void validateBuildDirectory(File dir) {
@@ -48,6 +58,16 @@ public class DefaultIncludedBuildFactory implements IncludedBuildFactory {
     @Override
     public IncludedBuildState createBuild(BuildIdentifier buildIdentifier, Path identityPath, BuildDefinition buildDefinition, boolean isImplicit, BuildState owner) {
         validateBuildDirectory(buildDefinition.getBuildRootDir());
-        return instantiator.newInstance(DefaultIncludedBuild.class, buildIdentifier, identityPath, buildDefinition, isImplicit, owner, workerLeaseService.getCurrentWorkerLease());
+        return new DefaultIncludedBuild(
+            buildIdentifier,
+            identityPath,
+            buildDefinition,
+            isImplicit,
+            owner,
+            buildTree,
+            buildLifecycleControllerFactory,
+            projectStateRegistry,
+            instantiator
+        );
     }
 }

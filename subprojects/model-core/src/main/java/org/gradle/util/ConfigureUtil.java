@@ -29,8 +29,45 @@ import javax.annotation.Nullable;
 import java.util.Collection;
 import java.util.Map;
 
-import static org.gradle.util.CollectionUtils.toStringList;
+import static org.gradle.util.internal.CollectionUtils.toStringList;
 
+/**
+ * Contains utility methods to configure objects with Groovy Closures.
+ * <p>
+ * Plugins should avoid using this class and methods that use {@link groovy.lang.Closure} as this makes the plugin harder to use in other languages. Instead, plugins should create methods that use {@link Action}.
+ * Here's an example pseudocode:
+ * <pre class='autoTested'>
+ *     interface MyOptions {
+ *         RegularFileProperty getOptionsFile()
+ *     }
+ *     abstract class MyExtension {
+ *         private final MyOptions options
+ *
+ *         {@literal @}Inject abstract ObjectFactory getObjectFactory()
+ *
+ *         public MyExtension() {
+ *             this.options = getObjectFactory().newInstance(MyOptions)
+ *         }
+ *
+ *         public void options(Action{@literal <?} extends MyOptions{@literal >}  action) {
+ *              action.execute(options)
+ *         }
+ *     }
+ *     extensions.create("myExtension", MyExtension)
+ *     myExtension {
+ *         options {
+ *             optionsFile = layout.projectDirectory.file("options.properties")
+ *         }
+ *     }
+ * </pre>
+ * <p>
+ * Gradle automatically generates a Closure-taking method at runtime for each method with an {@link Action} as a single argument as long as the object is created with {@link org.gradle.api.model.ObjectFactory#newInstance(Class, Object...)}.
+ * <p>
+ * As a last resort, to apply some configuration represented by a Groovy Closure, a plugin can use {@link org.gradle.api.Project#configure(Object, Closure)}.
+ *
+ * @deprecated Will be removed in Gradle 8.0.
+ */
+@Deprecated
 public class ConfigureUtil {
 
     public static <T> T configureByMap(Map<?, ?> properties, T delegate) {
@@ -68,6 +105,10 @@ public class ConfigureUtil {
         return configureByMap(properties, delegate);
     }
 
+    /**
+     * Incomplete input exception.
+     */
+    @Deprecated
     public static class IncompleteInputException extends RuntimeException {
         private final Collection missingKeys;
 
@@ -154,6 +195,12 @@ public class ConfigureUtil {
         new ClosureBackedAction<T>(withNewOwner, Closure.OWNER_ONLY, false).execute(target);
     }
 
+    /**
+     * Wrapper configure action.
+     *
+     * @param <T> the action type.
+     */
+    @Deprecated
     public static class WrappedConfigureAction<T> implements Action<T> {
         private final Closure configureClosure;
 

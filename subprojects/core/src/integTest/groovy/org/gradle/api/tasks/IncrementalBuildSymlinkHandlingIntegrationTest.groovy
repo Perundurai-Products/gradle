@@ -17,6 +17,9 @@
 package org.gradle.api.tasks
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.internal.reflect.problems.ValidationProblemId
+import org.gradle.internal.reflect.validation.ValidationMessageChecker
+import org.gradle.internal.reflect.validation.ValidationTestFor
 import org.gradle.util.Requires
 import org.gradle.util.TestPrecondition
 
@@ -24,8 +27,9 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 
 @Requires(TestPrecondition.SYMLINKS)
-class IncrementalBuildSymlinkHandlingIntegrationTest extends AbstractIntegrationSpec {
+class IncrementalBuildSymlinkHandlingIntegrationTest extends AbstractIntegrationSpec implements ValidationMessageChecker {
     def setup() {
+        expectReindentedValidationMessage()
         buildFile << """
 // This is a workaround to bust the JVM's file canonicalization cache
 def f = file("delete-me")
@@ -35,11 +39,13 @@ f.delete() // invalidates cache
 task work {
     inputs.file('in.txt')
     inputs.dir('in-dir')
-    outputs.file('out.txt')
-    outputs.dir('out-dir')
+    def outTxt = file('out.txt')
+    def outDir = file('out-dir')
+    outputs.file(outTxt)
+    outputs.dir(outDir)
     doLast {
-        file('out.txt').text = 'content'
-        def f2 = file('out-dir/file1.txt')
+        outTxt.text = 'content'
+        def f2 = new File(outDir, 'file1.txt')
         f2.parentFile.mkdirs()
         f2 << 'content'
     }
@@ -122,6 +128,9 @@ task work {
         result.assertTasksSkipped(":work")
     }
 
+    @ValidationTestFor(
+        ValidationProblemId.INPUT_FILE_DOES_NOT_EXIST
+    )
     def "symlink may not reference missing input file"() {
         file("in-dir").createDir()
         def link = file("in.txt")
@@ -130,8 +139,12 @@ task work {
 
         expect:
         fails("work")
-        failure.assertHasDescription("A problem was found with the configuration of task ':work'.")
-        failure.assertHasCause("File '$link' specified for property '\$1' does not exist.")
+        failure.assertHasDescription("A problem was found with the configuration of task ':work' (type 'DefaultTask').")
+        failureDescriptionContains(inputDoesNotExist {
+            property('$1')
+                .file(link)
+                .includeLink()
+        })
     }
 
     def "can replace input file with symlink to file with same content"() {

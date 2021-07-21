@@ -16,7 +16,6 @@
 
 package org.gradle.tooling.model.idea;
 
-import org.gradle.api.Incubating;
 import org.gradle.tooling.model.DomainObjectSet;
 import org.gradle.tooling.model.UnsupportedMethodException;
 
@@ -39,27 +38,9 @@ public interface IdeaContentRoot {
     DomainObjectSet<? extends IdeaSourceDirectory> getSourceDirectories();
 
     /**
-     * The set of generated source directories. This is a subset of those directories returned by {@link #getSourceDirectories()}.
-     *
-     * @since 2.2
-     * @deprecated Use {@link IdeaContentRoot#getSourceDirectories()} in combination with  {@link IdeaSourceDirectory#isGenerated()} instead.
-     */
-    @Deprecated
-    DomainObjectSet<? extends IdeaSourceDirectory> getGeneratedSourceDirectories();
-
-    /**
      * The set of test source directories.
      */
     DomainObjectSet<? extends IdeaSourceDirectory> getTestDirectories();
-
-    /**
-     * The set of generated test directories. This is a subset of those directories returned by {@link #getTestDirectories()}.
-     *
-     * @since 2.2
-     * @deprecated Use {@link IdeaContentRoot#getTestDirectories()} in combination with  {@link IdeaSourceDirectory#isGenerated()} instead.
-     */
-    @Deprecated
-    DomainObjectSet<? extends IdeaSourceDirectory> getGeneratedTestDirectories();
 
     /**
      * The set of resource directories.
@@ -67,7 +48,6 @@ public interface IdeaContentRoot {
      * @throws UnsupportedMethodException For Gradle versions older than 4.7 where this method is not supported.
      * @since 4.7
      */
-    @Incubating
     DomainObjectSet<? extends IdeaSourceDirectory> getResourceDirectories() throws UnsupportedMethodException;
 
 
@@ -77,7 +57,6 @@ public interface IdeaContentRoot {
      * @throws UnsupportedMethodException For Gradle versions older than 4.7 where this method is not supported.
      * @since 4.7
      */
-    @Incubating
     DomainObjectSet<? extends IdeaSourceDirectory> getTestResourceDirectories() throws UnsupportedMethodException;
 
     /**

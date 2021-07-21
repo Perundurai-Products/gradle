@@ -16,12 +16,15 @@
 
 package org.gradle.integtests.fixtures
 
-import org.junit.experimental.categories.Category
-import org.junit.runner.RunWith
-import org.gradle.util.VersionNumber
+import org.gradle.integtests.fixtures.compatibility.MultiVersionTest
+import org.gradle.integtests.fixtures.compatibility.MultiVersionTestCategory
+import org.gradle.util.internal.VersionNumber
 
-@RunWith(MultiVersionSpecRunner)
-@Category(ContextualMultiVersionTest.class)
+/**
+ * See {@link org.gradle.integtests.fixtures.compatibility.AbstractContextualMultiVersionTestInterceptor} for information on running these tests.
+ */
+@MultiVersionTest
+@MultiVersionTestCategory
 abstract class MultiVersionIntegrationSpec extends AbstractIntegrationSpec {
     static def version
 

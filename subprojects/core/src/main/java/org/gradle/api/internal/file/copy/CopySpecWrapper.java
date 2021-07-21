@@ -24,12 +24,14 @@ import org.gradle.api.Transformer;
 import org.gradle.api.file.CopyProcessingSpec;
 import org.gradle.api.file.CopySpec;
 import org.gradle.api.file.DuplicatesStrategy;
+import org.gradle.api.file.ExpandDetails;
 import org.gradle.api.file.FileCopyDetails;
 import org.gradle.api.file.FileTreeElement;
 import org.gradle.api.specs.Spec;
-import org.gradle.util.ClosureBackedAction;
+import org.gradle.util.internal.ClosureBackedAction;
 
 import javax.annotation.Nullable;
+import javax.inject.Inject;
 import java.io.FilterReader;
 import java.util.Map;
 import java.util.Set;
@@ -46,6 +48,7 @@ public class CopySpecWrapper implements CopySpec {
     @VisibleForTesting
     final CopySpec delegate;
 
+    @Inject
     public CopySpecWrapper(CopySpec delegate) {
         this.delegate = delegate;
     }
@@ -118,7 +121,7 @@ public class CopySpecWrapper implements CopySpec {
 
     @Override
     public CopySpec from(Object sourcePath, final Closure c) {
-        return delegate.from(sourcePath, new ClosureBackedAction<CopySpec>(c));
+        return delegate.from(sourcePath, new ClosureBackedAction<>(c));
     }
 
     @Override
@@ -204,13 +207,10 @@ public class CopySpecWrapper implements CopySpec {
 
     @Override
     public CopySpec rename(final Closure closure) {
-        delegate.rename(new Transformer<String, String>() {
-            @Override
-            public String transform(String s) {
-                Object res = closure.call(s);
-                //noinspection ConstantConditions
-                return res == null ? null : res.toString();
-            }
+        delegate.rename(s -> {
+            Object res = closure.call(s);
+            //noinspection ConstantConditions
+            return res == null ? null : res.toString();
         });
         return this;
     }
@@ -260,6 +260,12 @@ public class CopySpecWrapper implements CopySpec {
     @Override
     public CopySpec expand(Map<String, ?> properties) {
         delegate.expand(properties);
+        return this;
+    }
+
+    @Override
+    public CopySpec expand(Map<String, ?> properties, Action<? super ExpandDetails> action) {
+        delegate.expand(properties, action);
         return this;
     }
 

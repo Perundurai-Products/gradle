@@ -16,14 +16,42 @@
 
 package org.gradle.performance.fixture
 
+import com.google.common.collect.ImmutableList
+import groovy.transform.CompileStatic
 import org.gradle.performance.results.BuildDisplayInfo
+import org.gradle.profiler.BuildMutator
+import org.gradle.profiler.InvocationSettings
 
+import java.util.function.Function
+
+@CompileStatic
 class GradleBuildExperimentSpec extends BuildExperimentSpec {
     final GradleInvocationSpec invocation
+    final ImmutableList<String> measuredBuildOperations
+    final boolean measureGarbageCollection
+    final boolean crossVersion
 
-    GradleBuildExperimentSpec(String displayName, String projectName, File workingDirectory, GradleInvocationSpec invocation, Integer warmUpCount, Integer invocationCount, BuildExperimentListener listener, InvocationCustomizer invocationCustomizer) {
-        super(displayName, projectName, workingDirectory, warmUpCount, invocationCount, listener, invocationCustomizer)
+    GradleBuildExperimentSpec(
+        String displayName,
+        String projectName,
+        File workingDirectory,
+        GradleInvocationSpec invocation,
+        boolean crossVersion,
+        Integer warmUpCount,
+        Integer invocationCount,
+        ImmutableList<Function<InvocationSettings, BuildMutator>> buildMutators,
+        ImmutableList<String> measuredBuildOperations, boolean measureGarbageCollection
+    ) {
+        super(displayName, projectName, workingDirectory, warmUpCount, invocationCount, buildMutators)
+        this.crossVersion = crossVersion
+        this.measuredBuildOperations = measuredBuildOperations
+        this.measureGarbageCollection = measureGarbageCollection
         this.invocation = invocation
+    }
+
+    @Override
+    GradleInvocationSpec getInvocation() {
+        invocation
     }
 
     static GradleBuilder builder() {
@@ -32,7 +60,7 @@ class GradleBuildExperimentSpec extends BuildExperimentSpec {
 
     @Override
     BuildDisplayInfo getDisplayInfo() {
-        new BuildDisplayInfo(projectName, displayName, invocation.tasksToRun, invocation.cleanTasks, invocation.args, invocation.jvmOpts, invocation.useDaemon)
+        new BuildDisplayInfo(projectName, displayName, invocation.tasksToRun, invocation.cleanTasks, invocation.args, invocation.jvmArguments, invocation.useDaemon)
     }
 
     static class GradleBuilder implements BuildExperimentSpec.Builder {
@@ -42,8 +70,10 @@ class GradleBuildExperimentSpec extends BuildExperimentSpec {
         GradleInvocationSpec.InvocationBuilder invocation = GradleInvocationSpec.builder()
         Integer warmUpCount
         Integer invocationCount
-        BuildExperimentListener listener
-        InvocationCustomizer invocationCustomizer
+        final List<Function<InvocationSettings, BuildMutator>> buildMutators = []
+        final List<String> measuredBuildOperations = []
+        boolean measureGarbageCollection
+        boolean crossVersion
 
         GradleBuilder displayName(String displayName) {
             this.displayName = displayName
@@ -66,17 +96,34 @@ class GradleBuildExperimentSpec extends BuildExperimentSpec {
         }
 
         GradleBuilder invocation(@DelegatesTo(GradleInvocationSpec.InvocationBuilder) Closure<?> conf) {
-            invocation.with(conf)
+            invocation.with(conf as Closure<Object>)
             this
         }
 
-        GradleBuilder listener(BuildExperimentListener listener) {
-            this.listener = listener
+        GradleBuilder buildMutators(List<Function<InvocationSettings, BuildMutator>> mutators) {
+            this.buildMutators.clear()
+            this.buildMutators.addAll(mutators)
             this
         }
 
-        GradleBuilder invocationCustomizer(InvocationCustomizer invocationCustomizer) {
-            this.invocationCustomizer = invocationCustomizer
+        GradleBuilder addBuildMutator(Function<InvocationSettings, BuildMutator> buildMutator) {
+            this.buildMutators.add(buildMutator)
+            this
+        }
+
+        GradleBuilder measuredBuildOperations(List<String> measuredBuildOperations) {
+            this.measuredBuildOperations.clear()
+            this.measuredBuildOperations.addAll(measuredBuildOperations)
+            this
+        }
+
+        GradleBuilder measureGarbageCollection(boolean measureGarbageCollectionTime) {
+            this.measureGarbageCollection = measureGarbageCollectionTime
+            this
+        }
+
+        GradleBuilder crossVersion(boolean crossVersion) {
+            this.crossVersion = crossVersion
             this
         }
 
@@ -85,7 +132,18 @@ class GradleBuildExperimentSpec extends BuildExperimentSpec {
             assert displayName != null
             assert invocation != null
 
-            new GradleBuildExperimentSpec(displayName, projectName, workingDirectory, invocation.build(), warmUpCount, invocationCount, listener, invocationCustomizer)
+            new GradleBuildExperimentSpec(
+                displayName,
+                projectName,
+                workingDirectory,
+                invocation.build(),
+                crossVersion,
+                warmUpCount,
+                invocationCount,
+                ImmutableList.copyOf(buildMutators),
+                ImmutableList.copyOf(measuredBuildOperations),
+                measureGarbageCollection
+            )
         }
     }
 }

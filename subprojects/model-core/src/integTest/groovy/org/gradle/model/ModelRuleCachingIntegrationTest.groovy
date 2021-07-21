@@ -16,9 +16,11 @@
 
 package org.gradle.model
 
+import org.gradle.integtests.fixtures.UnsupportedWithConfigurationCache
 import org.gradle.integtests.fixtures.longlived.PersistentBuildProcessIntegrationTest
 import org.gradle.model.internal.inspect.ModelRuleExtractor
 
+@UnsupportedWithConfigurationCache(because = "software model")
 class ModelRuleCachingIntegrationTest extends PersistentBuildProcessIntegrationTest {
 
     def setup() {
@@ -37,7 +39,7 @@ class ModelRuleCachingIntegrationTest extends PersistentBuildProcessIntegrationT
     def "rules extracted from core plugins are reused across builds"() {
         given:
         buildFile << '''
-            apply plugin: 'java-lang'
+            apply plugin: 'cpp'
         '''
 
         when:

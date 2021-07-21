@@ -17,26 +17,45 @@
 package org.gradle.initialization;
 
 import org.gradle.internal.SystemProperties;
-import org.gradle.internal.deprecation.Deprecatable;
-import org.gradle.internal.deprecation.LoggingDeprecatable;
+import org.gradle.internal.installation.CurrentGradleInstallation;
+import org.gradle.internal.installation.GradleInstallation;
 
 import javax.annotation.Nullable;
 import java.io.File;
-import java.util.Set;
 
 import static org.gradle.internal.FileUtils.canonicalize;
 
-public class BuildLayoutParameters implements Deprecatable {
+public class BuildLayoutParameters {
     public static final String GRADLE_USER_HOME_PROPERTY_KEY = "gradle.user.home";
     private static final File DEFAULT_GRADLE_USER_HOME = new File(SystemProperties.getInstance().getUserHome() + "/.gradle");
-    private final Deprecatable deprecationHandler = new LoggingDeprecatable();
 
-    private boolean searchUpwards = true;
-    private File currentDir = canonicalize(SystemProperties.getInstance().getCurrentDir());
-    private File projectDir;
+    private File gradleInstallationHomeDir;
     private File gradleUserHomeDir;
+    private File projectDir;
+    private File currentDir;
 
     public BuildLayoutParameters() {
+        this(
+            findGradleInstallationHomeDir(),
+            findGradleUserHomeDir(),
+            null,
+            canonicalize(SystemProperties.getInstance().getCurrentDir())
+        );
+    }
+
+    public BuildLayoutParameters(
+        @Nullable File gradleInstallationHomeDir,
+        File gradleUserHomeDir,
+        @Nullable File projectDir,
+        File currentDir
+    ) {
+        this.gradleUserHomeDir = gradleUserHomeDir;
+        this.gradleInstallationHomeDir = gradleInstallationHomeDir;
+        this.projectDir = projectDir;
+        this.currentDir = currentDir;
+    }
+
+    static private File findGradleUserHomeDir() {
         String gradleUserHome = System.getProperty(GRADLE_USER_HOME_PROPERTY_KEY);
         if (gradleUserHome == null) {
             gradleUserHome = System.getenv("GRADLE_USER_HOME");
@@ -44,12 +63,16 @@ public class BuildLayoutParameters implements Deprecatable {
                 gradleUserHome = DEFAULT_GRADLE_USER_HOME.getAbsolutePath();
             }
         }
-        gradleUserHomeDir = canonicalize(new File(gradleUserHome));
+        return canonicalize(new File(gradleUserHome));
     }
 
-    public BuildLayoutParameters setSearchUpwards(boolean searchUpwards) {
-        this.searchUpwards = searchUpwards;
-        return this;
+    @Nullable
+    static private File findGradleInstallationHomeDir() {
+        GradleInstallation gradleInstallation = CurrentGradleInstallation.get();
+        if (gradleInstallation != null) {
+            return gradleInstallation.getGradleHome();
+        }
+        return null;
     }
 
     public BuildLayoutParameters setProjectDir(File projectDir) {
@@ -59,6 +82,11 @@ public class BuildLayoutParameters implements Deprecatable {
 
     public BuildLayoutParameters setGradleUserHomeDir(File gradleUserHomeDir) {
         this.gradleUserHomeDir = gradleUserHomeDir;
+        return this;
+    }
+
+    public BuildLayoutParameters setGradleInstallationHomeDir(@Nullable File gradleInstallationHomeDir) {
+        this.gradleInstallationHomeDir = gradleInstallationHomeDir;
         return this;
     }
 
@@ -84,22 +112,9 @@ public class BuildLayoutParameters implements Deprecatable {
         return gradleUserHomeDir;
     }
 
-    public boolean getSearchUpwards() {
-        return searchUpwards;
+    @Nullable
+    public File getGradleInstallationHomeDir() {
+        return gradleInstallationHomeDir;
     }
 
-    @Override
-    public void addDeprecation(String deprecation) {
-        deprecationHandler.addDeprecation(deprecation);
-    }
-
-    @Override
-    public Set<String> getDeprecations() {
-        return deprecationHandler.getDeprecations();
-    }
-
-    @Override
-    public void checkDeprecation() {
-        deprecationHandler.checkDeprecation();
-    }
 }

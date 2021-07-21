@@ -19,15 +19,17 @@ package org.gradle.api.distribution;
 import org.gradle.api.Action;
 import org.gradle.api.Named;
 import org.gradle.api.file.CopySpec;
+import org.gradle.api.provider.Property;
 
 /**
- * A distribution allow to bundle an application or a library including dependencies,sources...
+ * A distribution allows to bundle an application or a library including dependencies, sources...
  */
 public interface Distribution extends Named {
 
     /**
      * The name of this distribution.
      */
+    @Override
     String getName();
 
     /**
@@ -35,15 +37,10 @@ public interface Distribution extends Named {
      * <p>
      * If the {@link #getName()} of this distribution is "{@code main}" this defaults to the project's name.
      * Otherwise it is "{@code $project.name-$this.name}".
+     *
+     * @since 6.0
      */
-    String getBaseName();
-
-    /**
-     * The baseName of the distribution.
-     * <p>
-     * Set to change the name of the distribution archives.
-     */
-    void setBaseName(String baseName);
+    Property<String> getDistributionBaseName();
 
     /**
      * The contents of the distribution.
@@ -55,7 +52,9 @@ public interface Distribution extends Named {
      * <p>
      * Can be used to configure the contents of the distribution:
      * <pre class='autoTested'>
-     * apply plugin: "distribution"
+     * plugins {
+     *     id 'distribution'
+     * }
      *
      * distributions {
      *     main {

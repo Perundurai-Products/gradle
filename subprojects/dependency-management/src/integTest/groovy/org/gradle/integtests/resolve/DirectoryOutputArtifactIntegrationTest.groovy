@@ -190,7 +190,7 @@ class DirectoryOutputArtifactIntegrationTest extends AbstractIntegrationSpec {
         apply plugin: 'java'
 
         dependencies {
-            compile project(path: ':b', configuration: 'compile_output')
+            implementation project(path: ':b', configuration: 'compile_output')
         }
 
         '''
@@ -204,7 +204,7 @@ class DirectoryOutputArtifactIntegrationTest extends AbstractIntegrationSpec {
         }
 
         artifacts {
-            compile_output file:compileJava.destinationDir, builtBy: compileJava
+            compile_output file:compileJava.destinationDirectory.asFile.get(), builtBy: compileJava
         }
         '''
         file('b/src/main/java/Hello.java') << 'public class Hello {}'
@@ -223,12 +223,12 @@ class DirectoryOutputArtifactIntegrationTest extends AbstractIntegrationSpec {
         file('settings.gradle') << "include 'a', 'b'"
         file('a/build.gradle') << """
 
-        ${jcenterRepository()}
+        ${mavenCentralRepository()}
 
         apply plugin: 'java'
 
         dependencies {
-            compile project(path: ':b', configuration: 'compile_output')
+            implementation project(path: ':b', configuration: 'compile_output')
         }
 
         """
@@ -246,20 +246,20 @@ class DirectoryOutputArtifactIntegrationTest extends AbstractIntegrationSpec {
 
         apply plugin: 'java'
 
-        ${jcenterRepository()}
+        ${mavenCentralRepository()}
 
         configurations {
             compile_output {
-               extendsFrom compile
+               extendsFrom implementation
             }
         }
 
         dependencies {
-            compile 'org.apache.commons:commons-lang3:3.5'
+            implementation 'org.apache.commons:commons-lang3:3.5'
         }
 
         artifacts {
-            compile_output file:compileJava.destinationDir, builtBy: compileJava
+            compile_output file:compileJava.destinationDirectory.asFile.get(), builtBy: compileJava
         }
         """
         file('b/src/main/java/Hello.java') << '''import org.apache.commons.lang3.StringUtils;

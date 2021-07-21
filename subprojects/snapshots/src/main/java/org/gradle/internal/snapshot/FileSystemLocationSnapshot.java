@@ -16,7 +16,7 @@
 
 package org.gradle.internal.snapshot;
 
-import org.gradle.internal.file.FileType;
+import org.gradle.internal.file.FileMetadata;
 import org.gradle.internal.hash.HashCode;
 
 import java.util.Comparator;
@@ -24,22 +24,19 @@ import java.util.Comparator;
 /**
  * A snapshot of a single location on the file system.
  *
+ * We know everything about this snapshot, including children and Merkle hash.
+ *
  * The snapshot can be a snapshot of a regular file or of a whole directory tree.
  * The file at the location is not required to exist (see {@link MissingFileSnapshot}.
  */
-public interface FileSystemLocationSnapshot extends FileSystemSnapshot {
-
-    Comparator<FileSystemLocationSnapshot> BY_NAME = new Comparator<FileSystemLocationSnapshot>() {
-        @Override
-        public int compare(FileSystemLocationSnapshot o1, FileSystemLocationSnapshot o2) {
-            return o1.getName().compareTo(o2.getName());
-        }
-    };
+public interface FileSystemLocationSnapshot extends FileSystemSnapshot, FileSystemNode, MetadataSnapshot {
 
     /**
-     * The type of the file.
+     * The comparator of direct children of a file system location.
+     *
+     * The comparison is stable with respect to case sensitivity, so the order of the children is stable across operating systems.
      */
-    FileType getType();
+    Comparator<FileSystemLocationSnapshot> BY_NAME = Comparator.comparing(FileSystemLocationSnapshot::getName, PathUtil::compareFileNames);
 
     /**
      * The file name.
@@ -61,7 +58,7 @@ public interface FileSystemLocationSnapshot extends FileSystemSnapshot {
      *     <dt>Regular Files</dt>
      *     <dd>The hash of the content of the file.</dd>
      *     <dt>Missing files</dt>
-     *     <dd>{@link MissingFileSnapshot#SIGNATURE}</dd>
+     *     <dd>A special signature denoting a missing file.</dd>
      * </dl>
      */
     HashCode getHash();
@@ -70,4 +67,29 @@ public interface FileSystemLocationSnapshot extends FileSystemSnapshot {
      * Whether the content and the metadata (modification date) of the current snapshot is the same as for the given one.
      */
     boolean isContentAndMetadataUpToDate(FileSystemLocationSnapshot other);
+
+    /**
+     * Whether the content of the current snapshot is the same as for the given one.
+     */
+    boolean isContentUpToDate(FileSystemLocationSnapshot other);
+
+    /**
+     * Whether the file system location represented by this snapshot is a symlink or not.
+     */
+    FileMetadata.AccessType getAccessType();
+
+    void accept(FileSystemLocationSnapshotVisitor visitor);
+    <T> T accept(FileSystemLocationSnapshotTransformer<T> transformer);
+
+    interface FileSystemLocationSnapshotVisitor {
+        default void visitDirectory(DirectorySnapshot directorySnapshot) {};
+        default void visitRegularFile(RegularFileSnapshot fileSnapshot) {};
+        default void visitMissing(MissingFileSnapshot missingSnapshot) {};
+    }
+
+    interface FileSystemLocationSnapshotTransformer<T> {
+        T visitDirectory(DirectorySnapshot directorySnapshot);
+        T visitRegularFile(RegularFileSnapshot fileSnapshot);
+        T visitMissing(MissingFileSnapshot missingSnapshot);
+    }
 }

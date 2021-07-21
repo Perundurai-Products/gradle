@@ -28,7 +28,7 @@ import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.gradle.util.Requires
 import org.gradle.util.TestPrecondition
 import org.gradle.util.UsesNativeServices
-import org.gradle.util.VersionNumber
+import org.gradle.util.internal.VersionNumber
 import org.junit.Rule
 import spock.lang.Specification
 import spock.lang.Unroll
@@ -169,7 +169,7 @@ End of search list.
 """
 
     @Rule
-    TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
+    TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider(getClass())
     def execActionFactory = Mock(ExecActionFactory)
 
     @Unroll
@@ -247,7 +247,7 @@ End of search list.
         def binary = new File("g++")
 
         when:
-        def result = metadataProvider.getCompilerMetaData(binary, [], [])
+        def result = metadataProvider.getCompilerMetaData([]) { it.executable(binary) }
 
         then:
         1 * execActionFactory.newExecAction() >> action
@@ -305,6 +305,7 @@ End of search list.
         1 * visitor.node("g++ appears to be GCC rather than Clang. Treating it as GCC.")
     }
 
+    @Requires(TestPrecondition.NOT_WINDOWS)
     def "parses gcc system includes"() {
         def includes = correctPathSeparators(['/usr/local', '/usr/some/dir'])
         expect:
@@ -312,6 +313,7 @@ End of search list.
         result.component.systemIncludes*.path == includes
     }
 
+    @Requires(TestPrecondition.NOT_WINDOWS)
     def "parses clang system includes"() {
         def includes = correctPathSeparators([
             '/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/9.0.0/include',
@@ -337,6 +339,7 @@ End of search list.
         result.component.systemIncludes*.path == includes
     }
 
+    @Requires(TestPrecondition.WINDOWS)
     def "parses gcc cygwin system includes and maps to windows paths"() {
         def includes = [
             '/usr/include',
@@ -354,7 +357,7 @@ End of search list.
         mapsPath(cygpath, '/usr/include', 'C:\\cygwin\\usr\\include')
         mapsPath(cygpath, '/usr/local/include', 'C:\\cygwin\\usr\\local\\include')
         def provider = new GccMetadataProvider(execActionFactory, GCC)
-        def result = provider.getCompilerMetaData(new File("gcc"), [], [binDir])
+        def result = provider.getCompilerMetaData([binDir]) { it.executable(new File("gcc")) }
         result.component.systemIncludes*.path == mapped
     }
 
@@ -369,7 +372,7 @@ End of search list.
     SearchResult<GccMetadata> output(String output, String error, GccCompilerType compilerType = GCC, List<File> path = []) {
         runsCompiler(output, error)
         def provider = new GccMetadataProvider(execActionFactory, compilerType)
-        provider.getCompilerMetaData(new File("g++"), [], path)
+        provider.getCompilerMetaData(path) { it.executable(new File("g++")) }
     }
 
     void runsCompiler(String output, String error) {

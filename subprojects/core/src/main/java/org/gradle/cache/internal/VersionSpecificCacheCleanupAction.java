@@ -20,15 +20,16 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.SortedSetMultimap;
 import com.google.common.collect.TreeMultimap;
-import org.apache.commons.io.FileUtils;
-import org.gradle.api.logging.Logger;
-import org.gradle.api.logging.Logging;
+import org.gradle.api.internal.changedetection.state.CrossBuildFileHashCache;
 import org.gradle.api.specs.Spec;
 import org.gradle.cache.CleanupProgressMonitor;
+import org.gradle.internal.file.Deleter;
 import org.gradle.internal.time.Time;
 import org.gradle.internal.time.Timer;
-import org.gradle.util.GFileUtils;
+import org.gradle.util.internal.GFileUtils;
 import org.gradle.util.GradleVersion;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nonnull;
 import java.io.File;
@@ -36,23 +37,24 @@ import java.io.IOException;
 import java.util.SortedSet;
 import java.util.concurrent.TimeUnit;
 
-import static org.gradle.api.internal.changedetection.state.CrossBuildFileHashCache.FILE_HASHES_CACHE_KEY;
-
 public class VersionSpecificCacheCleanupAction implements DirectoryCleanupAction {
+    private final static String FILE_HASHES_CACHE_KEY =  CrossBuildFileHashCache.Kind.FILE_HASHES.getCacheId();
 
     @VisibleForTesting static final String MARKER_FILE_PATH = FILE_HASHES_CACHE_KEY + "/" + FILE_HASHES_CACHE_KEY + ".lock";
-    private static final Logger LOGGER = Logging.getLogger(VersionSpecificCacheCleanupAction.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(VersionSpecificCacheCleanupAction.class);
     private static final long CLEANUP_INTERVAL_IN_HOURS = 24;
 
     private final VersionSpecificCacheDirectoryScanner versionSpecificCacheDirectoryScanner;
     private final long maxUnusedDaysForReleases;
     private final long maxUnusedDaysForSnapshots;
+    private final Deleter deleter;
 
-    public VersionSpecificCacheCleanupAction(File cacheBaseDir, long maxUnusedDaysForReleasesAndSnapshots) {
-        this(cacheBaseDir, maxUnusedDaysForReleasesAndSnapshots, maxUnusedDaysForReleasesAndSnapshots);
+    public VersionSpecificCacheCleanupAction(File cacheBaseDir, long maxUnusedDaysForReleasesAndSnapshots, Deleter deleter) {
+        this(cacheBaseDir, maxUnusedDaysForReleasesAndSnapshots, maxUnusedDaysForReleasesAndSnapshots, deleter);
     }
 
-    public VersionSpecificCacheCleanupAction(File cacheBaseDir, long maxUnusedDaysForReleases, long maxUnusedDaysForSnapshots) {
+    public VersionSpecificCacheCleanupAction(File cacheBaseDir, long maxUnusedDaysForReleases, long maxUnusedDaysForSnapshots, Deleter deleter) {
+        this.deleter = deleter;
         Preconditions.checkArgument(maxUnusedDaysForReleases >= maxUnusedDaysForSnapshots,
             "maxUnusedDaysForReleases (%s) must be greater than or equal to maxUnusedDaysForSnapshots (%s)", maxUnusedDaysForReleases, maxUnusedDaysForSnapshots);
         this.versionSpecificCacheDirectoryScanner = new VersionSpecificCacheDirectoryScanner(cacheBaseDir);
@@ -66,6 +68,7 @@ public class VersionSpecificCacheCleanupAction implements DirectoryCleanupAction
         return "Deleting unused version-specific caches in " + versionSpecificCacheDirectoryScanner.getBaseDir();
     }
 
+    @Override
     public boolean execute(@Nonnull CleanupProgressMonitor progressMonitor) {
         if (requiresCleanup()) {
             Timer timer = Time.startTimer();
@@ -130,7 +133,7 @@ public class VersionSpecificCacheCleanupAction implements DirectoryCleanupAction
 
     private void deleteCacheDir(File cacheDir) throws IOException {
         LOGGER.debug("Deleting version-specific cache directory at {}", cacheDir);
-        FileUtils.deleteDirectory(cacheDir);
+        deleter.deleteRecursively(cacheDir);
     }
 
     private static class CleanupCondition implements Spec<VersionSpecificCacheDirectory> {

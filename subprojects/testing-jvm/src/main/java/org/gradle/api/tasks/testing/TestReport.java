@@ -18,12 +18,13 @@ package org.gradle.api.tasks.testing;
 
 import org.gradle.api.DefaultTask;
 import org.gradle.api.Transformer;
+import org.gradle.api.file.ConfigurableFileCollection;
 import org.gradle.api.file.FileCollection;
-import org.gradle.api.internal.file.UnionFileCollection;
 import org.gradle.api.internal.tasks.testing.junit.result.AggregateTestResultsProvider;
 import org.gradle.api.internal.tasks.testing.junit.result.BinaryResultBackedTestResultsProvider;
 import org.gradle.api.internal.tasks.testing.junit.result.TestResultsProvider;
 import org.gradle.api.internal.tasks.testing.report.DefaultTestReport;
+import org.gradle.api.model.ObjectFactory;
 import org.gradle.api.tasks.InputFiles;
 import org.gradle.api.tasks.OutputDirectory;
 import org.gradle.api.tasks.PathSensitive;
@@ -31,25 +32,31 @@ import org.gradle.api.tasks.PathSensitivity;
 import org.gradle.api.tasks.SkipWhenEmpty;
 import org.gradle.api.tasks.TaskAction;
 import org.gradle.internal.operations.BuildOperationExecutor;
+import org.gradle.work.DisableCachingByDefault;
 
 import javax.inject.Inject;
 import java.io.File;
-import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 
 import static org.gradle.internal.concurrent.CompositeStoppable.stoppable;
-import static org.gradle.util.CollectionUtils.collect;
+import static org.gradle.util.internal.CollectionUtils.collect;
 
 /**
  * Generates an HTML test report from the results of one or more {@link Test} tasks.
  */
+@DisableCachingByDefault(because = "Not made cacheable, yet")
 public class TestReport extends DefaultTask {
     private File destinationDir;
-    private List<Object> results = new ArrayList<Object>();
+    private ConfigurableFileCollection resultDirs = getObjectFactory().fileCollection();
 
     @Inject
     protected BuildOperationExecutor getBuildOperationExecutor() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Inject
+    protected ObjectFactory getObjectFactory() {
         throw new UnsupportedOperationException();
     }
 
@@ -72,26 +79,23 @@ public class TestReport extends DefaultTask {
      * Returns the set of binary test results to include in the report.
      */
     @PathSensitive(PathSensitivity.NONE)
-    @InputFiles @SkipWhenEmpty
+    @InputFiles
+    @SkipWhenEmpty
     public FileCollection getTestResultDirs() {
-        UnionFileCollection dirs = new UnionFileCollection();
-        for (Object result : results) {
-            addTo(result, dirs);
-        }
-        return dirs;
+        return resultDirs;
     }
 
-    private void addTo(Object result, UnionFileCollection dirs) {
+    private void addTo(Object result, ConfigurableFileCollection dirs) {
         if (result instanceof Test) {
             Test test = (Test) result;
-            dirs.addToUnion(getProject().files(test.getBinResultsDir()).builtBy(test));
+            dirs.from(test.getBinaryResultsDirectory());
         } else if (result instanceof Iterable<?>) {
             Iterable<?> iterable = (Iterable<?>) result;
             for (Object nested : iterable) {
                 addTo(nested, dirs);
             }
         } else {
-            dirs.addToUnion(getProject().files(result));
+            dirs.from(result);
         }
     }
 
@@ -100,7 +104,7 @@ public class TestReport extends DefaultTask {
      * task.
      */
     public void setTestResultDirs(Iterable<File> testResultDirs) {
-        this.results.clear();
+        resultDirs = getObjectFactory().fileCollection();
         reportOn(testResultDirs);
     }
 
@@ -125,7 +129,7 @@ public class TestReport extends DefaultTask {
      */
     public void reportOn(Object... results) {
         for (Object result : results) {
-            this.results.add(result);
+            addTo(result, resultDirs);
         }
     }
 
@@ -153,6 +157,7 @@ public class TestReport extends DefaultTask {
                 return new BinaryResultBackedTestResultsProvider(resultDirs.getSingleFile());
             } else {
                 return new AggregateTestResultsProvider(collect(resultDirs, resultsProviders, new Transformer<TestResultsProvider, File>() {
+                    @Override
                     public TestResultsProvider transform(File dir) {
                         return new BinaryResultBackedTestResultsProvider(dir);
                     }

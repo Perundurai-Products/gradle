@@ -17,13 +17,20 @@ package org.gradle.api.internal.artifacts;
 
 import org.gradle.api.InvalidUserDataException;
 import org.gradle.api.artifacts.ExcludeRule;
-import org.gradle.util.WrapUtil;
+import org.gradle.util.internal.WrapUtil;
 import org.junit.Test;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
-import static org.hamcrest.Matchers.*;
-import static org.junit.Assert.assertThat;
+import static org.hamcrest.CoreMatchers.equalTo;
+import static org.hamcrest.CoreMatchers.not;
+import static org.hamcrest.CoreMatchers.sameInstance;
+import static org.hamcrest.MatcherAssert.assertThat;
 
 public class DefaultExcludeRuleContainerTest {
     @Test

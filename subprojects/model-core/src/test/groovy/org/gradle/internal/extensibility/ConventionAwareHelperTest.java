@@ -29,14 +29,14 @@ import java.util.concurrent.Callable;
 
 import static java.util.Collections.emptyList;
 import static java.util.Collections.emptyMap;
-import static org.gradle.util.WrapUtil.toList;
-import static org.gradle.util.WrapUtil.toMap;
-import static org.hamcrest.Matchers.equalTo;
-import static org.hamcrest.Matchers.sameInstance;
+import static org.gradle.util.internal.WrapUtil.toList;
+import static org.gradle.util.internal.WrapUtil.toMap;
+import static org.hamcrest.CoreMatchers.equalTo;
+import static org.hamcrest.CoreMatchers.sameInstance;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertThat;
+import static org.hamcrest.MatcherAssert.assertThat;
 
 public class ConventionAwareHelperTest {
     ConventionAwareHelper conventionAware;
@@ -44,7 +44,7 @@ public class ConventionAwareHelperTest {
     TestTask testTask;
 
     @Rule
-    public TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider();
+    public TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider(getClass());
 
     @Before public void setUp() {
         testTask = TestUtil.create(temporaryFolder).task(TestTask.class);

@@ -23,7 +23,7 @@ import org.gradle.api.artifacts.component.ModuleComponentSelector;
 import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.strategy.Version;
 import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.strategy.VersionParser;
 
-import java.util.Collections;
+import javax.annotation.Nullable;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
@@ -33,7 +33,7 @@ public class VirtualPlatformState {
     private final ModuleResolveState platformModule;
     private final ResolveOptimizations resolveOptimizations;
 
-    private final Set<ModuleResolveState> participatingModules = Sets.newHashSet();
+    private final Set<ModuleResolveState> participatingModules = Sets.newLinkedHashSet();
     private final List<EdgeState> orphanEdges = Lists.newArrayListWithExpectedSize(2);
 
     private boolean hasForcedParticipatingModule;
@@ -47,23 +47,25 @@ public class VirtualPlatformState {
     void participatingModule(ModuleResolveState state) {
         state.registerPlatformOwner(this);
         if (participatingModules.add(state)) {
+            resolveOptimizations.declareVirtualPlatformInUse();
             ComponentState selected = platformModule.getSelected();
             if (selected != null) {
                 // There is a possibility that a platform version was selected before a new member
                 // of the platform was discovered. In this case, we need to restart the selection,
                 // or some members will not be upgraded
                 for (NodeState nodeState : selected.getNodes()) {
-                    nodeState.resetSelectionState();
+                    nodeState.markForVirtualPlatformRefresh();
                 }
             }
             hasForcedParticipatingModule |= isParticipatingModuleForced(state);
         }
     }
 
+    @Nullable
     private String getForcedVersion() {
         String version = null;
         for (SelectorState selector : platformModule.getSelectors()) {
-            if (selector.isForce()) {
+            if (selector.hasStrongOpinion()) {
                 ComponentSelector requested = selector.getRequested();
                 if (requested instanceof ModuleComponentSelector) {
                     String nv = ((ModuleComponentSelector) requested).getVersion();
@@ -87,7 +89,7 @@ public class VirtualPlatformState {
                 sorted.add(selected.getVersion());
             }
         }
-        Collections.sort(sorted, vC);
+        sorted.sort(vC);
         if (forcedVersion != null) {
             return sorted.subList(sorted.indexOf(forcedVersion), sorted.size());
         } else {
@@ -99,6 +101,7 @@ public class VirtualPlatformState {
         return participatingModules;
     }
 
+    @Nullable
     public ComponentIdentifier getSelectedPlatformId() {
         ComponentState selected = platformModule.getSelected();
         if (selected != null) {
@@ -112,7 +115,7 @@ public class VirtualPlatformState {
     }
 
     private boolean isSelectedPlatformForced() {
-        boolean forced = platformModule.getSelected().getSelectionReason().isForced();
+        boolean forced = platformModule.getSelected().hasStrongOpinion();
         if (forced) {
             resolveOptimizations.declareForcedPlatformInUse();
         }
@@ -121,7 +124,7 @@ public class VirtualPlatformState {
 
     private boolean isParticipatingModuleForced(ModuleResolveState participatingModule) {
         ComponentState selected = participatingModule.getSelected();
-        boolean forced = selected != null && selected.getSelectionReason().isForced();
+        boolean forced = selected != null && selected.hasStrongOpinion();
         if (forced) {
             resolveOptimizations.declareForcedPlatformInUse();
         }

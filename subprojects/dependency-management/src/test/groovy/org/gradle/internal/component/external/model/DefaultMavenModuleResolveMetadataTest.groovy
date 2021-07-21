@@ -17,25 +17,21 @@
 
 package org.gradle.internal.component.external.model
 
-import org.gradle.api.artifacts.ModuleVersionIdentifier
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 import org.gradle.api.attributes.Attribute
 import org.gradle.api.attributes.AttributeContainer
+import org.gradle.api.attributes.Category
 import org.gradle.api.attributes.Usage
 import org.gradle.api.internal.artifacts.DefaultImmutableModuleIdentifierFactory
 import org.gradle.api.internal.artifacts.DefaultModuleIdentifier
+import org.gradle.api.internal.artifacts.DependencyManagementTestUtil
 import org.gradle.api.internal.artifacts.dependencies.DefaultMutableVersionConstraint
-import org.gradle.api.internal.artifacts.dsl.dependencies.PlatformSupport
-import org.gradle.api.internal.artifacts.repositories.metadata.DefaultMavenImmutableAttributesFactory
 import org.gradle.api.internal.artifacts.repositories.metadata.MavenMutableModuleMetadataFactory
-import org.gradle.api.internal.model.NamedObjectInstantiator
 import org.gradle.api.internal.project.ProjectInternal
 import org.gradle.internal.component.external.descriptor.Configuration
 import org.gradle.internal.component.external.descriptor.MavenScope
-import org.gradle.internal.component.external.model.maven.DefaultMutableMavenModuleResolveMetadata
 import org.gradle.internal.component.external.model.maven.MavenDependencyDescriptor
 import org.gradle.internal.component.external.model.maven.MavenDependencyType
-import org.gradle.internal.component.model.ModuleSource
 import org.gradle.util.AttributeTestUtil
 import org.gradle.util.TestUtil
 import spock.lang.Unroll
@@ -45,7 +41,7 @@ import static org.gradle.internal.component.external.model.DefaultModuleComponen
 class DefaultMavenModuleResolveMetadataTest extends AbstractLazyModuleComponentResolveMetadataTest {
 
     private
-    final mavenMetadataFactory = new MavenMutableModuleMetadataFactory(new DefaultImmutableModuleIdentifierFactory(), AttributeTestUtil.attributesFactory(), TestUtil.objectInstantiator(), TestUtil.featurePreviews())
+    final mavenMetadataFactory = new MavenMutableModuleMetadataFactory(new DefaultImmutableModuleIdentifierFactory(), AttributeTestUtil.attributesFactory(), TestUtil.objectInstantiator(), DependencyManagementTestUtil.defaultSchema())
 
     @Override
     ModuleComponentResolveMetadata createMetadata(ModuleComponentIdentifier id, List<Configuration> configurations, List dependencies) {
@@ -106,28 +102,9 @@ class DefaultMavenModuleResolveMetadataTest extends AbstractLazyModuleComponentR
         defaultArtifacts.size() == runtimeArtifacts.size()
     }
 
-    def "copy with different source"() {
-        given:
-        def source = Stub(ModuleSource)
-        def mutable = mavenMetadataFactory.create(id)
-        mutable.packaging = "other"
-        mutable.relocated = true
-        mutable.snapshotTimestamp = "123"
-        def metadata = mutable.asImmutable()
-
-        when:
-        def copy = metadata.withSource(source)
-
-        then:
-        copy.source == source
-        copy.packaging == "other"
-        copy.relocated
-        copy.snapshotTimestamp == "123"
-    }
-
     def "recognises pom packaging"() {
         when:
-        def metadata = mavenMetadataFactory.create(id)
+        def metadata = mavenMetadataFactory.create(id, [])
         metadata.packaging = packaging
 
         then:
@@ -147,13 +124,12 @@ class DefaultMavenModuleResolveMetadataTest extends AbstractLazyModuleComponentR
     def "recognises java library for packaging=#packaging"() {
         given:
         def stringUsageAttribute = Attribute.of(Usage.USAGE_ATTRIBUTE.getName(), String.class)
-        def componentTypeAttribute = PlatformSupport.COMPONENT_CATEGORY
-        def metadata = new DefaultMutableMavenModuleResolveMetadata(Mock(ModuleVersionIdentifier), id, [], new DefaultMavenImmutableAttributesFactory(AttributeTestUtil.attributesFactory(), NamedObjectInstantiator.INSTANCE), TestUtil.objectInstantiator())
+        def componentTypeAttribute = Attribute.of(Category.CATEGORY_ATTRIBUTE.getName(), String.class)
+        def metadata = mavenMetadataFactory.create(id, [])
         metadata.packaging = packaging
-        metadata.variantMetadataRules.variantDerivationStrategy = new JavaEcosystemVariantDerivationStrategy()
 
         when:
-        def immutableMetadata = metadata.asImmutable()
+        def immutableMetadata = metadata.asImmutable().withDerivationStrategy(JavaEcosystemVariantDerivationStrategy.getInstance())
         def variantsForGraphTraversal = immutableMetadata.getVariantsForGraphTraversal().orNull()
         def compileConf = immutableMetadata.getConfiguration("compile")
         def runtimeConf = immutableMetadata.getConfiguration("runtime")

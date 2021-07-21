@@ -17,7 +17,7 @@
 package org.gradle.nativeplatform.toolchain.internal.msvcpp;
 
 import org.gradle.api.Named;
-import org.gradle.util.VersionNumber;
+import org.gradle.util.internal.VersionNumber;
 
 import java.io.File;
 
@@ -36,6 +36,7 @@ public abstract class WindowsKitInstall implements Named {
         return baseDir;
     }
 
+    @Override
     public String getName() {
         return name;
     }

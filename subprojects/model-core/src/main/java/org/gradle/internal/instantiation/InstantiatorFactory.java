@@ -18,6 +18,7 @@ package org.gradle.internal.instantiation;
 
 import org.gradle.internal.reflect.Instantiator;
 import org.gradle.internal.service.ServiceLookup;
+import org.gradle.internal.state.ManagedFactory;
 
 import java.lang.annotation.Annotation;
 import java.util.Collection;
@@ -29,23 +30,30 @@ import java.util.Collection;
  */
 public interface InstantiatorFactory {
     /**
-     * Creates an {@link Instantiator} that can inject services and user provided values into the instances it creates, but does not decorate the instances.
+     * Creates an {@link Instantiator} that can inject services and user provided values into the instances it creates, but does not decorate the instances. Is not lenient.
      *
-     * <p>Use for any non-model types for which services or user provided constructor values need to injected.
+     * <p>Use for any non-model types for which services or user provided constructor values need to injected. This is simply a convenience for {@link #injectScheme()}.
      *
      * @param services The services to make available to instances.
      */
-    Instantiator inject(ServiceLookup services);
+    InstanceGenerator inject(ServiceLookup services);
 
     /**
-     * Creates an {@link Instantiator} that can inject user provided values into the instances it creates, but does not decorate the instances.
+     * Creates an {@link Instantiator} that can inject user provided values into the instances it creates, but does not decorate the instances. Is not lenient.
      *
-     * <p>Use for any non-model types for which user provided values, but no services, need to be injected. This is simply a convenience for {@link #inject(ServiceLookup)}.
+     * <p>Use for any non-model types for which user provided values, but no services, need to be injected. This is simply a convenience for {@link #injectScheme()}.
      */
-    Instantiator inject();
+    InstanceGenerator inject();
 
     /**
-     * Create a new {@link InstantiationScheme} that can inject services and user provided values into the instances it creates, but does not decorate the instances. Supports using the {@link javax.inject.Inject} annotation plus additional custom annotations.
+     * Create an {@link InstantiationScheme} that can inject services and user provided values into the instances it creates, but does not decorate the instances. Supports using the {@link javax.inject.Inject} annotation only. Is not lenient.
+     *
+     * <p>Use for any non-model types for which services or user provided constructor values need to injected.
+     */
+    InstantiationScheme injectScheme();
+
+    /**
+     * Create a new {@link InstantiationScheme} that can inject services and user provided values into the instances it creates, but does not decorate the instances. Supports using the {@link javax.inject.Inject} annotation plus the given custom inject annotations. Is not lenient.
      *
      * @param injectAnnotations Zero or more annotations that mark properties whose value will be injected on creation. Each annotation must be known to this factory via a {@link InjectAnnotationHandler}.
      */
@@ -60,7 +68,7 @@ public interface InstantiatorFactory {
      * where backwards compatibility is required and instead prefer {@link #inject(ServiceLookup)} for any new non DSL-types.
      * This method will be retired in the future.
      */
-    Instantiator injectLenient(ServiceLookup services);
+    InstanceGenerator injectLenient(ServiceLookup services);
 
     /**
      * Creates an {@link Instantiator} that can inject user provided values into the instances it creates, but does not decorate the instances.
@@ -71,23 +79,30 @@ public interface InstantiatorFactory {
      * where backwards compatibility is required and instead prefer {@link #inject()} for any new non DSL-types.
      * This method will be retired in the future.
      */
-    Instantiator injectLenient();
+    InstanceGenerator injectLenient();
 
     /**
-     * Creates an {@link Instantiator} that decorates the instances created.
+     * Creates an {@link Instantiator} that can inject services and user provided values into the instances it creates and also decorates the instances. Is not lenient.
      *
-     * <p>Use for any model types for which no user provided constructor values or services need to be injected. This is a convenience for {@link #injectAndDecorateLenient(ServiceLookup)} and will also be retired.
-     */
-    Instantiator decorateLenient();
-
-    /**
-     * Creates an {@link Instantiator} that can inject services and user provided values into the instances it creates and also decorates the instances.
-     *
-     * <p>Use for any model types for which services or user provided constructor values need to injected.
+     * <p>Use for any model types for which services or user provided constructor values need to injected. This is simply a convenient for {@link #decorateScheme()}.
      *
      * @param services The services to make available to instances.
      */
-    Instantiator injectAndDecorate(ServiceLookup services);
+    InstanceGenerator decorate(ServiceLookup services);
+
+    /**
+     * Create an {@link InstantiationScheme} that can inject services and user provided values into the instances it creates and also decorates the instances. Supports using the {@link javax.inject.Inject} annotation only. Is not lenient.
+     */
+    InstantiationScheme decorateScheme();
+
+    /**
+     * Creates an {@link Instantiator} that decorates the instances created.
+     * The returned {@link Instantiator} is lenient when there is a missing {@link javax.inject.Inject} annotation or null constructor parameters,
+     * for backwards compatibility.
+     *
+     * <p>Use for any model types for which no user provided constructor values or services need to be injected. This is a convenience for {@link #decorateLenientScheme()} and will also be retired.
+     */
+    InstanceGenerator decorateLenient();
 
     /**
      * Creates an {@link Instantiator} that can inject services and user provided values into the instances it creates and also decorates the instances.
@@ -95,10 +110,26 @@ public interface InstantiatorFactory {
      * for backwards compatibility.
      *
      * <p>Use for any model types for which services or user provided constructor values need to injected. Use this method only for existing types
-     * where backwards compatibility is required and instead prefer {@link #injectAndDecorate(ServiceLookup)} for any new non DSL-types.
-     * This method will be retired in the future.
+     * where backwards compatibility is required and instead prefer {@link #decorateScheme()} for any new non DSL-types.
+     * This method will be retired in the future. This is a convenience for {@link #decorateLenientScheme()}.
      *
      * @param services The registry of services to make available to instances.
      */
-    Instantiator injectAndDecorateLenient(ServiceLookup services);
+    InstanceGenerator decorateLenient(ServiceLookup services);
+
+    /**
+     * Creates an {@link InstantiationScheme} that can inject services and user provided values into the instances it creates and also decorates the instances.
+     * The returned {@link InstantiationScheme} is lenient when there is a missing {@link javax.inject.Inject} annotation or null constructor parameters,
+     * for backwards compatibility.
+     *
+     * <p>Use for any model types for which services or user provided constructor values need to injected. Use this method only for existing types
+     * where backwards compatibility is required and instead prefer {@link #decorateScheme()} for any new non DSL-types.
+     * This method will be retired in the future.
+     */
+    InstantiationScheme decorateLenientScheme();
+
+    /**
+     * Returns a managed factory to use when isolating managed objects created using this factory.
+     */
+    ManagedFactory getManagedFactory();
 }

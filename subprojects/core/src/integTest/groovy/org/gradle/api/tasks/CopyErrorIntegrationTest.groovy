@@ -21,7 +21,7 @@ import org.gradle.test.fixtures.file.TestFile
 import org.gradle.util.PreconditionVerifier
 import org.gradle.util.Requires
 import org.gradle.util.TestPrecondition
-import org.hamcrest.Matchers
+import org.hamcrest.CoreMatchers
 import org.junit.Assert
 import org.junit.Rule
 import org.junit.Test
@@ -31,6 +31,7 @@ class CopyErrorIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     void givesReasonableErrorMessageWhenPathCannotBeConverted() {
+
         file('src/thing.txt').createFile()
 
         testFile('build.gradle') << '''
@@ -45,12 +46,13 @@ class CopyErrorIntegrationTest extends AbstractIntegrationTest {
         ExecutionFailure failure = inTestDirectory().withTasks('copy').runWithFailure()
         failure.assertHasCause("""Cannot convert the provided notation to a String: repository container.
 The following types/formats are supported:
-  - String or CharSequence instances, for example 'some/path'.
+  - String or CharSequence instances, for example "some/path".
   - Boolean values, for example true, Boolean.TRUE.
   - Number values, for example 42, 3.14.
   - A File instance
   - A Closure that returns any supported value.
-  - A Callable that returns any supported value.""")
+  - A Callable that returns any supported value.
+  - A Provider that provides any supported value.""")
     }
 
     @Test
@@ -68,11 +70,11 @@ The following types/formats are supported:
                 from 'src'
                 into 'dest'
             }
-'''
+        '''
 
         ExecutionFailure failure = inTestDirectory().withTasks('copy').runWithFailure()
         failure.assertHasDescription("Execution failed for task ':copy'.")
-        failure.assertHasCause("Could not list contents of '${link}'.")
+        failure.assertHasCause("Couldn't follow symbolic link '${link}'.")
     }
 
     @Test
@@ -97,9 +99,9 @@ The following types/formats are supported:
 
             ExecutionFailure failure = inTestDirectory().withTasks('copy').runWithFailure()
             failure.assertHasDescription("Execution failed for task ':copy'.")
-            failure.assertThatCause(Matchers.anyOf(
-                Matchers.startsWith("Could not list contents of directory '${dir}' as it is not readable."),
-                Matchers.startsWith("Could not read path '${dir}'.")
+            failure.assertThatCause(CoreMatchers.anyOf(
+                CoreMatchers.startsWith("Could not list contents of directory '${dir}' as it is not readable."),
+                CoreMatchers.startsWith("Could not read path '${dir}'.")
             ))
         } finally {
             dir.permissions = oldPermissions

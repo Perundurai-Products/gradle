@@ -13,6 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+package org.gradle.plugin.repository
+
 import org.gradle.integtests.fixtures.AbstractDependencyResolutionTest
 import org.gradle.test.fixtures.Repository
 import org.gradle.test.fixtures.file.LeaksFileHandles
@@ -20,7 +23,6 @@ import org.gradle.test.fixtures.plugin.PluginBuilder
 
 @LeaksFileHandles
 class ResolvingSnapshotFromPluginRepositorySpec extends AbstractDependencyResolutionTest {
-
 
     private publishTestPlugin() {
         publishTestPlugin(mavenRepo)
@@ -48,7 +50,6 @@ class ResolvingSnapshotFromPluginRepositorySpec extends AbstractDependencyResolu
           }
         """
     }
-
 
     def 'Can specify snapshot version'() {
         given:

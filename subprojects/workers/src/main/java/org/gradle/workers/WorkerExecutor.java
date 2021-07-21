@@ -17,6 +17,8 @@
 package org.gradle.workers;
 
 import org.gradle.api.Action;
+import org.gradle.internal.service.scopes.Scopes;
+import org.gradle.internal.service.scopes.ServiceScope;
 
 /**
  * Allows work to be submitted for asynchronous execution.  This api allows for safe, concurrent execution of work items and enables:
@@ -27,16 +29,13 @@ import org.gradle.api.Action;
  *     <li>Safe execution of multiple tasks in parallel</li>
  * </ul>
  *
- * <p>Work should be submitted with a {@link Runnable} class representing the implementation of the unit of work
- * and an action to configure the unit of work (via {@link WorkerConfiguration}).
+ * <p>Work should be submitted with a {@link WorkAction} class representing the implementation of the unit of work
+ * and an action to configure the parameters of the unit of work (via {@link WorkParameters}).
  *
  * <pre>
- *      workerExecutor.submit(RunnableWorkImpl.class) { WorkerConfiguration conf -&gt;
- *          // Set the isolation mode for the worker
- *          conf.isolationMode = IsolationMode.NONE
- *
- *          // Set up the constructor parameters for the unit of work
- *          conf.params = [ "foo", file('bar') ]
+ *      workerExecutor.noIsolation().submit(MyWorkActionImpl.class) { MyWorkParameters parameters -&gt;
+ *          parameters.inputFile = project.file('foo')
+ *          parameters.outputFile = project.layout.buildDirectory.file('bar')
  *      }
  * </pre>
  *
@@ -45,6 +44,7 @@ import org.gradle.api.Action;
  *
  * @since 3.5
  */
+@ServiceScope(Scopes.Project.class)
 public interface WorkerExecutor {
     /**
      * Submits a piece of work to be executed asynchronously.
@@ -55,7 +55,54 @@ public interface WorkerExecutor {
      * in the {@link WorkerConfiguration}.  If no idle daemons are available, a new daemon will be started.  Any errors
      * will be thrown from {@link #await()} or from the surrounding task action if {@link #await()} is not used.
      */
+    @Deprecated
     void submit(Class<? extends Runnable> actionClass, Action<? super WorkerConfiguration> configAction);
+
+    /**
+     * Creates a {@link WorkQueue} to submit work for asynchronous execution with no isolation.
+     *
+     * @since 5.6
+     */
+    WorkQueue noIsolation();
+
+    /**
+     * Creates a {@link WorkQueue} to submit work for asynchronous execution with an isolated classloader.
+     *
+     * @since 5.6
+     */
+    WorkQueue classLoaderIsolation();
+
+    /**
+     * Creates a {@link WorkQueue} to submit work for asynchronous execution in a daemon process.
+     *
+     * Work will execute in an idle daemon, if available.  If no idle daemons are available, a new daemon will be started.
+     *
+     * @since 5.6
+     */
+    WorkQueue processIsolation();
+
+    /**
+     * Creates a {@link WorkQueue} to submit work for asynchronous execution with no isolation and the requirements specified in the supplied {@link WorkerSpec}.
+     *
+     * @since 5.6
+     */
+    WorkQueue noIsolation(Action<? super WorkerSpec> action);
+
+    /**
+     * Creates a {@link WorkQueue} to submit work for asynchronous execution with an isolated classloader and the requirements specified in the supplied {@link ClassLoaderWorkerSpec}.
+     *
+     * @since 5.6
+     */
+    WorkQueue classLoaderIsolation(Action<? super ClassLoaderWorkerSpec> action);
+
+    /**
+     * Creates a {@link WorkQueue} to submit work for asynchronous execution in a daemon process.
+     *
+     * Work will execute in an idle daemon matching the requirements specified in the supplied {@link ProcessWorkerSpec}, if available.  If no idle daemons are available, a new daemon will be started.
+     *
+     * @since 5.6
+     */
+    WorkQueue processIsolation(Action<? super ProcessWorkerSpec> action);
 
     /**
      * Blocks until all work associated with the current build operation is complete.  Note that when using this method inside

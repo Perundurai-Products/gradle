@@ -23,10 +23,11 @@ import org.gradle.api.InvalidUserDataException;
 import org.gradle.api.UncheckedIOException;
 import org.gradle.api.java.archives.Attributes;
 import org.gradle.api.java.archives.ManifestMergeSpec;
+import org.gradle.api.provider.Provider;
 import org.gradle.internal.Actions;
 import org.gradle.internal.IoActions;
 import org.gradle.internal.file.PathToFileResolver;
-import org.gradle.util.ClosureBackedAction;
+import org.gradle.util.internal.ClosureBackedAction;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -40,6 +41,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.jar.Manifest;
+
+import static org.gradle.internal.Cast.uncheckedCast;
 
 public class DefaultManifest implements ManifestInternal {
     public static final String DEFAULT_CONTENT_CHARSET = "UTF-8";
@@ -139,24 +142,38 @@ public class DefaultManifest implements ManifestInternal {
     }
 
     private static void addMainAttributesToJavaManifest(org.gradle.api.java.archives.Manifest gradleManifest, Manifest javaManifest) {
-        for (Map.Entry<String, Object> entry : gradleManifest.getAttributes().entrySet()) {
-            String mainAttributeName = entry.getKey();
-            String mainAttributeValue = entry.getValue().toString();
-            javaManifest.getMainAttributes().putValue(mainAttributeName, mainAttributeValue);
-        }
+        fillAttributes(gradleManifest.getAttributes(), javaManifest.getMainAttributes());
     }
 
     private static void addSectionAttributesToJavaManifest(org.gradle.api.java.archives.Manifest gradleManifest, Manifest javaManifest) {
         for (Map.Entry<String, Attributes> entry : gradleManifest.getSections().entrySet()) {
             String sectionName = entry.getKey();
-            java.util.jar.Attributes sectionAttributes = new java.util.jar.Attributes();
-            for (Map.Entry<String, Object> attribute : entry.getValue().entrySet()) {
-                String attributeName = attribute.getKey();
-                String attributeValue = attribute.getValue().toString();
-                sectionAttributes.putValue(attributeName, attributeValue);
-            }
-            javaManifest.getEntries().put(sectionName, sectionAttributes);
+            java.util.jar.Attributes targetAttributes = new java.util.jar.Attributes();
+            fillAttributes(entry.getValue(), targetAttributes);
+            javaManifest.getEntries().put(sectionName, targetAttributes);
         }
+    }
+
+    private static void fillAttributes(Attributes attributes, java.util.jar.Attributes targetAttributes) {
+        for (Map.Entry<String, Object> entry : attributes.entrySet()) {
+            String mainAttributeName = entry.getKey();
+            String mainAttributeValue = resolveValueToString(entry.getValue());
+            if (mainAttributeValue != null) {
+                targetAttributes.putValue(mainAttributeName, mainAttributeValue);
+            }
+        }
+    }
+
+    private static String resolveValueToString(Object value) {
+        Object underlyingValue = value;
+        if (value instanceof Provider) {
+            Provider<?> provider = uncheckedCast(value);
+            if (!provider.isPresent()) {
+                return null;
+            }
+            underlyingValue = provider.get();
+        }
+        return underlyingValue.toString();
     }
 
     @Override

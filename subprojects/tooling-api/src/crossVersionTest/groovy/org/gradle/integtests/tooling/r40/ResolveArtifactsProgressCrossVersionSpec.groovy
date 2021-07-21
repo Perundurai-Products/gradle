@@ -24,15 +24,24 @@ import org.gradle.test.fixtures.maven.MavenFileRepository
 import org.gradle.test.fixtures.server.http.MavenHttpRepository
 import org.gradle.test.fixtures.server.http.RepositoryHttpServer
 import org.gradle.tooling.ProjectConnection
-import org.junit.Rule
+import org.gradle.util.GradleVersion
 
 @TargetGradleVersion(">=4.0")
 class ResolveArtifactsProgressCrossVersionSpec extends ToolingApiSpecification {
-    @Rule
-    public final RepositoryHttpServer server = new RepositoryHttpServer(temporaryFolder, targetDist.version.version)
+    private RepositoryHttpServer server
 
     def setup() {
+        server = new RepositoryHttpServer(temporaryFolder, targetDist.version.version)
+        server.before()
         toolingApi.requireIsolatedUserHome()
+    }
+
+    def cleanup() {
+        server.after()
+    }
+
+    private String expectedDisplayName(String name, String extension, String version) {
+        getTargetVersion() < GradleVersion.version("6.0") ? "$name.$extension" : "$name-$version.$extension"
     }
 
     @LeaksFileHandles
@@ -55,7 +64,7 @@ class ResolveArtifactsProgressCrossVersionSpec extends ToolingApiSpecification {
         def resolveArtifacts = events.operation('Resolve files of :configurationWithDependency')
         resolveArtifacts.parent.descriptor.displayName.matches("Execute .* for :resolve")
         resolveArtifacts.children.size() == 1
-        resolveArtifacts.child("Resolve provider.jar (test:provider:1.0)")
+        resolveArtifacts.child("Resolve ${expectedDisplayName('provider', 'jar', '1.0')} (test:provider:1.0)")
     }
 
     def "generates event for resolving intrinsic artifacts via file collection"() {
@@ -77,7 +86,7 @@ class ResolveArtifactsProgressCrossVersionSpec extends ToolingApiSpecification {
         def resolveArtifacts = events.operation('Resolve files of :configurationWithDependency')
         resolveArtifacts.parent.descriptor.displayName.matches("Execute .* for :resolve")
         resolveArtifacts.children.size() == 1
-        resolveArtifacts.child("Resolve provider.jar (test:provider:1.0)")
+        resolveArtifacts.child("Resolve ${expectedDisplayName('provider', 'jar', '1.0')} (test:provider:1.0)")
     }
 
     def "generates event for resolving intrinsic artifacts via incoming file collection"() {
@@ -99,7 +108,7 @@ class ResolveArtifactsProgressCrossVersionSpec extends ToolingApiSpecification {
         def resolveArtifacts = events.operation('Resolve files of :configurationWithDependency')
         resolveArtifacts.parent.descriptor.displayName.matches("Execute .* for :resolve")
         resolveArtifacts.children.size() == 1
-        resolveArtifacts.child("Resolve provider.jar (test:provider:1.0)")
+        resolveArtifacts.child("Resolve ${expectedDisplayName('provider', 'jar', '1.0')} (test:provider:1.0)")
     }
 
     def "generates event for resolving intrinsic artifacts via incoming artifact collection"() {
@@ -121,7 +130,7 @@ class ResolveArtifactsProgressCrossVersionSpec extends ToolingApiSpecification {
         def resolveArtifacts = events.operation('Resolve files of :configurationWithDependency')
         resolveArtifacts.parent.descriptor.displayName.matches("Execute .* for :resolve")
         resolveArtifacts.children.size() == 1
-        resolveArtifacts.child("Resolve provider.jar (test:provider:1.0)")
+        resolveArtifacts.child("Resolve ${expectedDisplayName('provider', 'jar', '1.0')} (test:provider:1.0)")
     }
 
     def "generates event for resolving artifact view via artifact collection"() {
@@ -143,7 +152,7 @@ class ResolveArtifactsProgressCrossVersionSpec extends ToolingApiSpecification {
         def resolveArtifacts = events.operation('Resolve files of :configurationWithDependency')
         resolveArtifacts.parent.descriptor.displayName.matches("Execute .* for :resolve")
         resolveArtifacts.children.size() == 1
-        resolveArtifacts.child("Resolve other.thing (test:other:1.0)")
+        resolveArtifacts.child("Resolve ${expectedDisplayName('other', 'thing', '1.0')} (test:other:1.0)")
     }
 
     def "generates event for resolving artifact view via file collection"() {
@@ -165,7 +174,7 @@ class ResolveArtifactsProgressCrossVersionSpec extends ToolingApiSpecification {
         def resolveArtifacts = events.operation('Resolve files of :configurationWithDependency')
         resolveArtifacts.parent.descriptor.displayName.matches("Execute .* for :resolve")
         resolveArtifacts.children.size() == 1
-        resolveArtifacts.child("Resolve other.thing (test:other:1.0)")
+        resolveArtifacts.child("Resolve ${expectedDisplayName('other', 'thing', '1.0')} (test:other:1.0)")
     }
 
     def "generates event for resolving artifacts even if dependencies have no artifacts"() {
@@ -280,7 +289,7 @@ class ResolveArtifactsProgressCrossVersionSpec extends ToolingApiSpecification {
                 configurationWithDependency
                 configurationWithoutDependency
             }
-            
+
             dependencies {
                 configurationWithDependency "test:provider:1.0"
                 artifactTypes {
@@ -288,7 +297,7 @@ class ResolveArtifactsProgressCrossVersionSpec extends ToolingApiSpecification {
                     jar { attributes.attribute(kind, "jar") }
                 }
             }
-            
+
             task resolve {
                 doLast {
                     configurations.${configuration}${artifactsAccessor}.each { }

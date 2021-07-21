@@ -16,11 +16,14 @@
 
 package org.gradle.performance.fixture
 
+import groovy.transform.CompileStatic
+
+@CompileStatic
 interface InvocationSpec {
 
     List<String> getTasksToRun()
 
-    List<String> getJvmOpts()
+    List<String> getJvmArguments()
 
     List<String> getArgs()
 

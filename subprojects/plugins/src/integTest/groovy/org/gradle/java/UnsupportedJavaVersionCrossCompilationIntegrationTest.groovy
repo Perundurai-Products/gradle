@@ -21,7 +21,7 @@ import org.gradle.integtests.fixtures.AvailableJavaHomes
 import org.gradle.integtests.fixtures.MultiVersionIntegrationSpec
 import org.gradle.integtests.fixtures.TargetVersions
 import org.gradle.internal.jvm.JavaInfo
-import org.gradle.util.TextUtil
+import org.gradle.util.internal.TextUtil
 import org.junit.Assume
 
 @TargetVersions(["1.5"])
@@ -68,7 +68,7 @@ public class Thing { }
     def "test execution fails using target Java version"() {
         given:
         buildFile << """
-dependencies { testCompile 'junit:junit:4.12' }
+dependencies { testImplementation 'junit:junit:4.13' }
 """
 
         file("src/test/java/ThingTest.java") << """

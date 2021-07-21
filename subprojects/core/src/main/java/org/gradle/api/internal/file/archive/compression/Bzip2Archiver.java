@@ -24,8 +24,6 @@ import org.gradle.internal.resource.ResourceExceptions;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
-import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -35,6 +33,7 @@ public class Bzip2Archiver extends AbstractArchiver {
         super(resource);
     }
 
+    @Override
     protected String getSchemePrefix() {
         return "bzip2:";
     }
@@ -42,22 +41,21 @@ public class Bzip2Archiver extends AbstractArchiver {
     public static ArchiveOutputStreamFactory getCompressor() {
         // this is not very beautiful but at some point we will
         // get rid of ArchiveOutputStreamFactory in favor of the writable Resource
-        return new ArchiveOutputStreamFactory() {
-            public OutputStream createArchiveOutputStream(File destination) throws FileNotFoundException {
-                OutputStream outStr = new BufferedOutputStream(new FileOutputStream(destination));
-                try {
-                    outStr.write('B');
-                    outStr.write('Z');
-                    return new CBZip2OutputStream(outStr);
-                } catch (Exception e) {
-                    IoActions.closeQuietly(outStr);
-                    String message = String.format("Unable to create bzip2 output stream for file %s", destination);
-                    throw new RuntimeException(message, e);
-                }
+        return destination -> {
+            OutputStream outStr = new BufferedOutputStream(new FileOutputStream(destination));
+            try {
+                outStr.write('B');
+                outStr.write('Z');
+                return new CBZip2OutputStream(outStr);
+            } catch (Exception e) {
+                IoActions.closeQuietly(outStr);
+                String message = String.format("Unable to create bzip2 output stream for file %s", destination);
+                throw new RuntimeException(message, e);
             }
         };
     }
 
+    @Override
     public InputStream read() {
         InputStream input = new BufferedInputStream(resource.read());
         try {

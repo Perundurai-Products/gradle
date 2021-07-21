@@ -75,6 +75,11 @@ public interface GradleDistribution {
     boolean isToolingApiLoggingInEmbeddedModeSupported();
 
     /**
+     * Returns true if this version handles the client provided standard input stream when running in embedded mode.
+     */
+    boolean isToolingApiStdinInEmbeddedModeSupported();
+
+    /**
      * Returns true if the tooling API of this distribution incorrectly locks build action implementation classes.
      */
     boolean isToolingApiLocksBuildActionClasses();
@@ -155,4 +160,9 @@ public interface GradleDistribution {
      * Returns true if this version logs different build outcome messages for tooling API requests that run tasks and to requests that do not run tasks (eg fetch a model).
      */
     boolean isToolingApiLogsConfigureSummary();
+
+    /**
+     * Returns true if this version generates a build operation that wraps the execution phase
+     */
+    boolean isToolingApiHasExecutionPhaseBuildOperation();
 }

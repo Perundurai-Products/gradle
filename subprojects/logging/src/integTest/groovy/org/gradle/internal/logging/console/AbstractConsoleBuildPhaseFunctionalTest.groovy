@@ -16,28 +16,23 @@
 
 package org.gradle.internal.logging.console
 
-import org.gradle.api.logging.configuration.ConsoleOutput
-import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.integtests.fixtures.RichConsoleStyling
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
+import org.gradle.integtests.fixtures.console.AbstractConsoleGroupedTaskFunctionalTest
 import org.gradle.integtests.fixtures.executer.GradleHandle
 import org.gradle.test.fixtures.ConcurrentTestUtil
 import org.gradle.test.fixtures.server.http.BlockingHttpServer
 import org.junit.Rule
 
-import static org.gradle.integtests.fixtures.FeaturePreviewsFixture.enableIncrementalArtifactTransformations
-
-abstract class AbstractConsoleBuildPhaseFunctionalTest extends AbstractIntegrationSpec implements RichConsoleStyling {
+abstract class AbstractConsoleBuildPhaseFunctionalTest extends AbstractConsoleGroupedTaskFunctionalTest {
     @Rule
     BlockingHttpServer server = new BlockingHttpServer()
     GradleHandle gradle
 
     def setup() {
-        executer.withConsole(consoleType)
         server.start()
     }
 
-    abstract ConsoleOutput getConsoleType()
-
+    @ToBeFixedForConfigurationCache(because = "Gradle.buildFinished", skip = ToBeFixedForConfigurationCache.Skip.LONG_TIMEOUT)
     def "shows progress bar and percent phase completion"() {
         settingsFile << """
             ${server.callFromBuild('settings')}
@@ -45,21 +40,21 @@ abstract class AbstractConsoleBuildPhaseFunctionalTest extends AbstractIntegrati
         """
         buildFile << """
             ${server.callFromBuild('root-build-script')}
-            task hello { 
-                dependsOn {                         
+            task hello {
+                dependsOn {
                     // call during task graph calculation
                     ${server.callFromBuild('task-graph')}
                     null
                 }
                 doFirst {
                     ${server.callFromBuild('task1')}
-                } 
+                }
             }
-            task hello2 { 
+            task hello2 {
                 dependsOn hello
                 doFirst {
                     ${server.callFromBuild('task2')}
-                } 
+                }
             }
             gradle.buildFinished {
                 ${server.callFromBuild('build-finished')}
@@ -127,6 +122,7 @@ abstract class AbstractConsoleBuildPhaseFunctionalTest extends AbstractIntegrati
         gradle.waitForFinish()
     }
 
+    @ToBeFixedForConfigurationCache(because = "build listener", skip = ToBeFixedForConfigurationCache.Skip.FAILS_TO_CLEANUP)
     def "shows progress bar and percent phase completion with included build"() {
         settingsFile << """
             ${server.callFromBuild('settings')}
@@ -134,11 +130,11 @@ abstract class AbstractConsoleBuildPhaseFunctionalTest extends AbstractIntegrati
         """
         buildFile << """
             ${server.callFromBuild('root-build-script')}
-            task hello2 { 
+            task hello2 {
                 dependsOn gradle.includedBuild("child").task(":hello")
                 doFirst {
                     ${server.callFromBuild('task2')}
-                } 
+                }
             }
             gradle.buildFinished {
                 ${server.callFromBuild('root-build-finished')}
@@ -150,14 +146,14 @@ abstract class AbstractConsoleBuildPhaseFunctionalTest extends AbstractIntegrati
         file("child/build.gradle") << """
             ${server.callFromBuild('child-build-script')}
             task hello {
-                dependsOn {                         
+                dependsOn {
                     // call during task graph calculation
                     ${server.callFromBuild('child-task-graph')}
                     null
                 }
                 doFirst {
                     ${server.callFromBuild('task1')}
-                } 
+                }
             }
         """
 
@@ -178,7 +174,7 @@ abstract class AbstractConsoleBuildPhaseFunctionalTest extends AbstractIntegrati
 
         and:
         childBuildScript.waitForAllPendingCalls()
-        assertHasBuildPhase("0% CONFIGURING")
+        assertHasBuildPhase("0% INITIALIZING")
         childBuildScript.releaseAll()
 
         and:
@@ -210,16 +206,17 @@ abstract class AbstractConsoleBuildPhaseFunctionalTest extends AbstractIntegrati
         gradle.waitForFinish()
     }
 
+    @ToBeFixedForConfigurationCache(because = "Gradle.buildFinished", skip = ToBeFixedForConfigurationCache.Skip.LONG_TIMEOUT)
     def "shows progress bar and percent phase completion with buildSrc build"() {
         settingsFile << """
             ${server.callFromBuild('settings')}
         """
         buildFile << """
             ${server.callFromBuild('root-build-script')}
-            task hello { 
+            task hello {
                 doFirst {
                     ${server.callFromBuild('task2')}
-                } 
+                }
             }
             gradle.buildFinished {
                 ${server.callFromBuild('root-build-finished')}
@@ -231,7 +228,7 @@ abstract class AbstractConsoleBuildPhaseFunctionalTest extends AbstractIntegrati
         file("buildSrc/build.gradle") << """
             ${server.callFromBuild('buildsrc-build-script')}
             assemble {
-                dependsOn {                         
+                dependsOn {
                     // call during task graph calculation
                     ${server.callFromBuild('buildsrc-task-graph')}
                     null
@@ -246,17 +243,22 @@ abstract class AbstractConsoleBuildPhaseFunctionalTest extends AbstractIntegrati
         """
 
         given:
+        def settings = server.expectAndBlock('settings')
         def childBuildScript = server.expectAndBlock('buildsrc-build-script')
         def childTaskGraph = server.expectAndBlock('buildsrc-task-graph')
         def task1 = server.expectAndBlock('buildsrc-task')
         def childBuildFinished = server.expectAndBlock('buildsrc-build-finished')
-        def settings = server.expectAndBlock('settings')
         def rootBuildScript = server.expectAndBlock('root-build-script')
         def task2 = server.expectAndBlock('task2')
         def rootBuildFinished = server.expectAndBlock('root-build-finished')
         gradle = executer.withTasks("hello").start()
 
         expect:
+        settings.waitForAllPendingCalls()
+        assertHasBuildPhase("0% INITIALIZING")
+        settings.releaseAll()
+
+        and:
         childBuildScript.waitForAllPendingCalls()
         assertHasBuildPhase("0% INITIALIZING")
         childBuildScript.releaseAll()
@@ -277,13 +279,8 @@ abstract class AbstractConsoleBuildPhaseFunctionalTest extends AbstractIntegrati
         childBuildFinished.releaseAll()
 
         and:
-        settings.waitForAllPendingCalls()
-        assertHasBuildPhase("0% INITIALIZING")
-        settings.releaseAll()
-
-        and:
         rootBuildScript.waitForAllPendingCalls()
-        assertHasBuildPhase("0% CONFIGURING")
+        assertHasBuildPhase("75% CONFIGURING")
         rootBuildScript.releaseAll()
 
         and:
@@ -300,34 +297,44 @@ abstract class AbstractConsoleBuildPhaseFunctionalTest extends AbstractIntegrati
         gradle.waitForFinish()
     }
 
+    @ToBeFixedForConfigurationCache(because = "Gradle.buildFinished", skip = ToBeFixedForConfigurationCache.Skip.LONG_TIMEOUT)
     def "shows progress bar and percent phase completion with artifact transforms"() {
         given:
         settingsFile << """
             include 'lib'
             include 'util'
         """
-
-        enableIncrementalArtifactTransformations(settingsFile)
         buildFile << """
             def usage = Attribute.of('usage', String)
             def artifactType = Attribute.of('artifactType', String)
-                
-            class FileSizer extends ArtifactTransform {
-                List<File> transform(File input) {
+
+            abstract class FileSizer implements TransformAction<Parameters> {
+                interface Parameters extends TransformParameters {
+                    @Input
+                    String getSuffix()
+                    void setSuffix(String suffix)
+                }
+
+                @InputArtifactDependencies
+                abstract FileCollection getDependencies()
+                @InputArtifact
+                abstract Provider<FileSystemLocation> getInputArtifact()
+
+                void transform(TransformOutputs outputs) {
+                    def input = inputArtifact.get().asFile
                     ${server.callFromBuild('size-transform')}
-                    File output = new File(outputDirectory, input.name + ".txt")
+                    File output = outputs.file(input.name + parameters.suffix)
                     output.text = String.valueOf(input.length())
-                    return [output]
                 }
             }
-            
+
             class FileDoubler extends ArtifactTransform {
                 List<File> transform(File input) {
                     ${server.callFromBuild('double-transform')}
                     return [input, input]
                 }
             }
-            
+
             allprojects {
                 dependencies {
                     attributesSchema {
@@ -344,8 +351,8 @@ abstract class AbstractConsoleBuildPhaseFunctionalTest extends AbstractIntegrati
             project(':lib') {
                 apply plugin: 'base'
                 task jar(type: Jar) {
-                    destinationDir = buildDir
-                    archiveName = 'lib.jar'
+                    destinationDirectory = buildDir
+                    archiveFileName = 'lib.jar'
                     doLast {
                         ${server.callFromBuild('jar')}
                     }
@@ -354,7 +361,7 @@ abstract class AbstractConsoleBuildPhaseFunctionalTest extends AbstractIntegrati
                     compile jar
                 }
             }
-    
+
             project(':util') {
                 dependencies {
                     compile project(':lib')
@@ -363,10 +370,12 @@ abstract class AbstractConsoleBuildPhaseFunctionalTest extends AbstractIntegrati
                         to.attribute(artifactType, "double")
                         artifactTransform(FileDoubler)
                     }
-                    registerTransform {
+                    registerTransform(FileSizer) {
                         from.attribute(artifactType, "double")
                         to.attribute(artifactType, "size")
-                        artifactTransform(FileSizer)
+                        parameters {
+                            suffix = ".txt"
+                        }
                     }
                 }
                 task resolve {
@@ -378,6 +387,7 @@ abstract class AbstractConsoleBuildPhaseFunctionalTest extends AbstractIntegrati
 
                     doLast {
                         ${server.callFromBuild('resolve-task')}
+                        size.artifactFiles.files.each { println it }
                     }
                 }
             }
@@ -393,6 +403,7 @@ abstract class AbstractConsoleBuildPhaseFunctionalTest extends AbstractIntegrati
         def buildFinished = server.expectAndBlock('build-finished')
 
         when:
+        executer.expectDeprecationWarning("Registering artifact transforms extending ArtifactTransform has been deprecated. This is scheduled to be removed in Gradle 8.0. Implement TransformAction instead.")
         gradle = executer.withTasks(":util:resolve").start()
 
         then:
@@ -431,6 +442,6 @@ abstract class AbstractConsoleBuildPhaseFunctionalTest extends AbstractIntegrati
     }
 
     String regexFor(String message) {
-        /<.*> $message \[\d+s]/
+        /<.*> $message \[[\dms ]+]/
     }
 }

@@ -16,9 +16,15 @@
 
 package org.gradle.api.internal.changedetection.state;
 
+import org.gradle.cache.GlobalCacheLocations;
+import org.gradle.internal.fingerprint.hashing.FileSystemLocationSnapshotHasher;
+import org.gradle.internal.fingerprint.hashing.RegularFileSnapshotContextHasher;
+import org.gradle.internal.fingerprint.hashing.RegularFileSnapshotContext;
 import org.gradle.internal.hash.HashCode;
-import org.gradle.internal.snapshot.RegularFileSnapshot;
-import org.gradle.internal.snapshot.WellKnownFileLocations;
+import org.gradle.internal.snapshot.FileSystemLocationSnapshot;
+
+import javax.annotation.Nullable;
+import java.io.IOException;
 
 /**
  * A {@link ResourceSnapshotterCacheService} that delegates to the global service for immutable files
@@ -27,20 +33,30 @@ import org.gradle.internal.snapshot.WellKnownFileLocations;
 public class SplitResourceSnapshotterCacheService implements ResourceSnapshotterCacheService {
     private final ResourceSnapshotterCacheService globalCache;
     private final ResourceSnapshotterCacheService localCache;
-    private final WellKnownFileLocations wellKnownFileLocations;
+    private final GlobalCacheLocations globalCacheLocations;
 
-    public SplitResourceSnapshotterCacheService(ResourceSnapshotterCacheService globalCache, ResourceSnapshotterCacheService localCache, WellKnownFileLocations wellKnownFileLocations) {
+    public SplitResourceSnapshotterCacheService(ResourceSnapshotterCacheService globalCache, ResourceSnapshotterCacheService localCache, GlobalCacheLocations globalCacheLocations) {
         this.globalCache = globalCache;
         this.localCache = localCache;
-        this.wellKnownFileLocations = wellKnownFileLocations;
+        this.globalCacheLocations = globalCacheLocations;
+    }
+
+    @Nullable
+    @Override
+    public HashCode hashFile(FileSystemLocationSnapshot snapshot, FileSystemLocationSnapshotHasher hasher, HashCode configurationHash) throws IOException {
+        if (globalCacheLocations.isInsideGlobalCache(snapshot.getAbsolutePath())) {
+            return globalCache.hashFile(snapshot, hasher, configurationHash);
+        } else {
+            return localCache.hashFile(snapshot, hasher, configurationHash);
+        }
     }
 
     @Override
-    public HashCode hashFile(RegularFileSnapshot fileSnapshot, RegularFileHasher hasher, HashCode configurationHash) {
-        if (wellKnownFileLocations.isImmutable(fileSnapshot.getAbsolutePath())) {
-            return globalCache.hashFile(fileSnapshot, hasher, configurationHash);
+    public HashCode hashFile(RegularFileSnapshotContext fileSnapshotContext, RegularFileSnapshotContextHasher hasher, HashCode configurationHash) throws IOException {
+        if (globalCacheLocations.isInsideGlobalCache(fileSnapshotContext.getSnapshot().getAbsolutePath())) {
+            return globalCache.hashFile(fileSnapshotContext, hasher, configurationHash);
         } else {
-            return localCache.hashFile(fileSnapshot, hasher, configurationHash);
+            return localCache.hashFile(fileSnapshotContext, hasher, configurationHash);
         }
     }
 }

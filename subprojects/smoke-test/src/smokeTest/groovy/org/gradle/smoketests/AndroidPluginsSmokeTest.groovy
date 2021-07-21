@@ -16,87 +16,143 @@
 
 package org.gradle.smoketests
 
+import org.gradle.integtests.fixtures.UnsupportedWithConfigurationCache
+import org.gradle.integtests.fixtures.android.AndroidHome
+import org.gradle.internal.reflect.validation.ValidationMessageChecker
+import org.gradle.testkit.runner.BuildResult
 import org.gradle.testkit.runner.TaskOutcome
-import spock.lang.Unroll
+import org.gradle.util.GradleVersion
 
+import static org.gradle.internal.reflect.validation.Severity.ERROR
 /**
- * For these tests to run you need to set ANDROID_HOME to your Android SDK directory
+ * For these tests to run you need to set ANDROID_SDK_ROOT to your Android SDK directory
  *
  * https://developer.android.com/studio/releases/build-tools.html
  * https://developer.android.com/studio/releases/gradle-plugin.html
  * https://androidstudio.googleblog.com/
  *
  */
-class AndroidPluginsSmokeTest extends AbstractSmokeTest {
+class AndroidPluginsSmokeTest extends AbstractPluginValidatingSmokeTest implements ValidationMessageChecker {
+
+    public static final String JAVA_COMPILE_DEPRECATION_MESSAGE = "Extending the JavaCompile task has been deprecated. This is scheduled to be removed in Gradle 7.0. Configure the task instead."
 
     def setup() {
-        assertAndroidHomeSet()
+        AndroidHome.assertIsSet()
     }
 
-    static void assertAndroidHomeSet() {
-        assert System.getenv().containsKey('ANDROID_HOME'): '''
-            In order to run these tests the ANDROID_HOME directory must be set.
-            It is not necessary to install the whole android SDK via Android Studio - it is enough if there is a $ANDROID_HOME/licenses/android-sdk-license containing the license keys from an Android Studio installation.
-            The Gradle Android plugin will then download the SDK by itself, see https://developer.android.com/studio/intro/update.html#download-with-gradle
-        '''.stripIndent()
-    }
-
-    @Unroll
-    def "android application plugin #pluginVersion"(String pluginVersion) {
+    @UnsupportedWithConfigurationCache
+    def "can use sourceSets task with android library and application build (agp=#agpVersion, ide=#ide)"() {
         given:
+        AGP_VERSIONS.assumeCurrentJavaVersionIsSupportedBy(agpVersion)
 
-        def basedir='.'
+        and:
+        androidLibraryAndApplicationBuild(agpVersion)
 
-        def packageName = 'org.gradle.android.example'
-        def activity = 'MyActivity'
-        writeActivity(basedir, packageName, activity)
-
-        file("${basedir}/src/main/res/values/strings.xml") << '''<?xml version="1.0" encoding="utf-8"?>
-            <resources>
-                <string name="app_name">Android Gradle</string>
-            </resources>'''.stripIndent()
-
-
-        file('src/main/AndroidManifest.xml') << """<?xml version="1.0" encoding="utf-8"?>
-            <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-                package="${packageName}">
-
-                <application android:label="@string/app_name" >
-                    <activity
-                        android:name=".${activity}"
-                        android:label="@string/app_name" >
-                        <intent-filter>
-                            <action android:name="android.intent.action.MAIN" />
-                            <category android:name="android.intent.category.LAUNCHER" />
-                        </intent-filter>
-                    </activity>
-                </application>
-
-            </manifest>""".stripIndent()
-
-        buildFile << buildscript(pluginVersion) << """
-            apply plugin: 'com.android.application'
-
-           ${jcenterRepository()}
-           ${googleRepository()}
-
-            android.defaultConfig.applicationId "org.gradle.android.myapplication"
-        """.stripIndent() << androidPluginConfiguration() << activityDependency()
+        and:
+        def runner = useAgpVersion(agpVersion, runner('sourceSets'))
 
         when:
-        def result = runner('androidDependencies', 'build', 'connectedAndroidTest', '-x', 'lint').build()
+        def result = runner.build()
 
         then:
-        result.task(':assemble').outcome == TaskOutcome.SUCCESS
-        result.task(':compileReleaseJavaWithJavac').outcome == TaskOutcome.SUCCESS
+        result.task(':app:sourceSets').outcome == TaskOutcome.SUCCESS
+        result.task(':library:sourceSets').outcome == TaskOutcome.SUCCESS
 
         where:
-        pluginVersion << TestedVersions.androidGradle
+        [agpVersion, ide] << [
+            TestedVersions.androidGradle.toList(),
+            [false, true]
+        ].combinations()
     }
 
-    @Unroll
-    def "android library plugin #pluginVersion"(String pluginVersion) {
+    @UnsupportedWithConfigurationCache(iterationMatchers = [AGP_4_0_ITERATION_MATCHER, AGP_4_1_ITERATION_MATCHER])
+    def "android library and application APK assembly (agp=#agpVersion, ide=#ide)"() {
+
         given:
+        AGP_VERSIONS.assumeCurrentJavaVersionIsSupportedBy(agpVersion)
+
+        and:
+        def abiChange = androidLibraryAndApplicationBuild(agpVersion)
+
+        and:
+        def runner = useAgpVersion(agpVersion, runner(
+            'assembleDebug',
+            'testDebugUnitTest',
+            'connectedDebugAndroidTest',
+            "-Pandroid.injected.invoked.from.ide=$ide"
+        ))
+
+        when: 'first build'
+        def result = buildMaybeExpectingWorkerExecutorDeprecation(runner, agpVersion)
+
+        then:
+        result.task(':app:compileDebugJavaWithJavac').outcome == TaskOutcome.SUCCESS
+        result.task(':library:assembleDebug').outcome == TaskOutcome.SUCCESS
+        result.task(':app:assembleDebug').outcome == TaskOutcome.SUCCESS
+
+        and:
+        assert !result.output.contains(JAVA_COMPILE_DEPRECATION_MESSAGE)
+
+        and:
+        assertConfigurationCacheStateStored()
+
+        when: 'up-to-date build'
+        result = runner.build()
+
+        then:
+        result.task(':app:compileDebugJavaWithJavac').outcome == TaskOutcome.UP_TO_DATE
+        result.task(':library:assembleDebug').outcome == TaskOutcome.UP_TO_DATE
+        result.task(':app:assembleDebug').outcome == TaskOutcome.UP_TO_DATE
+        result.task(':app:processDebugAndroidTestManifest').outcome == TaskOutcome.UP_TO_DATE
+
+        and:
+        assertConfigurationCacheStateLoaded()
+
+        when: 'abi change on library'
+        abiChange.run()
+        result = buildMaybeExpectingWorkerExecutorDeprecation(runner, agpVersion)
+
+        then: 'dependent sources are recompiled'
+        result.task(':library:compileDebugJavaWithJavac').outcome == TaskOutcome.SUCCESS
+        result.task(':app:compileDebugJavaWithJavac').outcome == TaskOutcome.SUCCESS
+        result.task(':library:assembleDebug').outcome == TaskOutcome.SUCCESS
+        result.task(':app:assembleDebug').outcome == TaskOutcome.SUCCESS
+
+        and:
+        assertConfigurationCacheStateLoaded()
+
+        when: 'clean re-build'
+        useAgpVersion(agpVersion, this.runner('clean')).build()
+        result = buildMaybeExpectingWorkerExecutorDeprecation(runner, agpVersion)
+
+        then:
+        result.task(':app:compileDebugJavaWithJavac').outcome == TaskOutcome.SUCCESS
+        result.task(':library:assembleDebug').outcome == TaskOutcome.SUCCESS
+        result.task(':app:assembleDebug').outcome == TaskOutcome.SUCCESS
+
+        and:
+        assertConfigurationCacheStateLoaded()
+
+        where:
+        [agpVersion, ide] << [
+            TestedVersions.androidGradle.toList(),
+            [false, true]
+        ].combinations()
+    }
+
+    private static BuildResult buildMaybeExpectingWorkerExecutorDeprecation(SmokeTestGradleRunner runner, String agpVersion) {
+        return runner
+            .expectLegacyDeprecationWarningIf(agpVersion.startsWith('4.1'),
+                "The WorkerExecutor.submit() method has been deprecated. " +
+                    "This is scheduled to be removed in Gradle 8.0. Please use the noIsolation(), classLoaderIsolation() or processIsolation() method instead. " +
+                    "See https://docs.gradle.org/${GradleVersion.current().version}/userguide/upgrading_version_5.html#method_workerexecutor_submit_is_deprecated for more details.")
+            .build()
+    }
+
+    /**
+     * @return ABI change runnable
+     */
+    private Runnable androidLibraryAndApplicationBuild(String agpVersion) {
 
         def app = 'app'
         def appPackage = 'org.gradle.android.example.app'
@@ -113,6 +169,12 @@ class AndroidPluginsSmokeTest extends AbstractSmokeTest {
             </manifest>""".stripIndent()
 
         writeActivity(app, appPackage, appActivity)
+        file("${app}/src/main/java/UsesLibraryActivity.java") << """
+            public class UsesLibraryActivity {
+                public void consume(${libPackage}.${libraryActivity} activity) {
+                }
+            }
+        """
         file("${app}/src/main/AndroidManifest.xml") << """<?xml version="1.0" encoding="utf-8"?>
             <manifest xmlns:android="http://schemas.android.com/apk/res/android"
                 package="${appPackage}">
@@ -136,16 +198,22 @@ class AndroidPluginsSmokeTest extends AbstractSmokeTest {
             <resources>
                 <string name="app_name">Android Gradle</string>
             </resources>'''.stripIndent()
+        file("${app}/src/test/java/ExampleTest.java") << '''
+            import org.junit.Test;
+            public class ExampleTest {
+                @Test public void test() {}
+            }
+        '''.stripIndent()
 
         file('settings.gradle') << """
             include ':${app}'
             include ':${library}'
         """
 
-        file('build.gradle') << buildscript(pluginVersion) << """
+        file('build.gradle') << buildscript(agpVersion) << """
             subprojects {
-                ${jcenterRepository()}
                 ${googleRepository()}
+                ${mavenCentralRepository()}
             }
         """
 
@@ -159,7 +227,9 @@ class AndroidPluginsSmokeTest extends AbstractSmokeTest {
         appBuildFile << activityDependency()
         appBuildFile << """
             dependencies {
-                compile project(':${library}')
+                implementation project(':${library}')
+                testImplementation 'junit:junit:4.12'
+                androidTestImplementation project(":${library}")
             }
         """
 
@@ -170,45 +240,36 @@ class AndroidPluginsSmokeTest extends AbstractSmokeTest {
         libraryBuildFile << androidPluginConfiguration()
         libraryBuildFile << activityDependency()
 
-        when:
-        def result = runner('build', '-x', 'lint').build()
-
-        then:
-        result.task(':app:assemble').outcome == TaskOutcome.SUCCESS
-        result.task(':library:assemble').outcome == TaskOutcome.SUCCESS
-        result.task(':app:compileReleaseJavaWithJavac').outcome == TaskOutcome.SUCCESS
-
-        where:
-        pluginVersion << TestedVersions.androidGradle
+        return {
+            writeActivity(library, libPackage, libraryActivity, true)
+        }
     }
 
-    private String activityDependency() {
+    private static String activityDependency() {
         """
             dependencies {
-                compile 'joda-time:joda-time:2.7'
+                implementation 'joda-time:joda-time:2.7'
             }
         """
     }
 
-    private String buildscript(String pluginVersion) {
+    private static String buildscript(String pluginVersion) {
         """
             buildscript {
-                ${jcenterRepository()}
+                ${mavenCentralRepository()}
                 ${googleRepository()}
 
                 dependencies {
                     classpath 'com.android.tools.build:gradle:${pluginVersion}'
                 }
             }
-
-            System.properties['com.android.build.gradle.overrideVersionCheck'] = 'true'
         """.stripIndent()
     }
 
-    private writeActivity(String basedir, String packageName, String className) {
+    private writeActivity(String basedir, String packageName, String className, changed = false) {
         String resourceName = className.toLowerCase()
 
-        file("${basedir}/src/main/java/${packageName.replaceAll('\\.', '/')}/HelloActivity.java") << """
+        file("${basedir}/src/main/java/${packageName.replaceAll('\\.', '/')}/${className}.java").text = """
             package ${packageName};
 
             import org.joda.time.LocalTime;
@@ -217,7 +278,7 @@ class AndroidPluginsSmokeTest extends AbstractSmokeTest {
             import android.os.Bundle;
             import android.widget.TextView;
 
-            public class HelloActivity extends Activity {
+            public class ${className} extends Activity {
 
                 @Override
                 public void onCreate(Bundle savedInstanceState) {
@@ -233,9 +294,10 @@ class AndroidPluginsSmokeTest extends AbstractSmokeTest {
                     textView.setText("The current local time is: " + currentTime);
                 }
 
+                ${changed ? "public void doStuff() {}" : ""}
             }""".stripIndent()
 
-        file("${basedir}/src/main/res/layout/${resourceName}_layout.xml") << '''<?xml version="1.0" encoding="utf-8"?>
+        file("${basedir}/src/main/res/layout/${resourceName}_layout.xml").text = '''<?xml version="1.0" encoding="utf-8"?>
             <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
                 android:orientation="vertical"
                 android:layout_width="fill_parent"
@@ -272,5 +334,67 @@ class AndroidPluginsSmokeTest extends AbstractSmokeTest {
                 }
             }
         """.stripIndent()
+    }
+
+    @Override
+    Map<String, Versions> getPluginsToValidate() {
+        return [
+            'com.android.application': TestedVersions.androidGradle,
+            'com.android.library': TestedVersions.androidGradle,
+            'com.android.test': TestedVersions.androidGradle,
+            'com.android.reporting': TestedVersions.androidGradle,
+            'com.android.dynamic-feature': TestedVersions.androidGradle,
+        ]
+    }
+
+    @Override
+    void configureValidation(String testedPluginId, String version) {
+        AGP_VERSIONS.assumeCurrentJavaVersionIsSupportedBy(version)
+        if (testedPluginId != 'com.android.reporting') {
+            buildFile << """
+                android {
+                    compileSdkVersion 24
+                    buildToolsVersion '${TestedVersions.androidTools}'
+                }
+            """
+        }
+        if (testedPluginId == 'com.android.test') {
+            buildFile << """
+                android {
+                    targetProjectPath ':'
+                }
+            """
+        }
+        settingsFile << """
+            pluginManagement {
+                repositories {
+                    gradlePluginPortal()
+                    google()
+                }
+                resolutionStrategy.eachPlugin {
+                    if (pluginRequest.id.id.startsWith('com.android')) {
+                        useModule('com.android.tools.build:gradle:${version}')
+                    }
+                }
+            }
+        """
+        validatePlugins {
+            boolean failsValidation = version.startsWith('4.2.')
+            if (failsValidation) {
+                def pluginSuffix = testedPluginId.substring('com.android.'.length())
+                def failingPlugins = ['com.android.internal.version-check', testedPluginId, 'com.android.internal.' + pluginSuffix]
+                passing {
+                    it !in failingPlugins
+                }
+                onPlugins(failingPlugins) {
+                    failsWith([
+                        (missingAnnotationMessage { type('com.android.build.gradle.internal.TaskManager.ConfigAttrTask').property('consumable').missingInputOrOutput().includeLink() }): ERROR,
+                        (missingAnnotationMessage { type('com.android.build.gradle.internal.TaskManager.ConfigAttrTask').property('resolvable').missingInputOrOutput().includeLink() }): ERROR,
+                    ])
+                }
+            } else {
+                alwaysPasses()
+            }
+        }
     }
 }

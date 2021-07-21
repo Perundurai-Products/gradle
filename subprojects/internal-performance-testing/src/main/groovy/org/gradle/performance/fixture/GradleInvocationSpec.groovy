@@ -20,31 +20,57 @@ import groovy.transform.CompileStatic
 import groovy.transform.EqualsAndHashCode
 import org.gradle.initialization.ParallelismBuildOptions
 import org.gradle.integtests.fixtures.executer.GradleDistribution
+import org.gradle.profiler.BuildAction
+import org.gradle.profiler.RunTasksAction
 
 @CompileStatic
 @EqualsAndHashCode
 class GradleInvocationSpec implements InvocationSpec {
-
     final GradleDistribution gradleDistribution
     final File workingDirectory
     final List<String> tasksToRun
+    final BuildAction buildAction
     final List<String> args
-    final List<String> jvmOpts
+    /**
+     * The JVM arguments for client VM. It's only for CLI invocation and is ignored by TAPI invocation.
+     */
+    final List<String> clientJvmArguments
+    /**
+     * The JVM arguments for daemon
+     */
+    final List<String> jvmArguments
     final List<String> cleanTasks
     final boolean useDaemon
     final boolean useToolingApi
     final boolean expectFailure
+    final File buildLog
 
-    GradleInvocationSpec(GradleDistribution gradleDistribution, File workingDirectory, List<String> tasksToRun, List<String> args, List<String> jvmOpts, List<String> cleanTasks, boolean useDaemon, boolean useToolingApi, boolean expectFailure) {
+    GradleInvocationSpec(
+        GradleDistribution gradleDistribution,
+        File workingDirectory,
+        List<String> tasksToRun,
+        List<String> args,
+        List<String> clientJvmArguments,
+        List<String> jvmArguments,
+        List<String> cleanTasks,
+        boolean useDaemon,
+        boolean useToolingApi,
+        boolean expectFailure,
+        BuildAction buildAction,
+        File buildLog
+    ) {
         this.gradleDistribution = gradleDistribution
         this.workingDirectory = workingDirectory
         this.tasksToRun = tasksToRun
         this.args = args
-        this.jvmOpts = jvmOpts
+        this.clientJvmArguments = clientJvmArguments
+        this.jvmArguments = jvmArguments
         this.cleanTasks = cleanTasks
         this.useDaemon = useDaemon
         this.useToolingApi = useToolingApi
         this.expectFailure = expectFailure
+        this.buildAction = buildAction
+        this.buildLog = buildLog
     }
 
     boolean getBuildWillRunInDaemon() {
@@ -61,17 +87,18 @@ class GradleInvocationSpec implements InvocationSpec {
         builder.workingDirectory(workingDirectory)
         builder.tasksToRun.addAll(this.tasksToRun)
         builder.args.addAll(args)
-        builder.gradleOptions.addAll(jvmOpts)
+        builder.jvmArguments.addAll(jvmArguments)
         builder.cleanTasks.addAll(cleanTasks)
         builder.useDaemon = useDaemon
         builder.useToolingApi = useToolingApi
         builder.expectFailure = expectFailure
+        builder.buildLog(buildLog)
         builder
     }
 
     GradleInvocationSpec withAdditionalJvmOpts(List<String> additionalJvmOpts) {
         InvocationBuilder builder = withBuilder()
-        builder.gradleOptions.addAll(additionalJvmOpts)
+        builder.jvmArguments.addAll(additionalJvmOpts)
         return builder.build()
     }
 
@@ -81,17 +108,19 @@ class GradleInvocationSpec implements InvocationSpec {
         return builder.build()
     }
 
-    static class InvocationBuilder implements InvocationSpec.Builder {
+    static class InvocationBuilder implements Builder {
         GradleDistribution gradleDistribution
         File workingDirectory
         List<String> tasksToRun = []
+        BuildAction buildAction
         List<String> args = []
-        List<String> gradleOptions = []
+        List<String> jvmArguments = []
+        List<String> clientJvmArguments = []
         List<String> cleanTasks = []
-        boolean useDaemon
+        boolean useDaemon = true
         boolean useToolingApi
         boolean expectFailure
-
+        File buildLog
 
         InvocationBuilder distribution(GradleDistribution gradleDistribution) {
             this.gradleDistribution = gradleDistribution
@@ -113,17 +142,33 @@ class GradleInvocationSpec implements InvocationSpec {
             this
         }
 
+        InvocationBuilder buildAction(BuildAction buildAction) {
+            this.buildAction = buildAction
+            this
+        }
+
         InvocationBuilder args(String... args) {
             this.args.addAll(Arrays.asList(args))
             this
         }
 
-        InvocationBuilder gradleOpts(String... gradleOpts) {
-            this.gradleOptions.addAll(Arrays.asList(gradleOpts))
+        InvocationBuilder jvmArgs(String... args) {
+            this.jvmArguments.addAll(Arrays.asList(args))
             this
         }
-        InvocationBuilder gradleOpts(Iterable<String> gradleOpts) {
-            this.gradleOptions.addAll(gradleOpts)
+
+        InvocationBuilder jvmArgs(Iterable<String> args) {
+            this.jvmArguments.addAll(args)
+            this
+        }
+
+        InvocationBuilder clientJvmArgs(String... args) {
+            this.clientJvmArguments.addAll(Arrays.asList(args))
+            this
+        }
+
+        InvocationBuilder clientJvmArgs(Iterable<String> args) {
+            this.clientJvmArguments.addAll(args)
             this
         }
 
@@ -134,10 +179,6 @@ class GradleInvocationSpec implements InvocationSpec {
         InvocationBuilder cleanTasks(Iterable<String> cleanTasks) {
             this.cleanTasks.addAll(cleanTasks)
             this
-        }
-
-        InvocationBuilder useDaemon() {
-            useDaemon(true)
         }
 
         InvocationBuilder useDaemon(boolean flag) {
@@ -156,11 +197,16 @@ class GradleInvocationSpec implements InvocationSpec {
         }
 
         InvocationBuilder disableParallelWorkers() {
-            gradleOpts("-D${ParallelismBuildOptions.MaxWorkersOption.GRADLE_PROPERTY}=1")
+            jvmArgs("-D${ParallelismBuildOptions.MaxWorkersOption.GRADLE_PROPERTY}=1")
+        }
+
+        InvocationBuilder buildLog(File buildLog) {
+            this.buildLog = buildLog
+            this
         }
 
         @Override
-        InvocationSpec.Builder expectFailure() {
+        Builder expectFailure() {
             expectFailure = true
             this
         }
@@ -169,7 +215,19 @@ class GradleInvocationSpec implements InvocationSpec {
             assert gradleDistribution != null
             assert workingDirectory != null
 
-            return new GradleInvocationSpec(gradleDistribution, workingDirectory, tasksToRun.asImmutable(), args.asImmutable(), gradleOptions.asImmutable(), cleanTasks.asImmutable(), useDaemon, useToolingApi, expectFailure)
+            return new GradleInvocationSpec(
+                gradleDistribution,
+                workingDirectory,
+                tasksToRun.asImmutable(),
+                args.asImmutable(),
+                clientJvmArguments.asImmutable(),
+                jvmArguments.asImmutable(),
+                cleanTasks.asImmutable(),
+                useDaemon,
+                useToolingApi,
+                expectFailure,
+                buildAction ?: new RunTasksAction(tasksToRun),
+                buildLog)
         }
 
     }

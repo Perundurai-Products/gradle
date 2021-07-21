@@ -16,9 +16,9 @@
 
 package org.gradle.api.publish.ivy.internal.artifact;
 
-import org.gradle.api.internal.tasks.TaskDependencyInternal;
+import org.gradle.api.publish.internal.PublicationInternal;
 import org.gradle.api.publish.ivy.IvyArtifact;
-import org.gradle.internal.Factory;
+import org.gradle.api.tasks.TaskDependency;
 
 import java.io.File;
 
@@ -26,9 +26,9 @@ import static com.google.common.io.Files.getFileExtension;
 
 public class DerivedIvyArtifact extends AbstractIvyArtifact {
     private final IvyArtifact original;
-    private final Factory<File> derived;
+    private final PublicationInternal.DerivedArtifact derived;
 
-    public DerivedIvyArtifact(IvyArtifact original, Factory<File> derived) {
+    public DerivedIvyArtifact(IvyArtifact original, PublicationInternal.DerivedArtifact derived) {
         this.original = original;
         this.derived = derived;
     }
@@ -59,12 +59,16 @@ public class DerivedIvyArtifact extends AbstractIvyArtifact {
     }
 
     @Override
-    protected TaskDependencyInternal getDefaultBuildDependencies() {
-        return (TaskDependencyInternal) original.getBuildDependencies();
+    protected TaskDependency getDefaultBuildDependencies() {
+        return original.getBuildDependencies();
     }
 
     @Override
     public File getFile() {
         return derived.create();
+    }
+
+    public boolean shouldBePublished() {
+        return derived.shouldBePublished();
     }
 }

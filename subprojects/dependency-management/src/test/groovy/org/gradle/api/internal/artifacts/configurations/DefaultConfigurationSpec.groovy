@@ -43,28 +43,27 @@ import org.gradle.api.internal.DomainObjectContext
 import org.gradle.api.internal.artifacts.ConfigurationResolver
 import org.gradle.api.internal.artifacts.DefaultExcludeRule
 import org.gradle.api.internal.artifacts.DefaultResolverResults
-import org.gradle.api.internal.artifacts.ImmutableModuleIdentifierFactory
 import org.gradle.api.internal.artifacts.ResolverResults
 import org.gradle.api.internal.artifacts.dependencies.DefaultExternalModuleDependency
-import org.gradle.api.internal.artifacts.dsl.dependencies.ProjectFinder
 import org.gradle.api.internal.artifacts.ivyservice.DefaultLenientConfiguration
 import org.gradle.api.internal.artifacts.ivyservice.moduleconverter.RootComponentMetadataBuilder
 import org.gradle.api.internal.artifacts.ivyservice.resolveengine.artifact.ArtifactVisitor
+import org.gradle.api.internal.artifacts.ivyservice.resolveengine.artifact.ResolvableArtifact
 import org.gradle.api.internal.artifacts.ivyservice.resolveengine.artifact.SelectedArtifactSet
 import org.gradle.api.internal.artifacts.ivyservice.resolveengine.artifact.VisitedArtifactSet
 import org.gradle.api.internal.artifacts.ivyservice.resolveengine.projectresult.ResolvedLocalComponentsResult
 import org.gradle.api.internal.artifacts.publish.DefaultPublishArtifact
 import org.gradle.api.internal.file.TestFiles
-import org.gradle.api.internal.project.ProjectState
+import org.gradle.api.internal.initialization.RootScriptDomainObjectContext
 import org.gradle.api.internal.project.ProjectStateRegistry
 import org.gradle.api.internal.tasks.TaskDependencyResolveContext
 import org.gradle.api.specs.Spec
 import org.gradle.api.tasks.TaskDependency
 import org.gradle.configuration.internal.UserCodeApplicationContext
-import org.gradle.initialization.ProjectAccessListener
 import org.gradle.internal.Factories
-import org.gradle.internal.event.ListenerBroadcast
+import org.gradle.internal.event.AnonymousListenerBroadcast
 import org.gradle.internal.event.ListenerManager
+import org.gradle.internal.model.CalculatedValueContainerFactory
 import org.gradle.internal.operations.TestBuildOperationExecutor
 import org.gradle.internal.reflect.Instantiator
 import org.gradle.internal.typeconversion.NotationParser
@@ -79,8 +78,8 @@ import spock.lang.Unroll
 import static org.gradle.api.artifacts.Configuration.State.RESOLVED
 import static org.gradle.api.artifacts.Configuration.State.RESOLVED_WITH_FAILURES
 import static org.gradle.api.artifacts.Configuration.State.UNRESOLVED
-import static org.hamcrest.Matchers.equalTo
-import static org.junit.Assert.assertThat
+import static org.hamcrest.CoreMatchers.equalTo
+import static org.hamcrest.MatcherAssert.assertThat
 
 class DefaultConfigurationSpec extends Specification {
     Instantiator instantiator = TestUtil.instantiatorFactory().decorateLenient()
@@ -90,31 +89,23 @@ class DefaultConfigurationSpec extends Specification {
     def listenerManager = Mock(ListenerManager)
     def metaDataProvider = Mock(DependencyMetaDataProvider)
     def resolutionStrategy = Mock(ResolutionStrategyInternal)
-    def projectAccessListener = Mock(ProjectAccessListener)
-    def projectFinder = Mock(ProjectFinder)
     def immutableAttributesFactory = AttributeTestUtil.attributesFactory()
-    def moduleIdentifierFactory = Mock(ImmutableModuleIdentifierFactory)
     def rootComponentMetadataBuilder = Mock(RootComponentMetadataBuilder)
     def projectStateRegistry = Mock(ProjectStateRegistry)
-    def projectState = Mock(ProjectState)
-    def safeLock = Mock(ProjectStateRegistry.SafeExclusiveLock)
     def domainObjectCollectioncallbackActionDecorator = Mock(CollectionCallbackActionDecorator)
     def userCodeApplicationContext = Mock(UserCodeApplicationContext)
+    def calculatedValueContainerFactory = Mock(CalculatedValueContainerFactory)
 
     def setup() {
-        _ * listenerManager.createAnonymousBroadcaster(DependencyResolutionListener) >> { new ListenerBroadcast<DependencyResolutionListener>(DependencyResolutionListener) }
+        _ * listenerManager.createAnonymousBroadcaster(DependencyResolutionListener) >> { new AnonymousListenerBroadcast<DependencyResolutionListener>(DependencyResolutionListener) }
         _ * resolver.getRepositories() >> []
-        _ * projectStateRegistry.stateFor(_) >> projectState
-        _ * projectStateRegistry.newExclusiveOperationLock() >> safeLock
-        _ * safeLock.withLock(_) >> { args -> args[0].run() }
-        _ * projectState.withMutableState(_) >> { args -> args[0].create() }
         _ * domainObjectCollectioncallbackActionDecorator.decorate(_) >> { args -> args[0] }
-        _ * userCodeApplicationContext.decorateWithCurrent(_) >> { args -> args[0] }
+        _ * userCodeApplicationContext.reapplyCurrentLater(_) >> { args -> args[0] }
     }
 
     void defaultValues() {
         when:
-        def configuration = conf("name", "project")
+        def configuration = conf("name", ":project")
 
         then:
         configuration.name == "name"
@@ -132,7 +123,7 @@ class DefaultConfigurationSpec extends Specification {
 
     def hasUsefulDisplayName() {
         when:
-        def configuration = conf("name", "project", "build")
+        def configuration = conf("name", ":project", ":build")
 
         then:
         configuration.displayName == "configuration ':build:project:name'"
@@ -316,7 +307,7 @@ class DefaultConfigurationSpec extends Specification {
         def fileSet = [new File("somePath")] as Set
 
         given:
-        expectResolved(fileSet);
+        expectResolved(fileSet)
 
         when:
         def resolved = configuration.resolve()
@@ -379,16 +370,16 @@ class DefaultConfigurationSpec extends Specification {
     }
 
     def fileCollectionWithDependencies() {
-        def dependency1 = dependency("group1", "name", "version");
-        def dependency2 = dependency("group2", "name", "version");
+        def dependency1 = dependency("group1", "name", "version")
+        def dependency2 = dependency("group2", "name", "version")
         def configuration = conf()
 
         when:
         def fileCollection = configuration.fileCollection(dependency1)
 
         then:
-        fileCollection.getDependencySpec().isSatisfiedBy(dependency1)
-        !fileCollection.getDependencySpec().isSatisfiedBy(dependency2)
+        fileCollection.dependencySpec.isSatisfiedBy(dependency1)
+        !fileCollection.dependencySpec.isSatisfiedBy(dependency2)
     }
 
     def fileCollectionWithSpec() {
@@ -399,7 +390,7 @@ class DefaultConfigurationSpec extends Specification {
         def fileCollection = configuration.fileCollection(spec)
 
         then:
-        fileCollection.getDependencySpec() == spec
+        fileCollection.dependencySpec == spec
     }
 
     def fileCollectionWithClosureSpec() {
@@ -410,8 +401,8 @@ class DefaultConfigurationSpec extends Specification {
         def fileCollection = configuration.fileCollection(closure)
 
         then:
-        fileCollection.getDependencySpec().isSatisfiedBy(dependency("group1", "name", "version"))
-        !fileCollection.getDependencySpec().isSatisfiedBy(dependency("group2", "name", "version"))
+        fileCollection.dependencySpec.isSatisfiedBy(dependency("group1", "name", "version"))
+        !fileCollection.dependencySpec.isSatisfiedBy(dependency("group2", "name", "version"))
     }
 
     def filesWithDependencies() {
@@ -444,7 +435,7 @@ class DefaultConfigurationSpec extends Specification {
         def fileSet = [new File("somePath")] as Set
 
         when:
-        prepareForFilesBySpec(fileSet);
+        prepareForFilesBySpec(fileSet)
 
         then:
         configuration.files(closure) == fileSet
@@ -475,7 +466,14 @@ class DefaultConfigurationSpec extends Specification {
         def visitedArtifactSet = Stub(VisitedArtifactSet)
 
         _ * visitedArtifactSet.select(_, _, _, _) >> Stub(SelectedArtifactSet) {
-            visitArtifacts(_, _) >> { ArtifactVisitor visitor, boolean l -> files.each { visitor.visitFile(null, null, null, it) } }
+            visitArtifacts(_, _) >> { ArtifactVisitor visitor, boolean l ->
+                files.each {
+                    def artifact = Stub(ResolvableArtifact)
+                    _ * artifact.file >> it
+                    visitor.visitArtifact(null, null, artifact)
+                }
+                visitor.endVisitCollection(null)
+            }
         }
 
         _ * localComponentsResult.resolvedProjectConfigurations >> Collections.emptySet()
@@ -537,7 +535,7 @@ class DefaultConfigurationSpec extends Specification {
 
         then:
         configuration.allArtifacts.files.files == [artifact1.file, artifact2.file] as Set
-        configuration.allArtifacts.files.buildDependencies == configuration.allArtifacts.buildDependencies
+        configuration.allArtifacts.files.buildDependencies.getDependencies(Mock(Task)) == [artifactTask1, artifactTask2] as Set
         configuration.allArtifacts.buildDependencies.getDependencies(Mock(Task)) == [artifactTask1, artifactTask2] as Set
     }
 
@@ -741,6 +739,23 @@ class DefaultConfigurationSpec extends Specification {
         assert copiedConfiguration.extendsFrom.empty
     }
 
+    def "multiple copies create unique configuration names"() {
+        def configuration = prepareConfigurationForCopyTest()
+        def resolutionStrategyCopy = Mock(ResolutionStrategyInternal)
+
+        when:
+        3 * resolutionStrategy.copy() >> resolutionStrategyCopy
+
+        def copied1Configuration = configuration.copy()
+        def copied2Configuration = configuration.copy()
+        def copied3Configuration = configuration.copyRecursive()
+
+        then:
+        checkCopiedConfiguration(configuration, copied1Configuration, resolutionStrategyCopy)
+        checkCopiedConfiguration(configuration, copied2Configuration, resolutionStrategyCopy, 2)
+        checkCopiedConfiguration(configuration, copied3Configuration, resolutionStrategyCopy, 3)
+    }
+
     @Unroll
     void "copies configuration role"() {
         def configuration = prepareConfigurationForCopyTest()
@@ -775,8 +790,8 @@ class DefaultConfigurationSpec extends Specification {
 
         and:
         def copiedConfiguration = configuration.copy(new Spec<Dependency>() {
-            public boolean isSatisfiedBy(Dependency element) {
-                return !element.getGroup().equals("group3");
+            boolean isSatisfiedBy(Dependency element) {
+                return !element.getGroup().equals("group3")
             }
         })
 
@@ -853,7 +868,7 @@ class DefaultConfigurationSpec extends Specification {
         configuration.transitive = false
         configuration.description = "descript"
         configuration.exclude([group: "value"])
-        configuration.exclude([group: "value2"]);
+        configuration.exclude([group: "value2"])
         configuration.artifacts.add(artifact("name1", "ext1", "type1", "classifier1"))
         configuration.artifacts.add(artifact("name2", "ext2", "type2", "classifier2"))
         configuration.dependencies.add(dependency("group1", "name1", "version1"))
@@ -867,8 +882,8 @@ class DefaultConfigurationSpec extends Specification {
         return configuration
     }
 
-    private void checkCopiedConfiguration(Configuration original, Configuration copy, def resolutionStrategyInCopy) {
-        assert copy.name == original.name + "Copy"
+    private void checkCopiedConfiguration(Configuration original, Configuration copy, def resolutionStrategyInCopy, int copyCount = 1) {
+        assert copy.name == original.name + "Copy${copyCount > 1 ? copyCount : ''}"
         assert copy.visible == original.visible
         assert copy.transitive == original.transitive
         assert copy.description == original.description
@@ -1079,25 +1094,21 @@ class DefaultConfigurationSpec extends Specification {
     }
 
     def "resolving configuration puts it into the right state and broadcasts events"() {
-        def listenerBroadcaster = Mock(ListenerBroadcast)
-
-        when:
-        def config = conf("conf")
-
-        then:
-        1 * listenerManager.createAnonymousBroadcaster(_) >> listenerBroadcaster
-
+        def listenerBroadcaster = Mock(AnonymousListenerBroadcast)
         def listener = Mock(DependencyResolutionListener)
+        def config
 
         when:
+        config = conf("conf")
         def result = Mock(ResolutionResult)
         resolves(config, result, Mock(ResolvedConfiguration))
         config.incoming.getResolutionResult().root
 
         then:
+        1 * listenerManager.createAnonymousBroadcaster(_) >> listenerBroadcaster
         _ * listenerBroadcaster.getSource() >> listener
-        1 * listener.beforeResolve(config.incoming)
-        1 * listener.afterResolve(config.incoming)
+        1 * listener.beforeResolve(_) >> { ResolvableDependencies dependencies -> assert dependencies == config.incoming }
+        1 * listener.afterResolve(_) >> { ResolvableDependencies dependencies -> assert dependencies == config.incoming }
         config.resolvedState == ConfigurationInternal.InternalState.ARTIFACTS_RESOLVED
         config.state == RESOLVED
     }
@@ -1332,14 +1343,14 @@ class DefaultConfigurationSpec extends Specification {
         when:
         conf.dependencies.add(Mock(Dependency))
         then:
-        def exDependency = thrown(InvalidUserDataException);
-        exDependency.message == "Cannot change dependencies of configuration ':conf' after it has been resolved."
+        def exDependency = thrown(InvalidUserDataException)
+        exDependency.message == "Cannot change dependencies of dependency configuration ':conf' after it has been resolved."
 
         when:
         conf.artifacts.add(Mock(PublishArtifact))
         then:
-        def exArtifact = thrown(InvalidUserDataException);
-        exArtifact.message == "Cannot change artifacts of configuration ':conf' after it has been resolved."
+        def exArtifact = thrown(InvalidUserDataException)
+        exArtifact.message == "Cannot change artifacts of dependency configuration ':conf' after it has been resolved."
     }
 
     def "defaultDependencies action does not trigger when config has dependencies"() {
@@ -1421,7 +1432,7 @@ class DefaultConfigurationSpec extends Specification {
         prepareForFilesBySpec([] as Set)
 
         given:
-        configuration.resolve();
+        configuration.resolve()
 
         when:
         configuration.setTransitive(true)
@@ -1534,7 +1545,7 @@ class DefaultConfigurationSpec extends Specification {
 
         then:
         IllegalArgumentException t = thrown()
-        t.message == "Cannot change attributes of configuration ':conf' after it has been resolved"
+        t.message == "Cannot change attributes of dependency configuration ':conf' after it has been resolved"
     }
 
     def "wrapper attribute container behaves similar to the delegatee"() {
@@ -1609,15 +1620,15 @@ class DefaultConfigurationSpec extends Specification {
 
     def dumpString() {
         when:
-        def configurationDependency = dependency("dumpgroup1", "dumpname1", "dumpversion1");
-        def otherConfSimilarDependency = dependency("dumpgroup1", "dumpname1", "dumpversion1");
-        def otherConfDependency = dependency("dumpgroup2", "dumpname2", "dumpversion2");
-        def otherConf = conf("dumpConf");
-        otherConf.getDependencies().add(otherConfDependency);
-        otherConf.getDependencies().add(otherConfSimilarDependency);
+        def configurationDependency = dependency("dumpgroup1", "dumpname1", "dumpversion1")
+        def otherConfSimilarDependency = dependency("dumpgroup1", "dumpname1", "dumpversion1")
+        def otherConfDependency = dependency("dumpgroup2", "dumpname2", "dumpversion2")
+        def otherConf = conf("dumpConf")
+        otherConf.getDependencies().add(otherConfDependency)
+        otherConf.getDependencies().add(otherConfSimilarDependency)
 
         def configuration = conf().extendsFrom(otherConf)
-        configuration.getDependencies().add(configurationDependency);
+        configuration.getDependencies().add(configurationDependency)
 
         then:
         configuration.dump() == """
@@ -1724,42 +1735,22 @@ All Artifacts:
     }
 
     private dependency(String group, String name, String version) {
-        new DefaultExternalModuleDependency(group, name, version);
+        new DefaultExternalModuleDependency(group, name, version)
     }
 
     private DefaultConfiguration conf(String confName = "conf", String projectPath = ":", String buildPath = ":") {
-        def domainObjectContext = new DomainObjectContext() {
-            @Override
-            Path identityPath(String name) {
-                getBuildPath().append(getProjectPath()).child(name)
-            }
-
-            @Override
-            Path projectPath(String name) {
-                getProjectPath().child(name)
-            }
-
-            @Override
-            Path getProjectPath() {
-                Path.ROOT.append(Path.path(projectPath))
-            }
-
-            @Override
-            Path getBuildPath() {
-                Path.ROOT.append(Path.path(buildPath))
-            }
-
-            @Override
-            boolean isScript() {
-                return false
-            }
-        }
+        def domainObjectContext = Stub(DomainObjectContext)
+        def build = Path.path(buildPath)
+        _ * domainObjectContext.identityPath(_) >> { String p -> build.append(Path.path(projectPath)).child(p) }
+        _ * domainObjectContext.projectPath(_) >> { String p -> Path.path(projectPath).child(p) }
+        _ * domainObjectContext.buildPath >> Path.path(buildPath)
+        _ * domainObjectContext.model >> RootScriptDomainObjectContext.INSTANCE
 
         def publishArtifactNotationParser = NotationParserBuilder.toType(ConfigurablePublishArtifact).toComposite()
         new DefaultConfiguration(domainObjectContext, confName, configurationsProvider, resolver, listenerManager, metaDataProvider,
-            Factories.constant(resolutionStrategy), projectAccessListener, projectFinder, TestFiles.fileCollectionFactory(),
-            new TestBuildOperationExecutor(), instantiator, publishArtifactNotationParser, Stub(NotationParser), immutableAttributesFactory, rootComponentMetadataBuilder, projectStateRegistry, Stub(DocumentationRegistry),
-            domainObjectCollectioncallbackActionDecorator, userCodeApplicationContext)
+            Factories.constant(resolutionStrategy), TestFiles.fileCollectionFactory(), new TestBuildOperationExecutor(), instantiator,
+            publishArtifactNotationParser, Stub(NotationParser), immutableAttributesFactory, rootComponentMetadataBuilder, Stub(DocumentationRegistry),
+            userCodeApplicationContext, domainObjectContext, projectStateRegistry, TestUtil.domainObjectCollectionFactory(), calculatedValueContainerFactory)
     }
 
     private DefaultPublishArtifact artifact(String name) {
@@ -1767,7 +1758,7 @@ All Artifacts:
     }
 
     private DefaultPublishArtifact artifact(String name, String extension, String type, String classifier) {
-        return new DefaultPublishArtifact(name, extension, type, classifier, new Date(), new File(name));
+        return new DefaultPublishArtifact(name, extension, type, classifier, new Date(), new File(name))
     }
 
     private DefaultPublishArtifact artifact(Map props = [:]) {

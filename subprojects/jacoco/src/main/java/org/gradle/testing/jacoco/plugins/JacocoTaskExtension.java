@@ -18,9 +18,8 @@ package org.gradle.testing.jacoco.plugins;
 
 import com.google.common.base.Joiner;
 import org.apache.commons.lang.StringUtils;
-import org.gradle.api.Incubating;
-import org.gradle.api.Project;
 import org.gradle.api.file.FileCollection;
+import org.gradle.api.model.ObjectFactory;
 import org.gradle.api.provider.Property;
 import org.gradle.api.provider.Provider;
 import org.gradle.api.tasks.Classpath;
@@ -29,11 +28,9 @@ import org.gradle.api.tasks.Internal;
 import org.gradle.api.tasks.LocalState;
 import org.gradle.api.tasks.Optional;
 import org.gradle.api.tasks.OutputFile;
-import org.gradle.internal.Factory;
 import org.gradle.internal.jacoco.JacocoAgentJar;
 import org.gradle.process.JavaForkOptions;
-import org.gradle.util.DeprecationLogger;
-import org.gradle.util.RelativePathUtil;
+import org.gradle.util.internal.RelativePathUtil;
 
 import javax.annotation.Nullable;
 import java.io.File;
@@ -68,10 +65,9 @@ public class JacocoTaskExtension {
 
     private boolean enabled = true;
     private final Property<File> destinationFile;
-    private boolean append = true;
-    private List<String> includes = new ArrayList<String>();
-    private List<String> excludes = new ArrayList<String>();
-    private List<String> excludeClassLoaders = new ArrayList<String>();
+    private List<String> includes = new ArrayList<>();
+    private List<String> excludes = new ArrayList<>();
+    private List<String> excludeClassLoaders = new ArrayList<>();
     private boolean includeNoLocationClasses;
     private String sessionId;
     private boolean dumpOnExit = true;
@@ -84,14 +80,14 @@ public class JacocoTaskExtension {
     /**
      * Creates a Jacoco task extension.
      *
-     * @param project the project
+     * @param objects the object factory
      * @param agent the agent JAR to use for analysis
      * @param task the task we extend
      */
-    public JacocoTaskExtension(Project project, JacocoAgentJar agent, JavaForkOptions task) {
+    public JacocoTaskExtension(ObjectFactory objects, JacocoAgentJar agent, JavaForkOptions task) {
         this.agent = agent;
         this.task = task;
-        destinationFile = project.getObjects().property(File.class);
+        destinationFile = objects.property(File.class);
     }
 
     /**
@@ -122,37 +118,12 @@ public class JacocoTaskExtension {
      * @param destinationFile Destination file provider
      * @since 4.0
      */
-    @Incubating
     public void setDestinationFile(Provider<File> destinationFile) {
         this.destinationFile.set(destinationFile);
     }
 
     public void setDestinationFile(File destinationFile) {
         this.destinationFile.set(destinationFile);
-    }
-
-    /**
-     * Whether or not data should be appended if the {@link #getDestinationFile()} already exists. Defaults to {@code true}.
-     *
-     * @deprecated The Jacoco plugin now deletes the old coverage file before task execution, so the data will never be appended to an existing coverage file from another task.
-     * Use {@link org.gradle.testing.jacoco.tasks.JacocoMerge} to merge different execution files or use {@link org.gradle.testing.jacoco.tasks.JacocoReportBase#setExecutionData(FileCollection)} to generate a report from multiple execution files at once.
-     * Append is set to true for the agent since this allows multiple JVMs spawned by one task to write to the same {@link #getDestinationFile() destination file}.
-     */
-    @Deprecated
-    @Input
-    public boolean isAppend() {
-        nagAboutDeprecatedAppendProperty();
-        return append;
-    }
-
-    @Deprecated
-    public void setAppend(boolean append) {
-        nagAboutDeprecatedAppendProperty();
-        this.append = append;
-    }
-
-    private void nagAboutDeprecatedAppendProperty() {
-        DeprecationLogger.nagUserOfDiscontinuedProperty("append", "Append should always be true.");
     }
 
     /**
@@ -317,7 +288,6 @@ public class JacocoTaskExtension {
      *
      * @since 4.6
      */
-    @Incubating
     @Classpath
     public FileCollection getAgentClasspath() {
         return agent.getAgentConf();
@@ -336,12 +306,7 @@ public class JacocoTaskExtension {
         builder.append(RelativePathUtil.relativePath(task.getWorkingDir(), agent.getJar()));
         builder.append('=');
         argument.append("destfile", getDestinationFile());
-        argument.append("append", DeprecationLogger.whileDisabled(new Factory<Boolean>() {
-            @Override
-            public Boolean create() {
-                return isAppend();
-            }
-        }));
+        argument.append("append", true);
         argument.append("includes", getIncludes());
         argument.append("excludes", getExcludes());
         argument.append("exclclassloader", getExcludeClassLoaders());
@@ -377,7 +342,7 @@ public class JacocoTaskExtension {
             if (value != null
                 && !((value instanceof Collection) && ((Collection) value).isEmpty())
                 && !((value instanceof String) && (StringUtils.isEmpty((String) value)))
-                && !((value instanceof Integer) && (value == Integer.valueOf(0)))) {
+                && !((value instanceof Integer) && ((Integer) value == 0))) {
                 if (anyArgs) {
                     builder.append(',');
                 }

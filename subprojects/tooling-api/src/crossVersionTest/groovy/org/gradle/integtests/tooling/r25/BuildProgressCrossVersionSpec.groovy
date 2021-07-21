@@ -19,6 +19,7 @@ package org.gradle.integtests.tooling.r25
 
 import org.gradle.integtests.tooling.fixture.ProgressEvents
 import org.gradle.integtests.tooling.fixture.ToolingApiSpecification
+import org.gradle.integtests.tooling.fixture.WithOldConfigurationsSupport
 import org.gradle.tooling.BuildException
 import org.gradle.tooling.ListenerFailedException
 import org.gradle.tooling.ProjectConnection
@@ -26,7 +27,7 @@ import org.gradle.tooling.events.OperationType
 import org.gradle.tooling.events.ProgressEvent
 import org.gradle.tooling.model.gradle.BuildInvocations
 
-class BuildProgressCrossVersionSpec extends ToolingApiSpecification {
+class BuildProgressCrossVersionSpec extends ToolingApiSpecification implements WithOldConfigurationsSupport {
 
     def "receive build progress events when requesting a model"() {
         given:
@@ -116,9 +117,11 @@ class BuildProgressCrossVersionSpec extends ToolingApiSpecification {
         configureBuild.descriptor.name == "Configure build"
         configureBuild.descriptor.parent == runBuild.descriptor
 
+        def runTasksParent = parentOfRunTasksOperation(events, runBuild)
+
         def runTasks = events.operation("Run tasks")
         runTasks.descriptor.name == "Run tasks"
-        runTasks.descriptor.parent == runBuild.descriptor
+        runTasks.descriptor.parent == runTasksParent.descriptor
 
         events.operations[0] == runBuild
 
@@ -131,7 +134,7 @@ class BuildProgressCrossVersionSpec extends ToolingApiSpecification {
         buildFile << """
             apply plugin: 'java'
             ${mavenCentralRepository()}
-            dependencies { testCompile 'junit:junit:4.12' }
+            dependencies { ${testImplementationConfiguration} 'junit:junit:4.13' }
             compileTestJava.options.fork = true  // forked as 'Gradle Test Executor 1'
         """
 
@@ -168,8 +171,10 @@ class BuildProgressCrossVersionSpec extends ToolingApiSpecification {
         configureBuild.descriptor.parent == runBuild.descriptor
         configureBuild.successful
 
+        def runTasksParent = parentOfRunTasksOperation(events, runBuild)
+
         def runTasks = events.operation("Run tasks")
-        assert runTasks.descriptor.parent == runBuild.descriptor
+        assert runTasks.descriptor.parent == runTasksParent.descriptor
         runTasks.failed
         runTasks.failures.size() == 1
 
@@ -178,6 +183,16 @@ class BuildProgressCrossVersionSpec extends ToolingApiSpecification {
 
         events.failed == [runBuild, runTasks]
         events.successful == events.operations - [runBuild, runTasks]
+    }
+
+    private ProgressEvents.Operation parentOfRunTasksOperation(ProgressEvents events, ProgressEvents.Operation runBuild) {
+        if (targetDist.toolingApiHasExecutionPhaseBuildOperation) {
+            def runTasksParent = events.operation("Run main tasks")
+            assert runTasksParent.parent.descriptor == runBuild.descriptor
+            return runTasksParent
+        } else {
+            return runBuild
+        }
     }
 
     def goodCode() {

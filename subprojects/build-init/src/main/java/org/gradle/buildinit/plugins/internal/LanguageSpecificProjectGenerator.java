@@ -16,5 +16,34 @@
 
 package org.gradle.buildinit.plugins.internal;
 
-public interface LanguageSpecificProjectGenerator extends ProjectGenerator {
+import org.gradle.buildinit.plugins.internal.modifiers.BuildInitTestFramework;
+import org.gradle.buildinit.plugins.internal.modifiers.ComponentType;
+import org.gradle.buildinit.plugins.internal.modifiers.Language;
+import org.gradle.buildinit.plugins.internal.modifiers.ModularizationOption;
+
+import java.util.Optional;
+import java.util.Set;
+
+public interface LanguageSpecificProjectGenerator {
+    String getId();
+
+    ComponentType getComponentType();
+
+    Language getLanguage();
+
+    Set<ModularizationOption> getModularizationOptions();
+
+    Optional<String> getFurtherReading(InitSettings settings);
+
+    Set<BuildInitTestFramework> getTestFrameworks();
+
+    BuildInitTestFramework getDefaultTestFramework();
+
+    boolean supportsPackage();
+
+    void generateProjectBuildScript(String projectName, InitSettings settings, BuildScriptBuilder buildScriptBuilder);
+
+    void generateConventionPluginBuildScript(String conventionPluginName, InitSettings settings, BuildScriptBuilder buildScriptBuilder);
+
+    void generateSources(InitSettings settings, TemplateFactory templateFactory);
 }

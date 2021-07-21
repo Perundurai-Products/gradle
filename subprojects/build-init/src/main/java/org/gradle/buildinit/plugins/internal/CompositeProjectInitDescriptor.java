@@ -18,9 +18,14 @@ package org.gradle.buildinit.plugins.internal;
 
 import org.gradle.buildinit.plugins.internal.modifiers.BuildInitDsl;
 import org.gradle.buildinit.plugins.internal.modifiers.BuildInitTestFramework;
+import org.gradle.buildinit.plugins.internal.modifiers.ComponentType;
+import org.gradle.buildinit.plugins.internal.modifiers.Language;
+import org.gradle.buildinit.plugins.internal.modifiers.ModularizationOption;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 
@@ -36,6 +41,21 @@ public class CompositeProjectInitDescriptor implements BuildInitializer {
     @Override
     public String getId() {
         return descriptor.getId();
+    }
+
+    @Override
+    public ComponentType getComponentType() {
+        return descriptor.getComponentType();
+    }
+
+    @Override
+    public Language getLanguage() {
+        return descriptor.getLanguage();
+    }
+
+    @Override
+    public Set<ModularizationOption> getModularizationOptions() {
+        return descriptor.getModularizationOptions();
     }
 
     @Override
@@ -55,7 +75,7 @@ public class CompositeProjectInitDescriptor implements BuildInitializer {
 
     @Override
     public Set<BuildInitDsl> getDsls() {
-        return new TreeSet<BuildInitDsl>(Arrays.asList(BuildInitDsl.values()));
+        return new TreeSet<>(Arrays.asList(BuildInitDsl.values()));
     }
 
     @Override
@@ -69,10 +89,29 @@ public class CompositeProjectInitDescriptor implements BuildInitializer {
     }
 
     @Override
+    public Optional<String> getFurtherReading(InitSettings settings) {
+        return descriptor.getFurtherReading(settings);
+    }
+
+    @Override
     public void generate(InitSettings settings) {
         for (BuildContentGenerator generator : generators) {
             generator.generate(settings);
         }
         descriptor.generate(settings);
+    }
+
+    public Map<String, List<String>> generateWithExternalComments(InitSettings settings) {
+        if (!(descriptor instanceof LanguageSpecificAdaptor)) {
+            throw new UnsupportedOperationException();
+        }
+        for (BuildContentGenerator generator : generators) {
+            if (generator instanceof SimpleGlobalFilesBuildSettingsDescriptor) {
+                ((SimpleGlobalFilesBuildSettingsDescriptor) generator).generateWithoutComments(settings);
+            } else {
+                generator.generate(settings);
+            }
+        }
+        return ((LanguageSpecificAdaptor) descriptor).generateWithExternalComments(settings);
     }
 }

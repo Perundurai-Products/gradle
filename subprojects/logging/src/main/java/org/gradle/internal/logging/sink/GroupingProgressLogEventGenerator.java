@@ -31,7 +31,7 @@ import org.gradle.internal.logging.events.UpdateNowEvent;
 import org.gradle.internal.logging.format.LogHeaderFormatter;
 import org.gradle.internal.operations.BuildOperationCategory;
 import org.gradle.internal.operations.OperationIdentifier;
-import org.gradle.util.GUtil;
+import org.gradle.util.internal.GUtil;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -66,6 +66,7 @@ public class GroupingProgressLogEventGenerator implements OutputEventListener {
         this.verbose = verbose;
     }
 
+    @Override
     public void onOutput(OutputEvent event) {
         if (event instanceof ProgressStartEvent) {
             onStart((ProgressStartEvent) event);

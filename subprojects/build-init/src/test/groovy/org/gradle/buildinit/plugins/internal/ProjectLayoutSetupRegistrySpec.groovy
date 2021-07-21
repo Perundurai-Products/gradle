@@ -17,14 +17,14 @@
 package org.gradle.buildinit.plugins.internal
 
 import org.gradle.api.GradleException
-import org.gradle.util.TextUtil
+import org.gradle.util.internal.TextUtil
 import spock.lang.Specification
 
 
 class ProjectLayoutSetupRegistrySpec extends Specification {
     def defaultType = descriptor("default")
     def converter = converter("maven")
-    def registry = new ProjectLayoutSetupRegistry(defaultType, converter)
+    def registry = new ProjectLayoutSetupRegistry(defaultType, converter, Mock(TemplateOperationFactory))
 
     def "can add multiple descriptors"() {
         when:
@@ -69,7 +69,7 @@ class ProjectLayoutSetupRegistrySpec extends Specification {
 
         then:
         def e = thrown(GradleException)
-        e.message == TextUtil.toPlatformLineSeparators("""The requested build setup type 'unknown' is not supported. Supported types:
+        e.message == TextUtil.toPlatformLineSeparators("""The requested build type 'unknown' is not supported. Supported types:
   - 'default'
   - 'desc1'
   - 'desc2'

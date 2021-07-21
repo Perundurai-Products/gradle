@@ -26,7 +26,9 @@ import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.strategy.DefaultV
 import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.strategy.MavenVersionSelectorScheme
 import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.strategy.VersionParser
 import org.gradle.api.internal.artifacts.repositories.ArtifactRepositoryInternal
-import org.gradle.groovy.scripts.StringScriptSource
+import org.gradle.api.internal.attributes.AttributesSchemaInternal
+import org.gradle.groovy.scripts.TextResourceScriptSource
+import org.gradle.internal.resource.StringTextResource
 import org.gradle.plugin.management.internal.DefaultPluginRequest
 import org.gradle.plugin.management.internal.PluginRequestInternal
 import org.gradle.plugin.use.internal.DefaultPluginId
@@ -56,13 +58,14 @@ class ArtifactRepositoriesPluginResolverTest extends Specification {
     def resolution = Mock(DependencyResolutionServices) {
         getResolveRepositoryHandler() >> repositories
         getConfigurationContainer() >> configurations
+        getAttributesSchema() >> Stub(AttributesSchemaInternal)
     }
     def result = Mock(PluginResolutionResult)
 
     def resolver = new ArtifactRepositoriesPluginResolver(resolution, versionSelectorScheme)
 
     PluginRequestInternal request(String id, String version = null) {
-        new DefaultPluginRequest(DefaultPluginId.of(id), version, true, 1, new StringScriptSource("test", "test"))
+        new DefaultPluginRequest(DefaultPluginId.of(id), version, true, 1, new TextResourceScriptSource(new StringTextResource("test", "test")))
     }
 
     def "fail pluginRequests without versions"() {
@@ -81,11 +84,11 @@ class ArtifactRepositoriesPluginResolverTest extends Specification {
         1 * result.found(SOURCE_NAME, _)
     }
 
-    def "fail pluginRequests with dynamic versions"() {
+    def "accept pluginRequests with dynamic versions"() {
         when:
         resolver.resolve(request("plugin", "latest.revision"), result)
 
         then:
-        1 * result.notFound(SOURCE_NAME, "dynamic plugin versions are not supported")
+        1 * result.found(SOURCE_NAME, _)
     }
 }

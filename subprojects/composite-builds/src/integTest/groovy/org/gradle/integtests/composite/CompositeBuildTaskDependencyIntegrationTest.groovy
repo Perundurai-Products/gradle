@@ -30,8 +30,10 @@ class CompositeBuildTaskDependencyIntegrationTest extends AbstractCompositeBuild
             buildFile << """
                 allprojects {
                     task logProject {
+                        def rootProjectName = project.rootProject.name
+                        def projectPath = project.path
                         doLast {
-                            println "Executing build '" + project.rootProject.name + "' project '" + project.path + "' task '" + path + "'"
+                            println "Executing build '" + rootProjectName + "' project '" + projectPath + "' task '" + path + "'"
                         }
                     }
                 }
@@ -185,7 +187,7 @@ class CompositeBuildTaskDependencyIntegrationTest extends AbstractCompositeBuild
     }
 
     dependencies {
-        compile "org.test:b1:1.0"
+        implementation "org.test:b1:1.0"
     }
 """
 

@@ -16,7 +16,7 @@
 package org.gradle.api.internal.artifacts.ivyservice.modulecache.dynamicversions;
 
 import com.google.common.collect.Maps;
-import org.gradle.util.BuildCommencedTimeProvider;
+import org.gradle.util.internal.BuildCommencedTimeProvider;
 
 import java.util.Map;
 
@@ -34,6 +34,7 @@ public class InMemoryModuleVersionsCache extends AbstractModuleVersionsCache {
         this.delegate = delegate;
     }
 
+    @Override
     protected void store(ModuleAtRepositoryKey key, ModuleVersionsCacheEntry entry) {
         inMemoryCache.put(key, entry);
         if (delegate != null) {
@@ -41,6 +42,7 @@ public class InMemoryModuleVersionsCache extends AbstractModuleVersionsCache {
         }
     }
 
+    @Override
     protected ModuleVersionsCacheEntry get(ModuleAtRepositoryKey key) {
         ModuleVersionsCacheEntry entry = inMemoryCache.get(key);
         if (entry == null && delegate != null) {

@@ -16,18 +16,20 @@
 
 package org.gradle.api.tasks
 
+import org.gradle.api.file.FileSystemOperations
+import org.gradle.api.file.ProjectLayout
+import org.gradle.api.model.ObjectFactory
+import org.gradle.api.provider.ProviderFactory
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.util.Requires
-
-import static org.gradle.util.TestPrecondition.KOTLIN_SCRIPT
-
+import org.gradle.process.ExecOperations
+import org.gradle.workers.WorkerExecutor
+import spock.lang.Unroll
 
 class TaskServiceInjectionIntegrationTest extends AbstractIntegrationSpec {
     def "can construct a task with @Inject services constructor arg"() {
         given:
         buildFile << """
             import org.gradle.workers.WorkerExecutor
-            import javax.inject.Inject
 
             class CustomTask extends DefaultTask {
                 private final WorkerExecutor executor
@@ -57,7 +59,6 @@ class TaskServiceInjectionIntegrationTest extends AbstractIntegrationSpec {
         given:
         buildFile << """
             import org.gradle.workers.WorkerExecutor
-            import javax.inject.Inject
 
             class CustomTask extends DefaultTask {
                 private final int number
@@ -89,7 +90,6 @@ class TaskServiceInjectionIntegrationTest extends AbstractIntegrationSpec {
         given:
         buildFile << """
             import org.gradle.workers.WorkerExecutor
-            import javax.inject.Inject
 
             class CustomTask extends DefaultTask {
                 @Inject
@@ -115,7 +115,6 @@ class TaskServiceInjectionIntegrationTest extends AbstractIntegrationSpec {
         given:
         buildFile << """
             import org.gradle.workers.WorkerExecutor
-            import javax.inject.Inject
 
             class CustomTask extends DefaultTask {
                 CustomTask() {
@@ -163,14 +162,13 @@ class TaskServiceInjectionIntegrationTest extends AbstractIntegrationSpec {
         then:
         failure.assertHasCause("Could not create task ':myTask'.")
         failure.assertHasCause("Could not create task of type 'CustomTask'.")
-        failure.assertHasCause("The constructor for class CustomTask should be annotated with @Inject.")
+        failure.assertHasCause("The constructor for type CustomTask should be annotated with @Inject.")
     }
 
     def "task creation fails when service getter is not public or protected"() {
         given:
         buildFile << """
             import org.gradle.workers.WorkerExecutor
-            import javax.inject.Inject
             import groovy.transform.PackageScope
 
             class CustomTask extends DefaultTask {
@@ -195,7 +193,6 @@ class TaskServiceInjectionIntegrationTest extends AbstractIntegrationSpec {
         failure.assertHasCause("Cannot use @Inject annotation on method CustomTask.getExecutor() as it is not public or protected.")
     }
 
-    @Requires(KOTLIN_SCRIPT)
     def "can construct a task in Kotlin with @Inject services constructor arg"() {
         given:
         settingsFile << "rootProject.buildFileName = 'build.gradle.kts'"
@@ -203,7 +200,6 @@ class TaskServiceInjectionIntegrationTest extends AbstractIntegrationSpec {
             import org.gradle.api.*
             import org.gradle.api.tasks.*
             import org.gradle.workers.WorkerExecutor
-            import javax.inject.Inject
 
             open class CustomTask @Inject constructor(private val executor: WorkerExecutor) : DefaultTask() {
                 @TaskAction fun run() = println(if (executor != null) "got it" else "NOT IT")
@@ -219,7 +215,6 @@ class TaskServiceInjectionIntegrationTest extends AbstractIntegrationSpec {
         outputContains("got it")
     }
 
-    @Requires(KOTLIN_SCRIPT)
     def "can construct a task with @Inject services and constructor args via Kotlin friendly DSL"() {
         given:
         settingsFile << "rootProject.buildFileName = 'build.gradle.kts'"
@@ -227,7 +222,6 @@ class TaskServiceInjectionIntegrationTest extends AbstractIntegrationSpec {
             import org.gradle.api.*
             import org.gradle.api.tasks.*
             import org.gradle.workers.WorkerExecutor
-            import javax.inject.Inject
 
             open class CustomTask @Inject constructor(private val number: Int, private val executor: WorkerExecutor) : DefaultTask() {
                 @TaskAction fun run() = println(if (executor != null) "got it \$number" else "\$number NOT IT")
@@ -241,5 +235,49 @@ class TaskServiceInjectionIntegrationTest extends AbstractIntegrationSpec {
 
         then:
         outputContains("got it 15")
+    }
+
+    @Unroll
+    def "service of type #serviceType is available for injection into task"() {
+        given:
+        buildFile << """
+            class CustomTask extends DefaultTask {
+                private final ${serviceType} service
+
+                @Inject
+                CustomTask(${serviceType} service) {
+                    this.service = service
+                }
+
+                @TaskAction
+                void printIt() {
+                    println(service != null ? "got it" : "NOT IT")
+                }
+            }
+
+            task myTask(type: CustomTask)
+        """
+
+        when:
+        run 'myTask'
+
+        then:
+        outputContains("got it")
+
+        when:
+        run 'myTask'
+
+        then:
+        outputContains("got it")
+
+        where:
+        serviceType << [
+            ObjectFactory,
+            ProjectLayout,
+            ProviderFactory,
+            WorkerExecutor,
+            FileSystemOperations,
+            ExecOperations,
+        ].collect { it.name }
     }
 }

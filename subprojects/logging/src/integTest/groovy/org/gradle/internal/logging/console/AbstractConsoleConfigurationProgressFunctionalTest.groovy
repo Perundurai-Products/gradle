@@ -24,7 +24,7 @@ import org.gradle.test.fixtures.ConcurrentTestUtil
 import org.gradle.test.fixtures.server.http.BlockingHttpServer
 import org.junit.Rule
 
-abstract class AbstractConsoleConfigurationProgressFunctionalTest extends AbstractIntegrationSpec implements RichConsoleStyling {
+abstract class AbstractConsoleConfigurationProgressFunctionalTest extends AbstractIntegrationSpec {
     @Rule
     BlockingHttpServer server = new BlockingHttpServer()
     GradleHandle gradle
@@ -42,7 +42,7 @@ abstract class AbstractConsoleConfigurationProgressFunctionalTest extends Abstra
         """
         buildFile << """
             ${server.callFromBuild('root-build-script')}
-            task hello 
+            task hello
         """
         file("b/build.gradle") << """
             ${server.callFromBuild('b-build-script')}
@@ -73,7 +73,7 @@ abstract class AbstractConsoleConfigurationProgressFunctionalTest extends Abstra
         """
         buildFile << """
             ${server.callFromBuild('root-build-script')}
-            task hello { 
+            task hello {
                 dependsOn gradle.includedBuild("child").task(":hello")
             }
         """
@@ -117,7 +117,7 @@ abstract class AbstractConsoleConfigurationProgressFunctionalTest extends Abstra
     def "shows work in progress with buildSrc build"() {
         buildFile << """
             ${server.callFromBuild('root-build-script')}
-            task hello 
+            task hello
         """
         file("buildSrc/settings.gradle") << """
             include 'a', 'b'
@@ -156,7 +156,7 @@ abstract class AbstractConsoleConfigurationProgressFunctionalTest extends Abstra
 
     void assertHasWorkInProgress(String message) {
         ConcurrentTestUtil.poll {
-            assert gradle.standardOutput.contains(workInProgressLine("> " + message))
+            RichConsoleStyling.assertHasWorkInProgress(gradle, "> " + message)
         }
     }
 }

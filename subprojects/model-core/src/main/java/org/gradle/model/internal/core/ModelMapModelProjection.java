@@ -25,7 +25,7 @@ import org.gradle.model.internal.core.rule.describe.ModelRuleDescriptor;
 import org.gradle.model.internal.manage.instance.ManagedInstance;
 import org.gradle.model.internal.type.ModelType;
 import org.gradle.model.internal.type.ModelTypes;
-import org.gradle.util.CollectionUtils;
+import org.gradle.util.internal.CollectionUtils;
 
 import javax.annotation.Nullable;
 import java.util.Collection;
@@ -73,6 +73,7 @@ public class ModelMapModelProjection<I> implements ModelProjection {
         } else {
             sb.append("<T>; where T is one of [");
             Joiner.on(", ").appendTo(sb, CollectionUtils.sort(Iterables.transform(creatableTypes, new Function<Class<?>, String>() {
+                @Override
                 public String apply(Class<?> input) {
                     return input.getName();
                 }

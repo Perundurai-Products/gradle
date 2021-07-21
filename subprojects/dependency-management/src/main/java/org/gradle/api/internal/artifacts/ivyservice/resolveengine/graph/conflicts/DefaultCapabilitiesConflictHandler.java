@@ -15,19 +15,20 @@
  */
 package org.gradle.api.internal.artifacts.ivyservice.resolveengine.graph.conflicts;
 
-import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import org.gradle.api.Action;
+import org.gradle.api.Describable;
 import org.gradle.api.artifacts.ModuleIdentifier;
 import org.gradle.api.artifacts.component.ComponentIdentifier;
 import org.gradle.api.capabilities.Capability;
 import org.gradle.api.internal.artifacts.ivyservice.resolveengine.graph.builder.ComponentState;
+import org.gradle.api.internal.artifacts.ivyservice.resolveengine.graph.builder.NodeState;
+import org.gradle.api.internal.artifacts.ivyservice.resolveengine.result.ComponentSelectionDescriptorInternal;
 import org.gradle.api.internal.artifacts.ivyservice.resolveengine.result.ComponentSelectionReasons;
-import org.gradle.internal.Describables;
 import org.gradle.internal.component.external.model.CapabilityInternal;
 
 import java.util.ArrayDeque;
@@ -36,36 +37,50 @@ import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.TreeSet;
 
 public class DefaultCapabilitiesConflictHandler implements CapabilitiesConflictHandler {
-    private final List<Resolver> resolvers = Lists.newArrayListWithExpectedSize(2);
-    private final Map<String, Set<ComponentState>> capabilityWithoutVersionToComponents = Maps.newHashMap();
-    private final Deque<CapabilityConflict> conflicts = new ArrayDeque<CapabilityConflict>();
+    private final List<Resolver> resolvers = Lists.newArrayListWithExpectedSize(3);
+    private final Map<String, Set<NodeState>> capabilityWithoutVersionToNodes = Maps.newHashMap();
+    private final Deque<CapabilityConflict> conflicts = new ArrayDeque<>();
 
     @Override
     public PotentialConflict registerCandidate(CapabilitiesConflictHandler.Candidate candidate) {
         CapabilityInternal capability = (CapabilityInternal) candidate.getCapability();
         String group = capability.getGroup();
         String name = capability.getName();
-        final Set<ComponentState> components = findComponentsFor(capability);
-        components.addAll(candidate.getImplicitCapabilityProviders());
-        if (components.add(candidate.getComponent()) && components.size() > 1) {
-            // The registered components may contain components which are no longer selected.
+        final Set<NodeState> nodes = findNodesFor(capability);
+        Collection<NodeState> implicitCapabilityProviders = candidate.getImplicitCapabilityProviders();
+        nodes.addAll(implicitCapabilityProviders);
+        NodeState node = candidate.getNode();
+        if ((nodes.add(node) || implicitCapabilityProviders.contains(node)) && nodes.size() > 1) {
+            // The registered nodes may contain nodes which are no longer selected.
             // We don't remove them from the list in the first place because it proved to be
             // slower than filtering as needed.
-            final List<ComponentState> candidatesForConflict = Lists.newArrayListWithCapacity(components.size());
-            for (ComponentState component : components) {
-                if (component.isCandidateForConflictResolution()) {
-                    candidatesForConflict.add(component);
+            ModuleIdentifier rootId = null;
+            final List<NodeState> candidatesForConflict = Lists.newArrayListWithCapacity(nodes.size());
+            for (NodeState ns : nodes) {
+                if (ns.isSelected()) {
+                    candidatesForConflict.add(ns);
+                    if (ns.isRoot()) {
+                        rootId = ns.getComponent().getId().getModule();
+                    }
                 }
+            }
+            if (rootId != null && candidatesForConflict.size() > 1) {
+                // This is a special case for backwards compatibility: it is possible to have
+                // a cycle where the root component depends on a library which transitively
+                // depends on a different version of the root module. In this case, we effectively
+                // allow 2 modules to have the same capability, so we filter the nodes coming
+                // from transitive dependencies
+                ModuleIdentifier rootModuleId = rootId;
+                candidatesForConflict.removeIf(n -> !n.isRoot() && n.getComponent().getId().getModule().equals(rootModuleId));
             }
             if (candidatesForConflict.size() > 1) {
                 PotentialConflict conflict = new PotentialConflict() {
                     @Override
                     public void withParticipatingModules(Action<ModuleIdentifier> action) {
-                        for (ComponentState component : candidatesForConflict) {
-                            action.execute(component.getId().getModule());
+                        for (NodeState node : candidatesForConflict) {
+                            action.execute(node.getComponent().getId().getModule());
                         }
                     }
 
@@ -81,15 +96,10 @@ public class DefaultCapabilitiesConflictHandler implements CapabilitiesConflictH
         return PotentialConflictFactory.noConflict();
     }
 
-    private Set<ComponentState> findComponentsFor(CapabilityInternal capability) {
+    private Set<NodeState> findNodesFor(CapabilityInternal capability) {
         String capabilityId = capability.getCapabilityId();
-        Set<ComponentState> componentStates = capabilityWithoutVersionToComponents.get(capabilityId);
-        if (componentStates == null) {
-            componentStates = Sets.newLinkedHashSet();
-            capabilityWithoutVersionToComponents.put(capabilityId, componentStates);
-        }
 
-        return componentStates;
+        return capabilityWithoutVersionToNodes.computeIfAbsent(capabilityId, k -> Sets.newLinkedHashSet());
     }
 
     @Override
@@ -105,12 +115,14 @@ public class DefaultCapabilitiesConflictHandler implements CapabilitiesConflictH
             resolver.resolve(details);
             if (details.hasResult()) {
                 resolutionAction.execute(details);
-                CapabilityInternal capability = (CapabilityInternal) conflict.descriptors.iterator().next();
-                details.getSelected().addCause(ComponentSelectionReasons.CONFLICT_RESOLUTION.withDescription(Describables.of("latest version of capability", capability.getCapabilityId())));
+                ComponentSelectionDescriptorInternal conflictResolution = ComponentSelectionReasons.CONFLICT_RESOLUTION;
+                if (details.reason != null) {
+                    conflictResolution = conflictResolution.withDescription(details.reason);
+                }
+                details.getSelected().addCause(conflictResolution);
                 return;
             }
         }
-        throw new RuntimeException("Cannot choose between " + prettifyCandidates(conflict) + " because they provide the same capability: " + prettifyCapabilities(conflict));
     }
 
     @Override
@@ -118,31 +130,38 @@ public class DefaultCapabilitiesConflictHandler implements CapabilitiesConflictH
         resolvers.add(conflictResolver);
     }
 
-    public static CapabilitiesConflictHandler.Candidate candidate(ComponentState component, Capability capability, Collection<ComponentState> implicitCapabilityProviders) {
-        return new Candidate(component, capability, implicitCapabilityProviders);
+    @Override
+    public boolean hasSeenCapability(Capability capability) {
+        return capabilityWithoutVersionToNodes.containsKey(((CapabilityInternal) capability).getCapabilityId());
+    }
+
+    public static CapabilitiesConflictHandler.Candidate candidate(NodeState node, Capability capability, Collection<NodeState> implicitCapabilityProviders) {
+        return new Candidate(node, capability, implicitCapabilityProviders);
     }
 
     private static class Candidate implements CapabilitiesConflictHandler.Candidate {
-        private final ComponentState component;
+        private final NodeState node;
         private final Capability capability;
-        private final Collection<ComponentState> implicitCapabilityProviders;
+        private final Collection<NodeState> implicitCapabilityProviders;
 
-        public Candidate(ComponentState component, Capability capability, Collection<ComponentState> implicitCapabilityProviders) {
-            this.component = component;
+        public Candidate(NodeState node, Capability capability, Collection<NodeState> implicitCapabilityProviders) {
+            this.node = node;
             this.capability = capability;
             this.implicitCapabilityProviders = implicitCapabilityProviders;
         }
 
-        public ComponentState getComponent() {
-            return component;
+        @Override
+        public NodeState getNode() {
+            return node;
         }
 
+        @Override
         public Capability getCapability() {
             return capability;
         }
 
         @Override
-        public Collection<ComponentState> getImplicitCapabilityProviders() {
+        public Collection<NodeState> getImplicitCapabilityProviders() {
             return implicitCapabilityProviders;
         }
     }
@@ -150,8 +169,9 @@ public class DefaultCapabilitiesConflictHandler implements CapabilitiesConflictH
 
     private static class Details implements ResolutionDetails {
         private final CapabilityConflict conflict;
-        private final Set<ComponentState> evicted = Sets.newHashSet();
-        private ComponentState selected;
+        private final Set<NodeState> evicted = Sets.newHashSet();
+        private NodeState selected;
+        private Describable reason;
 
         private Details(CapabilityConflict conflict) {
             this.conflict = conflict;
@@ -164,28 +184,46 @@ public class DefaultCapabilitiesConflictHandler implements CapabilitiesConflictH
 
         @Override
         public Collection<? extends CandidateDetails> getCandidates(Capability capability) {
-            ImmutableList.Builder<CandidateDetails> candidates = new ImmutableList.Builder<CandidateDetails>();
+            ImmutableList.Builder<CandidateDetails> candidates = new ImmutableList.Builder<>();
             String group = capability.getGroup();
             String name = capability.getName();
             String version = capability.getVersion();
-            for (final ComponentState component : conflict.components) {
-                if (!evicted.contains(component)) {
-                    Capability componentCapability = component.findCapability(group, name);
+            for (final NodeState node : conflict.nodes) {
+                if (!evicted.contains(node)) {
+                    Capability componentCapability = node.findCapability(group, name);
                     if (componentCapability != null && componentCapability.getVersion().equals(version)) {
                         candidates.add(new CandidateDetails() {
                             @Override
                             public ComponentIdentifier getId() {
-                                return component.getComponentId();
+                                return node.getComponent().getComponentId();
+                            }
+
+                            @Override
+                            public String getVariantName() {
+                                return node.getResolvedConfigurationId().getConfiguration();
                             }
 
                             @Override
                             public void evict() {
-                                evicted.add(component);
+                                node.evict();
+                                evicted.add(node);
                             }
 
                             @Override
                             public void select() {
-                                selected = component;
+                                selected = node;
+                            }
+
+                            @Override
+                            public void reject() {
+                                ComponentState component = node.getComponent();
+                                component.rejectForCapabilityConflict(capability, conflictedNodes(node, conflict.nodes));
+                                component.selectAndRestartModule();
+                            }
+
+                            @Override
+                            public void byReason(Describable description) {
+                                reason = description;
                             }
                         });
                     }
@@ -194,11 +232,17 @@ public class DefaultCapabilitiesConflictHandler implements CapabilitiesConflictH
             return candidates.build();
         }
 
+        private Collection<NodeState> conflictedNodes(NodeState node, Collection<NodeState> nodes) {
+            List<NodeState> conflictedNodes = Lists.newArrayList(nodes);
+            conflictedNodes.remove(node);
+            return conflictedNodes;
+        }
+
         @Override
         public void withParticipatingModules(Action<? super ModuleIdentifier> action) {
             Set<ModuleIdentifier> seen = Sets.newHashSet();
-            for (ComponentState component : conflict.components) {
-                ModuleIdentifier module = component.getId().getModule();
+            for (NodeState node : conflict.nodes) {
+                ModuleIdentifier module = node.getComponent().getId().getModule();
                 if (seen.add(module)) {
                     action.execute(module);
                 }
@@ -212,20 +256,20 @@ public class DefaultCapabilitiesConflictHandler implements CapabilitiesConflictH
 
         @Override
         public ComponentState getSelected() {
-            return selected;
+            return selected.getComponent();
         }
     }
 
     private static class CapabilityConflict {
 
-        private final Collection<ComponentState> components;
+        private final Collection<NodeState> nodes;
         private final Set<Capability> descriptors;
 
-        private CapabilityConflict(String group, String name, Collection<ComponentState> components) {
-            this.components = components;
-            final ImmutableSet.Builder<Capability> builder = new ImmutableSet.Builder<Capability>();
-            for (final ComponentState component : components) {
-                Capability capability = component.findCapability(group, name);
+        private CapabilityConflict(String group, String name, Collection<NodeState> nodes) {
+            this.nodes = nodes;
+            final ImmutableSet.Builder<Capability> builder = new ImmutableSet.Builder<>();
+            for (final NodeState node : nodes) {
+                Capability capability = node.findCapability(group, name);
                 if (capability != null) {
                     builder.add(capability);
                 }
@@ -235,19 +279,13 @@ public class DefaultCapabilitiesConflictHandler implements CapabilitiesConflictH
 
     }
 
-    private static String prettifyCapabilities(CapabilityConflict conflict) {
-        TreeSet<String> capabilities = Sets.newTreeSet();
-        for (Capability c : conflict.descriptors) {
-            capabilities.add(c.getGroup() + ":" + c.getName() + ":" + c.getVersion());
+    private static boolean sameComponentAppearsMultipleTimes(CapabilityConflict conflict) {
+        Set<ComponentState> components = Sets.newHashSet();
+        for (NodeState node : conflict.nodes) {
+            if (!components.add(node.getComponent())) {
+                return true;
+            }
         }
-        return Joiner.on(", ").join(capabilities);
-    }
-
-    private static String prettifyCandidates(CapabilityConflict conflict) {
-        TreeSet<String> candidates = Sets.newTreeSet();
-        for (ComponentState component : conflict.components) {
-            candidates.add(component.getId().toString());
-        }
-        return Joiner.on(" and ").join(candidates);
+        return false;
     }
 }

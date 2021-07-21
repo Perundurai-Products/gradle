@@ -18,17 +18,22 @@ package org.gradle.api.internal.project;
 
 import org.gradle.api.Project;
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier;
-import org.gradle.internal.Factory;
+import org.gradle.api.internal.initialization.ClassLoaderScope;
 import org.gradle.internal.build.BuildState;
+import org.gradle.internal.model.ModelContainer;
+import org.gradle.internal.resources.ResourceLock;
+import org.gradle.util.Path;
 
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
+import java.util.function.Consumer;
+import java.util.function.Function;
 
 /**
  * Encapsulates the identity and state of a particular project in a build tree.
  */
 @ThreadSafe
-public interface ProjectState {
+public interface ProjectState extends ModelContainer<ProjectInternal> {
     /**
      * Returns the containing build of this project.
      */
@@ -46,22 +51,45 @@ public interface ProjectState {
     String getName();
 
     /**
+     * Returns an identifying path for this project in the build tree.
+     */
+    Path getIdentityPath();
+
+    /**
+     * Returns a path for this project within its containing build. These are not unique within a build tree.
+     */
+    Path getProjectPath();
+
+    /**
      * Returns the identifier of the default component produced by this project.
      */
     ProjectComponentIdentifier getComponentIdentifier();
 
     /**
-     * Runs the given action against the public mutable state of the project. Applies best effort synchronization to prevent concurrent access to a particular project from multiple threads. However, it is currently easy for state to leak from one project to another so this is not a strong guarantee.
+     * Creates the mutable model for this project.
      */
-    <T> T withMutableState(Factory<? extends T> factory);
+    void createMutableModel(ClassLoaderScope selfClassLoaderScope, ClassLoaderScope baseClassLoaderScope);
 
     /**
-     * Runs the given action against the public mutable state of the project. Applies best effort synchronization to prevent concurrent access to a particular project from multiple threads. However, it is currently easy for state to leak from one project to another so this is not a strong guarantee.
+     * Configures the mutable model for this project, if not already.
      */
-    <T> void withMutableState(Runnable runnable);
+    void ensureConfigured();
 
     /**
-     * Returns whether or not the current thread holds the mutable state for this project.
+     * Configure the mutable model for this project and discovers any registered tasks, if not already done.
      */
-    boolean hasMutableState();
+    void ensureTasksDiscovered();
+
+    /**
+     * Returns the mutable model for this project. This should not be used directly. This property is here to help with migration away from direct usage.
+     */
+    ProjectInternal getMutableModel();
+
+    /**
+     * Returns the lock that will be acquired when accessing the mutable state of this project via {@link #applyToMutableState(Consumer)} and {@link #fromMutableState(Function)}.
+     * A caller can optionally acquire this lock before calling one of these accessor methods, in order to avoid those methods blocking.
+     *
+     * <p>Note that the lock may be shared between projects.
+     */
+    ResourceLock getAccessLock();
 }

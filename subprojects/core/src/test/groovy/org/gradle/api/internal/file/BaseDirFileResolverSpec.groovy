@@ -15,6 +15,7 @@
  */
 package org.gradle.api.internal.file
 
+
 import org.gradle.api.provider.Provider
 import org.gradle.internal.typeconversion.UnsupportedNotationException
 import org.gradle.test.fixtures.file.TestFile
@@ -28,12 +29,12 @@ import spock.lang.Specification
 
 import java.util.concurrent.Callable
 
-import static org.gradle.util.TextUtil.toPlatformLineSeparators
+import static org.gradle.util.internal.TextUtil.toPlatformLineSeparators
 
 @UsesNativeServices
 class BaseDirFileResolverSpec extends Specification {
     @Rule
-    TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
+    TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider(getClass())
 
     @Requires(TestPrecondition.SYMLINKS)
     def "normalizes absolute path which points to an absolute link"() {
@@ -165,7 +166,8 @@ The following types/formats are supported:
   - A Path instance.
   - A Directory instance.
   - A RegularFile instance.
-  - A URI or URL instance.""")
+  - A URI or URL instance.
+  - A TextResource instance.""")
     }
 
     def "normalizes null-returning closure to null"() {
@@ -229,7 +231,7 @@ The following types/formats are supported:
     }
 
     private BaseDirFileResolver resolver(File baseDir = tmpDir.testDirectory) {
-        new BaseDirFileResolver(TestFiles.fileSystem(), baseDir, TestFiles.getPatternSetFactory())
+        new BaseDirFileResolver(baseDir)
     }
 
     private File[] getFsRoots() {

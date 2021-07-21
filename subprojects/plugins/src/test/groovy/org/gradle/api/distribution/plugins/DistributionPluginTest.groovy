@@ -17,18 +17,17 @@
 package org.gradle.api.distribution.plugins
 
 import org.gradle.api.DefaultTask
-import org.gradle.api.Project
 import org.gradle.api.distribution.DistributionContainer
+import org.gradle.api.internal.project.ProjectInternal
 import org.gradle.api.tasks.Sync
 import org.gradle.api.tasks.TaskDependencyMatchers
-import org.gradle.api.tasks.TaskProvider
 import org.gradle.api.tasks.bundling.Tar
 import org.gradle.api.tasks.bundling.Zip
 import org.gradle.test.fixtures.AbstractProjectBuilderSpec
 import org.gradle.util.TestUtil
 
 class DistributionPluginTest extends AbstractProjectBuilderSpec {
-    private final Project project = TestUtil.builder(temporaryFolder).withName("test-project").build()
+    ProjectInternal project = TestUtil.builder(temporaryFolder).withName("test-project").build()
 
     def "adds convention object and a main distribution"() {
         when:
@@ -38,7 +37,7 @@ class DistributionPluginTest extends AbstractProjectBuilderSpec {
         def distributions = project.extensions.getByType(DistributionContainer.class)
         def dist = distributions.main
         dist.name == 'main'
-        dist.baseName == 'test-project'
+        dist.distributionBaseName.get() == 'test-project'
     }
 
     def "provides default values for additional distributions"() {
@@ -49,7 +48,7 @@ class DistributionPluginTest extends AbstractProjectBuilderSpec {
         def distributions = project.extensions.getByType(DistributionContainer.class)
         def dist = distributions.create('custom')
         dist.name == 'custom'
-        dist.baseName == 'test-project-custom'
+        dist.distributionBaseName.get() == 'test-project-custom'
     }
 
     def "adds distZip task for main distribution"() {
@@ -59,7 +58,7 @@ class DistributionPluginTest extends AbstractProjectBuilderSpec {
         then:
         def task = project.tasks.distZip
         task instanceof Zip
-        task.archivePath == project.file("build/distributions/test-project.zip")
+        task.archiveFile.get().asFile == project.file("build/distributions/test-project.zip")
     }
 
     def "adds distZip task for custom distribution"() {
@@ -70,7 +69,7 @@ class DistributionPluginTest extends AbstractProjectBuilderSpec {
         then:
         def task = project.tasks.customDistZip
         task instanceof Zip
-        task.archivePath == project.file("build/distributions/test-project-custom.zip")
+        task.archiveFile.get().asFile == project.file("build/distributions/test-project-custom.zip")
     }
 
     def "adds distTar task for main distribution"() {
@@ -80,7 +79,7 @@ class DistributionPluginTest extends AbstractProjectBuilderSpec {
         then:
         def task = project.tasks.distTar
         task instanceof Tar
-        task.archivePath == project.file("build/distributions/test-project.tar")
+        task.archiveFile.get().asFile == project.file("build/distributions/test-project.tar")
     }
 
     def "adds distTar task for custom distribution"() {
@@ -91,7 +90,7 @@ class DistributionPluginTest extends AbstractProjectBuilderSpec {
         then:
         def task = project.tasks.customDistTar
         task instanceof Tar
-        task.archivePath == project.file("build/distributions/test-project-custom.tar")
+        task.archiveFile.get().asFile == project.file("build/distributions/test-project-custom.tar")
     }
 
     def "adds assembleDist task for custom distribution"() {
@@ -112,9 +111,9 @@ class DistributionPluginTest extends AbstractProjectBuilderSpec {
 
         then:
         def zip = project.tasks.distZip
-        zip.archivePath == project.file("build/distributions/test-project-1.2.zip")
+        zip.archiveFile.get().asFile == project.file("build/distributions/test-project-1.2.zip")
         def tar = project.tasks.distTar
-        tar.archivePath == project.file("build/distributions/test-project-1.2.tar")
+        tar.archiveFile.get().asFile == project.file("build/distributions/test-project-1.2.tar")
     }
 
     def "adds installDist task for main distribution"() {
@@ -144,16 +143,16 @@ class DistributionPluginTest extends AbstractProjectBuilderSpec {
 
         then:
         def task = project.assembleDist
-        task.dependsOn.findAll {it instanceof TaskProvider}.collect{ it.name }.containsAll(["distTar", "distZip"])
+        task.dependsOn.containsAll(["distTar", "distZip"])
     }
 
-    public void "distribution name is configurable"() {
+    def "distribution name is configurable"() {
         when:
         project.pluginManager.apply(DistributionPlugin)
-        project.distributions.main.baseName = "SuperApp";
+        project.distributions.main.distributionBaseName = "SuperApp";
 
         then:
         def distZipTask = project.tasks.distZip
-        distZipTask.archiveName == "SuperApp.zip"
+        distZipTask.archiveFileName.get() == "SuperApp.zip"
     }
 }

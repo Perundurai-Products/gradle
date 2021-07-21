@@ -16,6 +16,7 @@
 
 package org.gradle.nativeplatform.test.googletest
 
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.internal.os.OperatingSystem
 import org.gradle.nativeplatform.fixtures.AbstractInstalledToolChainIntegrationSpec
 import org.gradle.nativeplatform.fixtures.RequiresInstalledToolChain
@@ -23,13 +24,13 @@ import org.gradle.nativeplatform.fixtures.ToolChainRequirement
 import org.gradle.nativeplatform.fixtures.app.CppHelloWorldApp
 import org.gradle.util.Requires
 import org.gradle.util.TestPrecondition
-import org.gradle.util.TextUtil
+import org.gradle.util.internal.TextUtil
 
 @Requires(TestPrecondition.CAN_INSTALL_EXECUTABLE)
 @RequiresInstalledToolChain(ToolChainRequirement.SUPPORTS_32)
 class GoogleTestDependentComponentsIntegrationSpec extends AbstractInstalledToolChainIntegrationSpec {
 
-    def prebuiltDir = buildContext.getSamplesDir().file("native-binaries/google-test/libs")
+    def prebuiltDir = buildContext.getSamplesDir().file("native-binaries/google-test/groovy/libs")
     def prebuiltPath = TextUtil.normaliseFileSeparators(prebuiltDir.path)
     def app = new CppHelloWorldApp()
 
@@ -90,7 +91,7 @@ class GoogleTestDependentComponentsIntegrationSpec extends AbstractInstalledTool
                             cppCompiler.args '-pthread'
                             linker.args '-pthread'
                         }
-                        
+
                         if ((toolChain instanceof Gcc || toolChain instanceof Clang) && ${!toolChain.displayName.startsWith("gcc cygwin")}) {
                             // Use C++03 with the old ABIs, as this is what the googletest binaries were built with
                             // Later, Gradle's dependency management will understand ABI
@@ -112,6 +113,7 @@ class GoogleTestDependentComponentsIntegrationSpec extends AbstractInstalledTool
         app.googleTestTests.writeSources(file("src/helloTest"))
     }
 
+    @ToBeFixedForConfigurationCache
     def "buildDependentsHello assemble and check all hello binaries"() {
         given:
         useConventionalSourceLocations()
@@ -124,6 +126,7 @@ class GoogleTestDependentComponentsIntegrationSpec extends AbstractInstalledTool
         executed ':helloSharedLibrary', ':helloStaticLibrary', ':helloTestGoogleTestExe', ':runHelloTestGoogleTestExe'
     }
 
+    @ToBeFixedForConfigurationCache
     def "buildDependentsHelloSharedLibrary assemble and check hello shared library"() {
         given:
         useConventionalSourceLocations()
@@ -137,6 +140,7 @@ class GoogleTestDependentComponentsIntegrationSpec extends AbstractInstalledTool
         notExecuted ':helloTestGoogleTestExe', ':runHelloTestGoogleTestExe'
     }
 
+    @ToBeFixedForConfigurationCache
     def "buildDependentsHelloStaticLibrary assemble and check hello static library"() {
         given:
         useConventionalSourceLocations()
@@ -149,6 +153,7 @@ class GoogleTestDependentComponentsIntegrationSpec extends AbstractInstalledTool
         executed ':helloStaticLibrary', ':helloTestGoogleTestExe', ':runHelloTestGoogleTestExe'
     }
 
+    @ToBeFixedForConfigurationCache
     def "buildDependentsHelloTestCUnitExe assemble and run test suite"() {
         given:
         useConventionalSourceLocations()

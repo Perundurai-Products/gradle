@@ -21,14 +21,14 @@ import net.rubygrapefruit.platform.WindowsRegistry
 import org.gradle.internal.logging.text.DiagnosticsVisitor
 import org.gradle.internal.logging.text.TreeFormatter
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
-import org.gradle.util.VersionNumber
+import org.gradle.util.internal.VersionNumber
 import org.junit.Rule
 import spock.lang.Specification
 
 import static org.gradle.nativeplatform.toolchain.internal.msvcpp.AbstractWindowsKitComponentLocator.PLATFORMS
 
 class DefaultUcrtLocatorTest extends Specification {
-    @Rule TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
+    @Rule TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider(getClass())
     final WindowsRegistry windowsRegistry = Stub(WindowsRegistry)
     final WindowsComponentLocator ucrtLocator = new DefaultUcrtLocator(windowsRegistry)
 

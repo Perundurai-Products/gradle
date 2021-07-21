@@ -30,23 +30,16 @@ public class AbstractProgressLoggingHandler {
         this.progressLoggerFactory = progressLoggerFactory;
     }
 
-    protected ResourceOperation createResourceOperation(URI resource, ResourceOperation.Type operationType, Class loggingClazz, long contentLength) {
+    protected ResourceOperation createResourceOperation(URI resource, ResourceOperation.Type operationType, Class<?> loggingClazz, long contentLength) {
         ProgressLogger progressLogger = progressLoggerFactory.newOperation(loggingClazz != null ? loggingClazz : getClass());
         String description = createDescription(operationType, resource);
         progressLogger.setDescription(description);
         progressLogger.started();
-        String resourceName = createShortDescription(resource);
-        return new ResourceOperation(progressLogger, operationType, contentLength, resourceName);
+        return new ResourceOperation(progressLogger, operationType, contentLength);
     }
 
     private String createDescription(ResourceOperation.Type operationType, URI resource) {
         return operationType.getCapitalized() + " " + resource.toString();
-    }
-
-    private String createShortDescription(URI resource) {
-        String rawUri = resource.toString();
-        int lastSlash = rawUri.lastIndexOf('/');
-        return lastSlash == -1 ? rawUri : rawUri.substring(lastSlash + 1);
     }
 
     protected static class ProgressLoggingInputStream extends InputStream {
@@ -72,6 +65,7 @@ public class AbstractProgressLoggingHandler {
             return result;
         }
 
+        @Override
         public int read(byte[] b, int off, int len) throws IOException {
             int read = inputStream.read(b, off, len);
             if (read > 0) {

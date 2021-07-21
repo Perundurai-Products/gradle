@@ -18,12 +18,19 @@ package org.gradle.integtests.fixtures.executer;
 
 import org.hamcrest.Matcher;
 
+import java.util.function.Consumer;
+
 public class ErrorsOnStdoutScrapingExecutionFailure extends ErrorsOnStdoutScrapingExecutionResult implements ExecutionFailure {
     private final ExecutionFailure delegate;
 
     public ErrorsOnStdoutScrapingExecutionFailure(ExecutionFailure delegate) {
         super(delegate);
         this.delegate = delegate;
+    }
+
+    @Override
+    public ExecutionFailure getIgnoreBuildSrc() {
+        return new ErrorsOnStdoutScrapingExecutionFailure(delegate.getIgnoreBuildSrc());
     }
 
     @Override
@@ -51,7 +58,7 @@ public class ErrorsOnStdoutScrapingExecutionFailure extends ErrorsOnStdoutScrapi
     }
 
     @Override
-    public ExecutionFailure assertThatCause(Matcher<String> matcher) {
+    public ExecutionFailure assertThatCause(Matcher<? super String> matcher) {
         delegate.assertThatCause(matcher);
         return this;
     }
@@ -63,8 +70,14 @@ public class ErrorsOnStdoutScrapingExecutionFailure extends ErrorsOnStdoutScrapi
     }
 
     @Override
-    public ExecutionFailure assertThatDescription(Matcher<String> matcher) {
+    public ExecutionFailure assertThatDescription(Matcher<? super String> matcher) {
         delegate.assertThatDescription(matcher);
+        return this;
+    }
+
+    @Override
+    public ExecutionFailure assertHasFailure(String description, Consumer<? super Failure> action) {
+        delegate.assertHasFailure(description, action);
         return this;
     }
 

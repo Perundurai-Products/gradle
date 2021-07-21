@@ -23,12 +23,13 @@ import org.gradle.api.Buildable;
 import org.gradle.api.InvalidUserDataException;
 import org.gradle.api.Task;
 import org.gradle.api.internal.provider.ProviderInternal;
+import org.gradle.api.internal.provider.ValueSupplier;
 import org.gradle.api.tasks.TaskDependency;
-import org.gradle.api.tasks.TaskProvider;
+import org.gradle.internal.Cast;
 import org.gradle.internal.typeconversion.UnsupportedNotationException;
-import org.gradle.util.DeprecationLogger;
 
 import javax.annotation.Nullable;
+import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -42,7 +43,7 @@ import java.util.Set;
 import java.util.concurrent.Callable;
 
 import static com.google.common.collect.Iterables.toArray;
-import static org.gradle.util.GUtil.uncheckedCall;
+import static org.gradle.util.internal.GUtil.uncheckedCall;
 
 /**
  * A task dependency which can have both mutable and immutable dependency values.
@@ -87,18 +88,18 @@ public class DefaultTaskDependency extends AbstractTaskDependency {
                 context.add(dependency);
             } else if (dependency instanceof TaskDependency) {
                 context.add(dependency);
+            } else if (dependency instanceof ProviderInternal) {
+                // When a Provider is used as a task dependency (rather than as a task input), need to unpack the value
+                ProviderInternal<?> provider = (ProviderInternal<?>) dependency;
+                ValueSupplier.ValueProducer producer = provider.getProducer();
+                if (producer.isKnown()) {
+                    producer.visitProducerTasks(context);
+                } else {
+                    // The provider does not know how to produce the value, so use the value instead
+                    queue.addFirst(provider.get());
+                }
             } else if (dependency instanceof TaskDependencyContainer) {
-                ((TaskDependencyContainer) dependency).visitDependencies(new AbstractTaskDependencyResolveContext() {
-                    @Override
-                    public void add(Object dependency) {
-                        queue.addFirst(dependency);
-                    }
-
-                    @Override
-                    public Task getTask() {
-                        return context.getTask();
-                    }
-                });
+                ((TaskDependencyContainer) dependency).visitDependencies(context);
             } else if (dependency instanceof Closure) {
                 Closure closure = (Closure) dependency;
                 Object closureResult = closure.call(context.getTask());
@@ -118,18 +119,19 @@ public class DefaultTaskDependency extends AbstractTaskDependency {
                         queue.addFirst(item);
                     }
                 }
-            } else if (dependency instanceof Iterable) {
-                Iterable<?> iterable = (Iterable) dependency;
+            } else if (dependency instanceof Iterable && !(dependency instanceof Path)) {
+                // Path is Iterable, but we don't want to unpack it
+                Iterable<?> iterable = Cast.uncheckedNonnullCast(dependency);
                 addAllFirst(queue, toArray(iterable, Object.class));
             } else if (dependency instanceof Map) {
-                Map<?, ?> map = (Map) dependency;
+                Map<?, ?> map = Cast.uncheckedNonnullCast(dependency);
                 addAllFirst(queue, map.values().toArray());
             } else if (dependency instanceof Object[]) {
                 Object[] array = (Object[]) dependency;
                 addAllFirst(queue, array);
             } else if (dependency instanceof Callable) {
-                Callable callable = (Callable) dependency;
-                Object callableResult = uncheckedCall(callable);
+                Callable<?> callable = Cast.uncheckedNonnullCast(dependency);
+                Object callableResult = uncheckedCall(Cast.uncheckedNonnullCast(callable));
                 if (callableResult != null) {
                     queue.addFirst(callableResult);
                 }
@@ -139,9 +141,9 @@ public class DefaultTaskDependency extends AbstractTaskDependency {
                 List<String> formats = new ArrayList<String>();
                 if (resolver != null) {
                     formats.add("A String or CharSequence task name or path");
-                    formats.add("A TaskReference instance");
                 }
                 formats.add("A Task instance");
+                formats.add("A TaskReference instance");
                 formats.add("A Buildable instance");
                 formats.add("A TaskDependency instance");
                 formats.add("A Provider that represents a task output");
@@ -190,6 +192,7 @@ public class DefaultTaskDependency extends AbstractTaskDependency {
 
     private static class TaskDependencySet implements Set<Object> {
         private final Set<Object> delegate = Sets.newHashSet();
+        private final static String REMOVE_ERROR = "Removing a task dependency from a task instance is not supported.";
 
         @Override
         public int size() {
@@ -228,27 +231,7 @@ public class DefaultTaskDependency extends AbstractTaskDependency {
 
         @Override
         public boolean remove(Object o) {
-            DeprecationLogger.nagUserOfDeprecatedBehaviour("Do not remove a task dependency from a Task instance.");
-            if (delegate.remove(o)) {
-                return true;
-            }
-
-            for (Iterator<Object> it = delegate.iterator(); it.hasNext();) {
-                Object obj = it.next();
-                if (isTaskProvider(obj) && o instanceof Task && isTaskProviderOfTask((TaskProvider) obj, (Task) o)) {
-                    it.remove();
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        private static boolean isTaskProvider(Object obj) {
-            return obj instanceof TaskProvider;
-        }
-
-        private static boolean isTaskProviderOfTask(TaskProvider provider, Task task) {
-            return provider instanceof ProviderInternal && ((ProviderInternal) provider).getType().isInstance(task) && provider.getName().equals(task.getName());
+            throw new UnsupportedOperationException(REMOVE_ERROR);
         }
 
         @Override
@@ -263,12 +246,12 @@ public class DefaultTaskDependency extends AbstractTaskDependency {
 
         @Override
         public boolean retainAll(Collection<?> c) {
-            return delegate.retainAll(c);
+            throw new UnsupportedOperationException(REMOVE_ERROR);
         }
 
         @Override
         public boolean removeAll(Collection<?> c) {
-            return delegate.removeAll(c);
+            throw new UnsupportedOperationException(REMOVE_ERROR);
         }
 
         @Override

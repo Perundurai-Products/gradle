@@ -15,7 +15,7 @@
  */
 
 /**
- * Types used for legacy publishing to both Ivy and Maven, using `UploadArchives` task.
+ * Types used for legacy publishing to Ivy, using `Upload` task.
  * We first convert a `Configuration` into these types, and then use the
  * {@link org.gradle.internal.component.external.ivypublish.DefaultIvyModuleDescriptorWriter}
  * to generate the Ivy module descriptor.
@@ -25,5 +25,7 @@
  * Note that this is all slated for replacement by the `ivy-publish` and `maven-publish` plugins.
  * Many of the types in this package are misnamed, since they apply equally to both Maven and Ivy legacy publishing.
  */
+@NonNullApi
 package org.gradle.internal.component.external.ivypublish;
 
+import org.gradle.api.NonNullApi;

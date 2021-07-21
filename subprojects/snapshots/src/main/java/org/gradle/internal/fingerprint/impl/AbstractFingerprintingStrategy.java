@@ -17,18 +17,37 @@
 package org.gradle.internal.fingerprint.impl;
 
 import org.gradle.internal.fingerprint.CurrentFileCollectionFingerprint;
-import org.gradle.internal.fingerprint.FingerprintCompareStrategy;
+import org.gradle.internal.fingerprint.DirectorySensitivity;
 import org.gradle.internal.fingerprint.FingerprintingStrategy;
+import org.gradle.internal.fingerprint.hashing.ConfigurableNormalizer;
+import org.gradle.internal.fingerprint.hashing.FileSystemLocationSnapshotHasher;
+import org.gradle.internal.hash.HashCode;
+import org.gradle.internal.hash.Hasher;
+import org.gradle.internal.hash.Hashing;
+import org.gradle.internal.snapshot.FileSystemLocationSnapshot;
+
+import javax.annotation.Nullable;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 
 public abstract class AbstractFingerprintingStrategy implements FingerprintingStrategy {
     private final String identifier;
-    private final FingerprintCompareStrategy compareStrategy;
     private final CurrentFileCollectionFingerprint emptyFingerprint;
+    private final DirectorySensitivity directorySensitivity;
+    private final HashCode configurationHash;
 
-    public AbstractFingerprintingStrategy(String identifier, FingerprintCompareStrategy compareStrategy) {
+    public AbstractFingerprintingStrategy(
+        String identifier,
+        DirectorySensitivity directorySensitivity,
+        ConfigurableNormalizer contentNormalizer
+    ) {
         this.identifier = identifier;
         this.emptyFingerprint = new EmptyCurrentFileCollectionFingerprint(identifier);
-        this.compareStrategy = compareStrategy;
+        this.directorySensitivity = directorySensitivity;
+        Hasher hasher = Hashing.newHasher();
+        hasher.putString(getClass().getName());
+        contentNormalizer.appendConfigurationToHasher(hasher);
+        this.configurationHash = hasher.hash();
     }
 
     @Override
@@ -41,8 +60,27 @@ public abstract class AbstractFingerprintingStrategy implements FingerprintingSt
         return emptyFingerprint;
     }
 
+    @Nullable
+    protected HashCode getNormalizedContentHash(FileSystemLocationSnapshot snapshot, FileSystemLocationSnapshotHasher normalizedContentHasher) {
+        try {
+            return normalizedContentHasher.hash(snapshot);
+        } catch (IOException e) {
+            throw new UncheckedIOException(failedToNormalize(snapshot), e);
+        } catch (UncheckedIOException e) {
+            throw new UncheckedIOException(failedToNormalize(snapshot), e.getCause());
+        }
+    }
+
+    private static String failedToNormalize(FileSystemLocationSnapshot snapshot) {
+        return String.format("Failed to normalize content of '%s'.", snapshot.getAbsolutePath());
+    }
+
+    public DirectorySensitivity getDirectorySensitivity() {
+        return directorySensitivity;
+    }
+
     @Override
-    public FingerprintCompareStrategy getCompareStrategy() {
-        return compareStrategy;
+    public HashCode getConfigurationHash() {
+        return configurationHash;
     }
 }

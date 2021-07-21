@@ -17,14 +17,17 @@
 package org.gradle.api.tasks.diagnostics
 
 import groovy.transform.CompileStatic
+import org.gradle.api.JavaVersion
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.integtests.fixtures.FeaturePreviewsFixture
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.integtests.fixtures.resolve.ResolveTestFixture
 import org.gradle.integtests.resolve.locking.LockfileFixture
 import spock.lang.Ignore
 import spock.lang.Unroll
 
 class DependencyInsightReportTaskIntegrationTest extends AbstractIntegrationSpec {
+    def jvmVersion = JavaVersion.current().majorVersion
+
     def setup() {
         executer.requireOwnGradleUserHomeDir()
         settingsFile << """
@@ -33,6 +36,7 @@ class DependencyInsightReportTaskIntegrationTest extends AbstractIntegrationSpec
         new ResolveTestFixture(buildFile).addDefaultVariantDerivationStrategy()
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "requires use of configuration flag if Java plugin isn't applied"() {
         given:
         file("build.gradle") << """
@@ -54,6 +58,7 @@ class DependencyInsightReportTaskIntegrationTest extends AbstractIntegrationSpec
         failure.assertHasCause("Dependency insight report cannot be generated because the input configuration was not specified.")
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "indicates that requested dependency cannot be found for default configuration"() {
         given:
         mavenRepo.module("org", "leaf1").publish()
@@ -84,6 +89,7 @@ No dependencies matching given input were found in configuration ':compileClassp
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "indicates that requested dependency cannot be found for custom configuration"() {
         given:
         mavenRepo.module("org", "leaf1").publish()
@@ -114,6 +120,7 @@ No dependencies matching given input were found in configuration ':conf'
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "shows basic single tree with repeated dependency"() {
         given:
         mavenRepo.module("org", "leaf1").publish()
@@ -146,9 +153,10 @@ No dependencies matching given input were found in configuration ':conf'
         outputContains """
 org:leaf2:1.0
    variant "runtime" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-runtime (not requested)
-      org.gradle.component.category = library (not requested)
+      org.gradle.status          = release (not requested)
+      org.gradle.usage           = java-runtime (not requested)
+      org.gradle.libraryelements = jar (not requested)
+      org.gradle.category        = library (not requested)
    ]
 
 org:leaf2:1.0
@@ -159,6 +167,7 @@ org:leaf2:1.0
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "basic dependency insight with conflicting versions"() {
         given:
         mavenRepo.module("org", "leaf1").publish()
@@ -200,12 +209,13 @@ org:leaf2:1.0
 Task :dependencyInsight
 org:leaf2:2.5
    variant "runtime" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-runtime (not requested)
-      org.gradle.component.category = library (not requested)
+      org.gradle.status          = release (not requested)
+      org.gradle.usage           = java-runtime (not requested)
+      org.gradle.libraryelements = jar (not requested)
+      org.gradle.category        = library (not requested)
    ]
    Selection reasons:
-      - By conflict resolution : between versions 1.5, 2.5 and 1.0
+      - By conflict resolution : between versions 2.5, 1.5 and 1.0
 
 org:leaf2:2.5
 \\--- org:toplevel3:1.0
@@ -225,6 +235,7 @@ org:leaf2:1.5 -> 2.5
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "can limit the report to one path to each dependency"() {
         given:
         mavenRepo.with {
@@ -256,9 +267,10 @@ org:leaf2:1.5 -> 2.5
         outputContains """
 org:leaf:1.0
    variant "runtime" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-runtime (not requested)
-      org.gradle.component.category = library (not requested)
+      org.gradle.status          = release (not requested)
+      org.gradle.usage           = java-runtime (not requested)
+      org.gradle.libraryelements = jar (not requested)
+      org.gradle.category        = library (not requested)
    ]
 
 org:leaf:1.0
@@ -278,9 +290,10 @@ org:leaf:1.0
         outputContains """
 org:leaf:1.0
    variant "runtime" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-runtime (not requested)
-      org.gradle.component.category = library (not requested)
+      org.gradle.status          = release (not requested)
+      org.gradle.usage           = java-runtime (not requested)
+      org.gradle.libraryelements = jar (not requested)
+      org.gradle.category        = library (not requested)
    ]
 
 org:leaf:1.0
@@ -290,6 +303,7 @@ org:leaf:1.0
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "displays information about conflicting modules when failOnVersionConflict is used"() {
         given:
         mavenRepo.module("org", "leaf1").publish()
@@ -329,19 +343,18 @@ org:leaf:1.0
         run "dependencyInsight", "--dependency", "leaf2", "--configuration", "conf"
 
         then:
-        outputContains """Dependency resolution failed because of conflicts between the following modules:
-   - org:leaf2:1.5
-   - org:leaf2:2.5
-   - org:leaf2:1.0
+        outputContains """Dependency resolution failed because of conflict(s) on the following module(s):
+   - org:leaf2 between versions 2.5, 1.5 and 1.0
 
 org:leaf2:2.5
    variant "runtime" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-runtime (not requested)
-      org.gradle.component.category = library (not requested)
+      org.gradle.status          = release (not requested)
+      org.gradle.usage           = java-runtime (not requested)
+      org.gradle.libraryelements = jar (not requested)
+      org.gradle.category        = library (not requested)
    ]
    Selection reasons:
-      - By conflict resolution : between versions 1.5, 2.5 and 1.0
+      - By conflict resolution : between versions 2.5, 1.5 and 1.0
 
 org:leaf2:2.5
 \\--- org:toplevel3:1.0
@@ -361,6 +374,7 @@ org:leaf2:1.5 -> 2.5
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "displays information about conflicting modules when failOnVersionConflict is used and afterResolve is used"() {
         given:
         mavenRepo.module("org", "leaf1").publish()
@@ -391,7 +405,7 @@ org:leaf2:1.5 -> 2.5
                     resolutionStrategy.failOnVersionConflict()
                     incoming.afterResolve {
                         // If executed, the below will cause the resolution failure on version conflict to be thrown, breaking dependency insight
-                        it.artifacts.artifacts 
+                        it.artifacts.artifacts
                     }
                 }
             }
@@ -404,19 +418,18 @@ org:leaf2:1.5 -> 2.5
         run "dependencyInsight", "--dependency", "leaf2", "--configuration", "conf"
 
         then:
-        outputContains """Dependency resolution failed because of conflicts between the following modules:
-   - org:leaf2:1.5
-   - org:leaf2:2.5
-   - org:leaf2:1.0
+        outputContains """Dependency resolution failed because of conflict(s) on the following module(s):
+   - org:leaf2 between versions 2.5, 1.5 and 1.0
 
 org:leaf2:2.5
    variant "runtime" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-runtime (not requested)
-      org.gradle.component.category = library (not requested)
+      org.gradle.status          = release (not requested)
+      org.gradle.usage           = java-runtime (not requested)
+      org.gradle.libraryelements = jar (not requested)
+      org.gradle.category        = library (not requested)
    ]
    Selection reasons:
-      - By conflict resolution : between versions 1.5, 2.5 and 1.0
+      - By conflict resolution : between versions 2.5, 1.5 and 1.0
 
 org:leaf2:2.5
 \\--- org:toplevel3:1.0
@@ -436,6 +449,7 @@ org:leaf2:1.5 -> 2.5
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "displays a dependency insight report even if locks are out of date"() {
         def lockfileFixture = new LockfileFixture(testDirectory: testDirectory)
         mavenRepo.module('org', 'foo', '1.0').publish()
@@ -456,7 +470,7 @@ configurations {
     lockedConf
 }
 
-dependencies {    
+dependencies {
     lockedConf 'org:foo:1.+'
 }
 """
@@ -482,6 +496,7 @@ org:foo:1.+ -> 1.1
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "displays a dependency insight report even if locks are out of date because of new constraint"() {
         def lockfileFixture = new LockfileFixture(testDirectory: testDirectory)
         mavenRepo.module('org', 'foo', '1.0').publish()
@@ -502,7 +517,7 @@ configurations {
     lockedConf
 }
 
-dependencies {    
+dependencies {
     constraints {
         lockedConf('org:foo:1.1')
     }
@@ -522,7 +537,7 @@ org:foo:1.0 FAILED
       - By constraint : dependency was locked to version '1.0'
    Failures:
       - Could not resolve org:foo:{strictly 1.0}.
-          - Cannot find a version of 'org:foo' that satisfies the version constraints: 
+          - Cannot find a version of 'org:foo' that satisfies the version constraints:
                Dependency path ':insight-test:unspecified' --> 'org:foo:1.+'
                Constraint path ':insight-test:unspecified' --> 'org:foo:1.1'
                Constraint path ':insight-test:unspecified' --> 'org:foo:{strictly 1.0}' because of the following reason: dependency was locked to version '1.0'
@@ -546,6 +561,7 @@ org:foo:1.+ FAILED
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "shows forced version and substitution equivalent to force"() {
         given:
         mavenRepo.module("org", "leaf", "1.0").publish()
@@ -569,7 +585,7 @@ org:foo:1.+ FAILED
             }
             configurations.forced.resolutionStrategy.force 'org:leaf:1.0'
             configurations.substituted.resolutionStrategy.dependencySubstitution {
-                substitute module('org:leaf') with module('org:leaf:1.0')
+                substitute module('org:leaf') using module('org:leaf:1.0')
             }
             dependencies {
                 conf 'org:foo:1.0', 'org:bar:1.0'
@@ -583,9 +599,10 @@ org:foo:1.+ FAILED
         outputContains """
 org:leaf:1.0 (forced)
    variant "runtime" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-runtime (not requested)
-      org.gradle.component.category = library (not requested)
+      org.gradle.status          = release (not requested)
+      org.gradle.usage           = java-runtime (not requested)
+      org.gradle.libraryelements = jar (not requested)
+      org.gradle.category        = library (not requested)
    ]
 
 org:leaf:1.0
@@ -604,9 +621,10 @@ org:leaf:2.0 -> 1.0
         outputContains """
 org:leaf:1.0 (selected by rule)
    variant "runtime" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-runtime (not requested)
-      org.gradle.component.category = library (not requested)
+      org.gradle.status          = release (not requested)
+      org.gradle.usage           = java-runtime (not requested)
+      org.gradle.libraryelements = jar (not requested)
+      org.gradle.category        = library (not requested)
    ]
 
 org:leaf:1.0
@@ -619,6 +637,7 @@ org:leaf:2.0 -> 1.0
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "shows forced dynamic version"() {
         given:
         mavenRepo.module("org", "leaf", "1").publish()
@@ -641,15 +660,17 @@ org:leaf:2.0 -> 1.0
         """
 
         when:
+        executer.expectDeprecationWarning()
         run "dependencyInsight", "--configuration", "conf", "--dependency", "leaf"
 
         then:
         outputContains """
 org:leaf:2
    variant "runtime" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-runtime (not requested)
-      org.gradle.component.category = library (not requested)
+      org.gradle.status          = release (not requested)
+      org.gradle.usage           = java-runtime (not requested)
+      org.gradle.libraryelements = jar (not requested)
+      org.gradle.category        = library (not requested)
    ]
    Selection reasons:
       - Was requested : didn't match version 3 because testing stuff
@@ -660,6 +681,7 @@ org:leaf:[1,2] -> 2
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "shows multiple outgoing dependencies"() {
         given:
         ivyRepo.module("org", "leaf", "1.0").publish()
@@ -719,6 +741,7 @@ org:leaf:latest.integration -> 1.0
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "shows version selected by multiple rules"() {
         given:
         mavenRepo.module("org", "bar", "2.0").publish()
@@ -733,8 +756,8 @@ org:leaf:latest.integration -> 1.0
                         eachDependency { it.useVersion('1.0') }
                         eachDependency { it.useVersion('2.0'); it.because("RULE 2") }
                         dependencySubstitution {
-                            substitute module('org:foo') because "SUBSTITUTION 1" with module('org:foo:3.0')
-                            substitute module('org:foo') because "SUBSTITUTION 2" with module('org:bar:2.0')
+                            substitute module('org:foo') because "SUBSTITUTION 1" using module('org:foo:3.0')
+                            substitute module('org:foo') because "SUBSTITUTION 2" using module('org:bar:2.0')
                             all {
                                 it.useTarget('org:bar:2.0', "SUBSTITUTION 3")
                             }
@@ -759,9 +782,10 @@ org:leaf:latest.integration -> 1.0
         outputContains """
 org:bar:2.0
    variant "runtime" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-runtime (not requested)
-      org.gradle.component.category = library (not requested)
+      org.gradle.status          = release (not requested)
+      org.gradle.usage           = java-runtime (not requested)
+      org.gradle.libraryelements = jar (not requested)
+      org.gradle.category        = library (not requested)
    ]
    Selection reasons:
       - Forced
@@ -776,6 +800,7 @@ org:foo:1.0 -> org:bar:2.0
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "shows version and reason when chosen by dependency resolve rule"() {
         given:
         mavenRepo.module("org", "foo", "1.0").publish()
@@ -822,9 +847,10 @@ org:foo:1.0 -> org:bar:2.0
         outputContains """
 org.test:bar:2.0
    variant "runtime" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-runtime (not requested)
-      org.gradle.component.category = library (not requested)
+      org.gradle.status          = release (not requested)
+      org.gradle.usage           = java-runtime (not requested)
+      org.gradle.libraryelements = jar (not requested)
+      org.gradle.category        = library (not requested)
    ]
    Selection reasons:
       - Selected by rule : why not?
@@ -834,9 +860,10 @@ org:bar:1.0 -> org.test:bar:2.0
 
 org:baz:1.0 (selected by rule)
    variant "runtime" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-runtime (not requested)
-      org.gradle.component.category = library (not requested)
+      org.gradle.status          = release (not requested)
+      org.gradle.usage           = java-runtime (not requested)
+      org.gradle.libraryelements = jar (not requested)
+      org.gradle.category        = library (not requested)
    ]
 
 org:baz:1.0
@@ -844,9 +871,10 @@ org:baz:1.0
 
 org:foo:2.0
    variant "runtime" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-runtime (not requested)
-      org.gradle.component.category = library (not requested)
+      org.gradle.status          = release (not requested)
+      org.gradle.usage           = java-runtime (not requested)
+      org.gradle.libraryelements = jar (not requested)
+      org.gradle.category        = library (not requested)
    ]
    Selection reasons:
       - Selected by rule : because I am in control
@@ -857,6 +885,7 @@ org:foo:1.0 -> 2.0
     }
 
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "shows version and reason with dependency substitution"() {
         given:
         mavenRepo.module("org", "foo", "1.0").publish()
@@ -870,8 +899,8 @@ org:foo:1.0 -> 2.0
             configurations {
                conf {
                   resolutionStrategy.dependencySubstitution {
-                     substitute module('org:foo') because 'foo superceded by bar' with module('org:bar:1.0')
-                     substitute module('org:baz') with module('org:baz:2.0')
+                     substitute module('org:foo') because 'foo superseded by bar' using module('org:bar:1.0')
+                     substitute module('org:baz') using module('org:baz:2.0')
                   }
                }
             }
@@ -892,9 +921,10 @@ org:foo:1.0 -> 2.0
         outputContains """
 org:baz:2.0 (selected by rule)
    variant "runtime" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-runtime (not requested)
-      org.gradle.component.category = library (not requested)
+      org.gradle.status          = release (not requested)
+      org.gradle.usage           = java-runtime (not requested)
+      org.gradle.libraryelements = jar (not requested)
+      org.gradle.category        = library (not requested)
    ]
 
 org:baz:1.1 -> 2.0
@@ -902,18 +932,20 @@ org:baz:1.1 -> 2.0
 
 org:bar:1.0
    variant "runtime" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-runtime (not requested)
-      org.gradle.component.category = library (not requested)
+      org.gradle.status          = release (not requested)
+      org.gradle.usage           = java-runtime (not requested)
+      org.gradle.libraryelements = jar (not requested)
+      org.gradle.category        = library (not requested)
    ]
    Selection reasons:
-      - Selected by rule : foo superceded by bar
+      - Selected by rule : foo superseded by bar
 
 org:foo:1.0 -> org:bar:1.0
 \\--- conf
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "shows substituted modules"() {
         given:
         mavenRepo.module("org", "new-leaf", "77").publish()
@@ -928,8 +960,8 @@ org:foo:1.0 -> org:bar:1.0
             configurations {
                 conf {
                     resolutionStrategy.dependencySubstitution {
-                        substitute module('org:leaf') with module('org:new-leaf:77')
-                        substitute module('org:foo') with module('org:foo:2.0')
+                        substitute module('org:leaf') using module('org:new-leaf:77')
+                        substitute module('org:foo') using module('org:foo:2.0')
                     }
                 }
             }
@@ -949,9 +981,10 @@ org:foo:1.0 -> org:bar:1.0
         outputContains """
 org:new-leaf:77 (selected by rule)
    variant "runtime" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-runtime (not requested)
-      org.gradle.component.category = library (not requested)
+      org.gradle.status          = release (not requested)
+      org.gradle.usage           = java-runtime (not requested)
+      org.gradle.libraryelements = jar (not requested)
+      org.gradle.category        = library (not requested)
    ]
 
 org:leaf:1.0 -> org:new-leaf:77
@@ -964,6 +997,7 @@ org:leaf:2.0 -> org:new-leaf:77
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "shows substituted modules with a custom description"() {
         given:
         mavenRepo.module("org", "foo", "1.0").publish()
@@ -978,8 +1012,8 @@ org:leaf:2.0 -> org:new-leaf:77
             configurations {
                 conf {
                     resolutionStrategy.dependencySubstitution {
-                        substitute module('org:foo:1.0') because('I want to') with module('org:foo:2.0')
-                        substitute module('org:bar:1.0') because('I am not sure I want to explain') with module('org:bar:2.0')
+                        substitute module('org:foo:1.0') because('I want to') using module('org:foo:2.0')
+                        substitute module('org:bar:1.0') because('I am not sure I want to explain') using module('org:bar:2.0')
                     }
                 }
             }
@@ -998,9 +1032,10 @@ org:leaf:2.0 -> org:new-leaf:77
         then:
         outputContains """org:bar:2.0
    variant "runtime" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-runtime (not requested)
-      org.gradle.component.category = library (not requested)
+      org.gradle.status          = release (not requested)
+      org.gradle.usage           = java-runtime (not requested)
+      org.gradle.libraryelements = jar (not requested)
+      org.gradle.category        = library (not requested)
    ]
    Selection reasons:
       - Selected by rule : I am not sure I want to explain
@@ -1010,9 +1045,10 @@ org:bar:1.0 -> 2.0
 
 org:foo:2.0
    variant "runtime" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-runtime (not requested)
-      org.gradle.component.category = library (not requested)
+      org.gradle.status          = release (not requested)
+      org.gradle.usage           = java-runtime (not requested)
+      org.gradle.libraryelements = jar (not requested)
+      org.gradle.category        = library (not requested)
    ]
    Selection reasons:
       - Selected by rule : I want to
@@ -1022,6 +1058,7 @@ org:foo:1.0 -> 2.0
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "shows version resolved from dynamic selectors"() {
         given:
         ivyRepo.module("org", "leaf", "1.6").publish()
@@ -1071,6 +1108,7 @@ org:leaf:latest.integration -> 1.6
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "forced version matches the conflict resolution"() {
         given:
         mavenRepo.module("org", "leaf", "1.0").publish()
@@ -1103,9 +1141,10 @@ org:leaf:latest.integration -> 1.6
         outputContains """
 org:leaf:2.0 (forced)
    variant "runtime" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-runtime (not requested)
-      org.gradle.component.category = library (not requested)
+      org.gradle.status          = release (not requested)
+      org.gradle.usage           = java-runtime (not requested)
+      org.gradle.libraryelements = jar (not requested)
+      org.gradle.category        = library (not requested)
    ]
 
 org:leaf:2.0
@@ -1118,6 +1157,7 @@ org:leaf:1.0 -> 2.0
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "forced version does not match anything in the graph"() {
         given:
         mavenRepo.module("org", "leaf", "1.0").publish()
@@ -1151,9 +1191,10 @@ org:leaf:1.0 -> 2.0
         outputContains """
 org:leaf:1.5 (forced)
    variant "runtime" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-runtime (not requested)
-      org.gradle.component.category = library (not requested)
+      org.gradle.status          = release (not requested)
+      org.gradle.usage           = java-runtime (not requested)
+      org.gradle.libraryelements = jar (not requested)
+      org.gradle.category        = library (not requested)
    ]
 
 org:leaf:1.0 -> 1.5
@@ -1166,6 +1207,7 @@ org:leaf:2.0 -> 1.5
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "forced version at dependency level"() {
         given:
         mavenRepo.module("org", "leaf", "1.0").publish()
@@ -1194,15 +1236,17 @@ org:leaf:2.0 -> 1.5
         """
 
         when:
+        executer.expectDeprecationWarning()
         run "insight"
 
         then:
         outputContains """
 org:leaf:1.0 (forced)
    variant "runtime" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-runtime (not requested)
-      org.gradle.component.category = library (not requested)
+      org.gradle.status          = release (not requested)
+      org.gradle.usage           = java-runtime (not requested)
+      org.gradle.libraryelements = jar (not requested)
+      org.gradle.category        = library (not requested)
    ]
 
 org:leaf:1.0
@@ -1216,6 +1260,7 @@ org:leaf:2.0 -> 1.0
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "forced version combined with constraint"() {
         given:
         mavenRepo.module("org", "leaf", "2.0").publish()
@@ -1248,9 +1293,10 @@ org:leaf:2.0 -> 1.0
         outputContains """
 org:leaf:2.0
    variant "runtime" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-runtime (not requested)
-      org.gradle.component.category = library (not requested)
+      org.gradle.status          = release (not requested)
+      org.gradle.usage           = java-runtime (not requested)
+      org.gradle.libraryelements = jar (not requested)
+      org.gradle.category        = library (not requested)
    ]
    Selection reasons:
       - Forced
@@ -1265,6 +1311,7 @@ org:leaf:1.4 -> 2.0
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "shows decent failure when inputs missing"() {
         given:
         file("build.gradle") << """
@@ -1280,6 +1327,7 @@ org:leaf:1.4 -> 2.0
         failure.assertHasCause("Dependency insight report cannot be generated because the input configuration was not specified.")
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "informs that there are no dependencies"() {
         given:
         file("build.gradle") << """
@@ -1299,6 +1347,7 @@ org:leaf:1.4 -> 2.0
         outputContains("No dependencies matching given input were found")
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "informs that nothing matches the input dependency"() {
         given:
         mavenRepo.module("org", "top").publish()
@@ -1326,6 +1375,7 @@ org:leaf:1.4 -> 2.0
         outputContains("No dependencies matching given input were found")
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "marks modules that can't be resolved as 'FAILED'"() {
         given:
         mavenRepo.module("org", "top").dependsOnModules("middle").publish()
@@ -1357,6 +1407,7 @@ org:middle:1.0 FAILED
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "marks modules that can't be resolved after forcing a different version as 'FAILED'"() {
         given:
         mavenRepo.module("org", "top").dependsOn("org", "middle", "1.0").publish()
@@ -1391,7 +1442,7 @@ org:middle:1.0 FAILED
       - Could not find org:middle:2.0.
         Searched in the following locations:
           - ${mavenRepoURL}/org/middle/2.0/middle-2.0.pom
-          - ${mavenRepoURL}/org/middle/2.0/middle-2.0.jar
+        If the artifact you are trying to retrieve can be found in the repository but without metadata in 'Maven POM' format, you need to adjust the 'metadataSources { ... }' of the repository declaration.
 
 org:middle:1.0 -> 2.0 FAILED
 \\--- org:top:1.0
@@ -1399,6 +1450,7 @@ org:middle:1.0 -> 2.0 FAILED
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "marks modules that can't be resolved after conflict resolution as 'FAILED'"() {
         given:
         mavenRepo.module("org", "top").dependsOn("org", "middle", "1.0").publish()
@@ -1435,6 +1487,7 @@ org:middle:1.0 -> 2.0 FAILED
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "marks modules that can't be resolved after substitution as 'FAILED'"() {
         given:
         mavenRepo.module("org", "top").dependsOn("org", "middle", "1.0").publish()
@@ -1447,7 +1500,7 @@ org:middle:1.0 -> 2.0 FAILED
             configurations {
                 conf {
                     resolutionStrategy.dependencySubstitution {
-                        substitute module("org:middle") with module("org:middle:2.0+")
+                        substitute module("org:middle") using module("org:middle:2.0+")
                     }
                 }
             }
@@ -1525,6 +1578,7 @@ org:leaf:[1.5,1.9] -> 1.5
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "shows multiple failed outgoing dependencies"() {
         given:
         ivyRepo.module("org", "top", "1.0")
@@ -1559,7 +1613,7 @@ org:leaf:1.0 FAILED
       - Could not find org:leaf:1.0.
         Searched in the following locations:
           - ${ivyRepoURL}/org/leaf/1.0/ivy-1.0.xml
-          - ${ivyRepoURL}/org/leaf/1.0/leaf-1.0.jar
+        If the artifact you are trying to retrieve can be found in the repository but without metadata in 'ivy.xml' format, you need to adjust the 'metadataSources { ... }' of the repository declaration.
 
 org:leaf:1.0 FAILED
 \\--- org:top:1.0
@@ -1585,6 +1639,7 @@ org:leaf:[1.5,2.0] FAILED
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     void "marks project dependencies that cannot be resolved as 'FAILED'"() {
         given:
         file("settings.gradle") << "include 'A', 'B', 'C'; rootProject.name='root'"
@@ -1595,7 +1650,7 @@ org:leaf:[1.5,2.0] FAILED
               conf project(':A')
               conf project(':B')
             }
-            
+
             project(':B') {
                 configurations.create('default')
                 dependencies.add("default", project(':C'))
@@ -1633,6 +1688,7 @@ project :C FAILED
 
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "deals with dependency cycles"() {
         given:
         mavenRepo.module("org", "leaf1").dependsOnModules("leaf2").publish()
@@ -1661,9 +1717,10 @@ project :C FAILED
         outputContains """
 org:leaf2:1.0
    variant "runtime" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-runtime (not requested)
-      org.gradle.component.category = library (not requested)
+      org.gradle.status          = release (not requested)
+      org.gradle.usage           = java-runtime (not requested)
+      org.gradle.libraryelements = jar (not requested)
+      org.gradle.category        = library (not requested)
    ]
 
 org:leaf2:1.0
@@ -1673,28 +1730,31 @@ org:leaf2:1.0
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "deals with dependency cycle to root"() {
         given:
         file("settings.gradle") << "include 'impl'; rootProject.name='root'"
 
         file("build.gradle") << """
             allprojects {
-                apply plugin: 'java'
+                apply plugin: 'java-library'
                 group = 'org.foo'
                 version = '1.0'
             }
-            archivesBaseName = 'root'
+            base {
+                archivesBaseName = 'root'
+            }
             dependencies {
-                compile project(":impl")
+                implementation project(":impl")
             }
             project(":impl") {
                 dependencies {
-                    compile project(":")
+                    implementation project(":")
                 }
             }
             task insight(type: DependencyInsightReportTask) {
                 setDependencySpec { true }
-                configuration = configurations.compile
+                configuration = configurations.runtimeClasspath
             }
         """
 
@@ -1704,7 +1764,24 @@ org:leaf2:1.0
         then:
         outputContains """
 project :
-   variant "compile+runtimeElements"
+   variant "runtimeClasspath" [
+      org.gradle.category            = library
+      org.gradle.usage               = java-runtime
+      org.gradle.libraryelements     = jar
+      org.gradle.dependency.bundling = external
+      org.gradle.jvm.environment     = standard-jvm
+      org.gradle.jvm.version         = $jvmVersion
+   ]
+   variant "runtimeElements" [
+      org.gradle.category            = library
+      org.gradle.dependency.bundling = external
+      org.gradle.usage               = java-runtime
+      org.gradle.libraryelements     = jar
+      org.gradle.jvm.version         = $jvmVersion
+
+      Requested attributes not found in the selected variant:
+         org.gradle.jvm.environment     = standard-jvm
+   ]
 
 project :
 \\--- project :impl
@@ -1712,6 +1789,7 @@ project :
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "selects a module component dependency with a given name"() {
         given:
         mavenRepo.module("org", "leaf1").dependsOnModules("leaf2").publish()
@@ -1722,7 +1800,7 @@ project :
 
         file("build.gradle") << """
             allprojects {
-                apply plugin: 'java'
+                apply plugin: 'java-library'
                 group = 'org.foo'
                 version = '1.0-SNAPSHOT'
                 repositories {
@@ -1730,16 +1808,16 @@ project :
                 }
             }
             dependencies {
-                compile project(':impl')
+                implementation project(':impl')
             }
             project(':impl') {
                 dependencies {
-                    compile 'org:leaf1:1.0'
+                    implementation 'org:leaf1:1.0'
                 }
             }
             task insight(type: DependencyInsightReportTask) {
                 setDependencySpec { it.requested instanceof ModuleComponentSelector && it.requested.module == 'leaf2' }
-                configuration = configurations.compile
+                configuration = configurations.runtimeClasspath
             }
         """
 
@@ -1750,18 +1828,25 @@ project :
         outputContains """
 org:leaf2:1.0
    variant "runtime" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-runtime (not requested)
-      org.gradle.component.category = library (not requested)
+      org.gradle.status              = release (not requested)
+      org.gradle.usage               = java-runtime
+      org.gradle.libraryelements     = jar
+      org.gradle.category            = library
+
+      Requested attributes not found in the selected variant:
+         org.gradle.dependency.bundling = external
+         org.gradle.jvm.environment     = standard-jvm
+         org.gradle.jvm.version         = $jvmVersion
    ]
 
 org:leaf2:1.0
 \\--- org:leaf1:1.0
      \\--- project :impl
-          \\--- compile
+          \\--- runtimeClasspath
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "selects a project component dependency with a given project path"() {
         given:
         mavenRepo.module("org", "leaf1").dependsOnModules("leaf2").publish()
@@ -1772,7 +1857,7 @@ org:leaf2:1.0
 
         file("build.gradle") << """
             allprojects {
-                apply plugin: 'java'
+                apply plugin: 'java-library'
                 group = 'org.foo'
                 version = '1.0-SNAPSHOT'
                 repositories {
@@ -1780,16 +1865,16 @@ org:leaf2:1.0
                 }
             }
             dependencies {
-                compile project(':impl')
+                implementation project(':impl')
             }
             project(':impl') {
                 dependencies {
-                    compile 'org:leaf1:1.0'
+                    implementation 'org:leaf1:1.0'
                 }
             }
             task insight(type: DependencyInsightReportTask) {
                 setDependencySpec { it.requested instanceof ProjectComponentSelector && it.requested.projectPath == ':impl' }
-                configuration = configurations.compile
+                configuration = configurations.compileClasspath
             }
         """
 
@@ -1799,15 +1884,23 @@ org:leaf2:1.0
         then:
         outputContains """
 project :impl
-   variant "runtimeElements" [
-      org.gradle.usage = java-runtime-jars (not requested)
+   variant "apiElements" [
+      org.gradle.category            = library
+      org.gradle.dependency.bundling = external
+      org.gradle.usage               = java-api
+      org.gradle.libraryelements     = jar (compatible with: classes)
+      org.gradle.jvm.version         = $jvmVersion
+
+      Requested attributes not found in the selected variant:
+         org.gradle.jvm.environment     = standard-jvm
    ]
 
 project :impl
-\\--- compile
+\\--- compileClasspath
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "selects a module component dependency with a given name with dependency command line option"() {
         given:
         mavenRepo.module("org", "leaf1").dependsOnModules("leaf2").publish()
@@ -1819,7 +1912,7 @@ project :impl
 
         file("build.gradle") << """
             allprojects {
-                apply plugin: 'java'
+                apply plugin: 'java-library'
                 group = 'org.foo'
                 version = '1.0-SNAPSHOT'
                 repositories {
@@ -1827,17 +1920,17 @@ project :impl
                 }
             }
             dependencies {
-                compile project(':impl')
+                api project(':impl')
             }
             project(':api') {
                 dependencies {
-                    compile 'org:leaf1:1.0'
+                    api 'org:leaf1:1.0'
                 }
             }
             project(':impl') {
                 dependencies {
-                    compile project(':api')
-                    compile 'org:leaf4:1.0'
+                    api project(':api')
+                    api 'org:leaf4:1.0'
                 }
             }
         """
@@ -1849,9 +1942,15 @@ project :impl
         outputContains """
 org:leaf4:1.0
    variant "compile" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-api
-      org.gradle.component.category = library (not requested)
+      org.gradle.status              = release (not requested)
+      org.gradle.usage               = java-api
+      org.gradle.libraryelements     = jar (compatible with: classes)
+      org.gradle.category            = library
+
+      Requested attributes not found in the selected variant:
+         org.gradle.dependency.bundling = external
+         org.gradle.jvm.environment     = standard-jvm
+         org.gradle.jvm.version         = ${JavaVersion.current().majorVersion}
    ]
 
 org:leaf4:1.0
@@ -1860,6 +1959,7 @@ org:leaf4:1.0
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "selects both api and implementation dependencies with dependency command line option"() {
         given:
         mavenRepo.module("org", "leaf1").publish()
@@ -1883,9 +1983,15 @@ org:leaf4:1.0
         outputContains """
 org:leaf1:1.0
    variant "compile" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-api
-      org.gradle.component.category = library (not requested)
+      org.gradle.status              = release (not requested)
+      org.gradle.usage               = java-api
+      org.gradle.libraryelements     = jar (compatible with: classes)
+      org.gradle.category            = library
+
+      Requested attributes not found in the selected variant:
+         org.gradle.dependency.bundling = external
+         org.gradle.jvm.environment     = standard-jvm
+         org.gradle.jvm.version         = ${JavaVersion.current().majorVersion}
    ]
 
 org:leaf1:1.0
@@ -1899,9 +2005,15 @@ org:leaf1:1.0
         outputContains """
 org:leaf2:1.0
    variant "compile" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-api
-      org.gradle.component.category = library (not requested)
+      org.gradle.status              = release (not requested)
+      org.gradle.usage               = java-api
+      org.gradle.libraryelements     = jar (compatible with: classes)
+      org.gradle.category            = library
+
+      Requested attributes not found in the selected variant:
+         org.gradle.dependency.bundling = external
+         org.gradle.jvm.environment     = standard-jvm
+         org.gradle.jvm.version         = ${JavaVersion.current().majorVersion}
    ]
 
 org:leaf2:1.0
@@ -1909,6 +2021,7 @@ org:leaf2:1.0
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "selects a project component dependency with a given name with dependency command line option"() {
         given:
         mavenRepo.module("org", "leaf1").dependsOnModules("leaf2").publish()
@@ -1920,7 +2033,7 @@ org:leaf2:1.0
 
         file("build.gradle") << """
             allprojects {
-                apply plugin: 'java'
+                apply plugin: 'java-library'
                 group = 'org.foo'
                 version = '1.0-SNAPSHOT'
                 repositories {
@@ -1928,23 +2041,23 @@ org:leaf2:1.0
                 }
             }
             dependencies {
-                compile project(':impl')
-                compile project(':some:deeply:nested')
+                api project(':impl')
+                api project(':some:deeply:nested')
             }
             project(':api') {
                 dependencies {
-                    compile 'org:leaf1:1.0'
+                    api 'org:leaf1:1.0'
                 }
             }
             project(':impl') {
                 dependencies {
-                    compile project(':api')
-                    compile 'org:leaf4:1.0'
+                    api project(':api')
+                    api 'org:leaf4:1.0'
                 }
             }
             project(':some:deeply:nested') {
                 dependencies {
-                    compile 'org:leaf3:1.0'
+                    api 'org:leaf3:1.0'
                 }
             }
         """
@@ -1956,7 +2069,14 @@ org:leaf2:1.0
         outputContains """
 project :api
    variant "apiElements" [
-      org.gradle.usage = java-api
+      org.gradle.category            = library
+      org.gradle.dependency.bundling = external
+      org.gradle.usage               = java-api
+      org.gradle.libraryelements     = jar (compatible with: classes)
+      org.gradle.jvm.version         = ${JavaVersion.current().majorVersion}
+
+      Requested attributes not found in the selected variant:
+         org.gradle.jvm.environment     = standard-jvm
    ]
 
 project :api
@@ -1971,7 +2091,14 @@ project :api
         outputContains """
 project :some:deeply:nested
    variant "apiElements" [
-      org.gradle.usage = java-api
+      org.gradle.category            = library
+      org.gradle.dependency.bundling = external
+      org.gradle.usage               = java-api
+      org.gradle.libraryelements     = jar (compatible with: classes)
+      org.gradle.jvm.version         = ${JavaVersion.current().majorVersion}
+
+      Requested attributes not found in the selected variant:
+         org.gradle.jvm.environment     = standard-jvm
    ]
 
 project :some:deeply:nested
@@ -1985,7 +2112,14 @@ project :some:deeply:nested
         outputContains """
 project :some:deeply:nested
    variant "apiElements" [
-      org.gradle.usage = java-api
+      org.gradle.category            = library
+      org.gradle.dependency.bundling = external
+      org.gradle.usage               = java-api
+      org.gradle.libraryelements     = jar (compatible with: classes)
+      org.gradle.jvm.version         = ${JavaVersion.current().majorVersion}
+
+      Requested attributes not found in the selected variant:
+         org.gradle.jvm.environment     = standard-jvm
    ]
 
 project :some:deeply:nested
@@ -1993,6 +2127,7 @@ project :some:deeply:nested
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "renders tree with a mix of project and external dependencies"() {
         given:
         mavenRepo.module("org", "leaf1").dependsOnModules("leaf2").publish()
@@ -2003,7 +2138,7 @@ project :some:deeply:nested
 
         file("build.gradle") << """
             allprojects {
-                apply plugin: 'java'
+                apply plugin: 'java-library'
                 group = 'org.foo'
                 version = '1.0-SNAPSHOT'
                 repositories {
@@ -2011,17 +2146,17 @@ project :some:deeply:nested
                 }
             }
             dependencies {
-                compile project(':impl')
+                api project(':impl')
             }
             project(':api') {
                 dependencies {
-                    compile 'org:leaf2:1.0'
+                    api 'org:leaf2:1.0'
                 }
             }
             project(':impl') {
                 dependencies {
-                    compile project(':api')
-                    compile 'org:leaf1:1.0'
+                    api project(':api')
+                    api 'org:leaf1:1.0'
                 }
             }
         """
@@ -2033,9 +2168,15 @@ project :some:deeply:nested
         outputContains """
 org:leaf3:1.0
    variant "compile" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-api
-      org.gradle.component.category = library (not requested)
+      org.gradle.status              = release (not requested)
+      org.gradle.usage               = java-api
+      org.gradle.libraryelements     = jar (compatible with: classes)
+      org.gradle.category            = library
+
+      Requested attributes not found in the selected variant:
+         org.gradle.dependency.bundling = external
+         org.gradle.jvm.environment     = standard-jvm
+         org.gradle.jvm.version         = ${JavaVersion.current().majorVersion}
    ]
 
 org:leaf3:1.0
@@ -2049,6 +2190,7 @@ org:leaf3:1.0
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     void "fails a configuration is not resolvable"() {
         mavenRepo.module("foo", "foo", '1.0').publish()
         mavenRepo.module("foo", "bar", '2.0').publish()
@@ -2058,6 +2200,7 @@ org:leaf3:1.0
                maven { url "${mavenRepo.uri}" }
             }
             configurations {
+                api.canBeConsumed = false
                 api.canBeResolved = false
                 compile.extendsFrom api
             }
@@ -2071,7 +2214,7 @@ org:leaf3:1.0
         fails "dependencyInsight", "--dependency", "foo", "--configuration", "api"
 
         then:
-        failure.assertHasCause("Resolving configuration 'api' directly is not allowed")
+        failure.assertHasCause("Resolving dependency configuration 'api' is not allowed as it is defined as 'canBeResolved=false'.")
 
         when:
         run "dependencyInsight", "--dependency", "foo", "--configuration", "compile"
@@ -2079,9 +2222,10 @@ org:leaf3:1.0
         then:
         result.groupedOutput.task(":dependencyInsight").output.contains("""foo:bar:2.0
    variant "runtime" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-runtime (not requested)
-      org.gradle.component.category = library (not requested)
+      org.gradle.status          = release (not requested)
+      org.gradle.usage           = java-runtime (not requested)
+      org.gradle.libraryelements = jar (not requested)
+      org.gradle.category        = library (not requested)
    ]
 
 foo:bar:2.0
@@ -2089,9 +2233,10 @@ foo:bar:2.0
 
 foo:foo:1.0
    variant "runtime" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-runtime (not requested)
-      org.gradle.component.category = library (not requested)
+      org.gradle.status          = release (not requested)
+      org.gradle.usage           = java-runtime (not requested)
+      org.gradle.libraryelements = jar (not requested)
+      org.gradle.category        = library (not requested)
    ]
 
 foo:foo:1.0
@@ -2100,6 +2245,7 @@ foo:foo:1.0
     }
 
     @Unroll
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "renders dependency constraint differently"() {
         given:
         mavenRepo.module("org", "foo", "1.0").publish()
@@ -2112,11 +2258,11 @@ foo:foo:1.0
 
         file("build.gradle") << """
             apply plugin: 'java-library'
-            
+
             repositories {
                maven { url "${mavenRepo.uri}" }
             }
-            
+
             dependencies {
                 implementation 'org:foo' // no version
                 constraints {
@@ -2133,9 +2279,15 @@ foo:foo:1.0
         then:
         outputContains """org:foo:$selected
    variant "compile" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-api
-      org.gradle.component.category = library (not requested)
+      org.gradle.status              = release (not requested)
+      org.gradle.usage               = java-api
+      org.gradle.libraryelements     = jar (compatible with: classes)
+      org.gradle.category            = library
+
+      Requested attributes not found in the selected variant:
+         org.gradle.dependency.bundling = external
+         org.gradle.jvm.environment     = standard-jvm
+         org.gradle.jvm.version         = ${JavaVersion.current().majorVersion}
    ]
    Selection reasons:
       - By constraint : $rejected
@@ -2151,6 +2303,7 @@ org:foo -> $selected
     }
 
     @Unroll
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "renders custom dependency constraint reasons (#version)"() {
         given:
         mavenRepo.module("org", "foo", "1.0").publish()
@@ -2185,9 +2338,15 @@ org:foo -> $selected
         then:
         outputContains """org:foo:$selected
    variant "compile" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-api
-      org.gradle.component.category = library (not requested)
+      org.gradle.status              = release (not requested)
+      org.gradle.usage               = java-api
+      org.gradle.libraryelements     = jar (compatible with: classes)
+      org.gradle.category            = library
+
+      Requested attributes not found in the selected variant:
+         org.gradle.dependency.bundling = external
+         org.gradle.jvm.environment     = standard-jvm
+         org.gradle.jvm.version         = ${JavaVersion.current().majorVersion}
    ]
    Selection reasons:
       - By constraint : ${rejected}${reason}
@@ -2203,6 +2362,7 @@ org:foo -> $selected
     }
 
     @Unroll
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "renders custom dependency reasons"() {
         given:
         mavenRepo.module("org", "foo", "1.0").publish()
@@ -2234,9 +2394,15 @@ org:foo -> $selected
         then:
         outputContains """org:foo:$selected
    variant "compile" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-api
-      org.gradle.component.category = library (not requested)
+      org.gradle.status              = release (not requested)
+      org.gradle.usage               = java-api
+      org.gradle.libraryelements     = jar (compatible with: classes)
+      org.gradle.category            = library
+
+      Requested attributes not found in the selected variant:
+         org.gradle.dependency.bundling = external
+         org.gradle.jvm.environment     = standard-jvm
+         org.gradle.jvm.version         = ${JavaVersion.current().majorVersion}
    ]
    Selection reasons:
       - Was requested : ${rejected}${reason}
@@ -2251,6 +2417,7 @@ org:foo:${displayVersion} -> $selected
         "prefer '[1.0, 1.4]'; reject '1.4'" | '{prefer [1.0, 1.4]; reject 1.4}' | "1.4 has a critical bug"                        | '1.3'    | "rejected version 1.4 because "
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "doesn't report duplicate reasons"() {
         given:
         mavenRepo.module("org", "foo", "1.0").publish()
@@ -2280,9 +2447,15 @@ org:foo:${displayVersion} -> $selected
         then:
         outputContains """org:foo:1.3
    variant "compile" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-api
-      org.gradle.component.category = library (not requested)
+      org.gradle.status              = release (not requested)
+      org.gradle.usage               = java-api
+      org.gradle.libraryelements     = jar (compatible with: classes)
+      org.gradle.category            = library
+
+      Requested attributes not found in the selected variant:
+         org.gradle.dependency.bundling = external
+         org.gradle.jvm.environment     = standard-jvm
+         org.gradle.jvm.version         = ${JavaVersion.current().majorVersion}
    ]
    Selection reasons:
       - Was requested : didn't match versions 2.0, 1.5, 1.4
@@ -2294,7 +2467,8 @@ org:foo:[1.1,1.3] -> 1.3
 """
     }
 
-    def "does't mix rejected versions on different constraints"() {
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
+    def "doesn't mix rejected versions on different constraints"() {
         given:
         mavenRepo.module("org", "foo", "1.0").publish()
         mavenRepo.module("org", "foo", "1.1").publish()
@@ -2332,9 +2506,15 @@ org:foo:[1.1,1.3] -> 1.3
         then:
         outputContains """org:bar:1.0
    variant "compile" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-api
-      org.gradle.component.category = library (not requested)
+      org.gradle.status              = release (not requested)
+      org.gradle.usage               = java-api
+      org.gradle.libraryelements     = jar (compatible with: classes)
+      org.gradle.category            = library
+
+      Requested attributes not found in the selected variant:
+         org.gradle.dependency.bundling = external
+         org.gradle.jvm.environment     = standard-jvm
+         org.gradle.jvm.version         = ${JavaVersion.current().majorVersion}
    ]
    Selection reasons:
       - Was requested : rejected versions 1.2, 1.1
@@ -2344,9 +2524,15 @@ org:bar:{require [1.0,); reject [1.1, 1.2]} -> 1.0
 
 org:foo:1.1
    variant "compile" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-api
-      org.gradle.component.category = library (not requested)
+      org.gradle.status              = release (not requested)
+      org.gradle.usage               = java-api
+      org.gradle.libraryelements     = jar (compatible with: classes)
+      org.gradle.category            = library
+
+      Requested attributes not found in the selected variant:
+         org.gradle.dependency.bundling = external
+         org.gradle.jvm.environment     = standard-jvm
+         org.gradle.jvm.version         = ${JavaVersion.current().majorVersion}
    ]
    Selection reasons:
       - Was requested : rejected version 1.2
@@ -2356,6 +2542,7 @@ org:foo:{require [1.0,); reject 1.2} -> 1.1
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "shows versions rejected by rule"() {
         given:
         mavenRepo.module("org", "foo", "1.0").publish()
@@ -2385,11 +2572,11 @@ org:foo:{require [1.0,); reject 1.2} -> 1.1
                    }
                 }
             }
-            
+
             configurations.compileClasspath.resolutionStrategy.componentSelection.all { ComponentSelection selection ->
                if (selection.candidate.module == 'bar' && selection.candidate.version in ['1.2', '1.1']) {
                   selection.reject("version \${selection.candidate.version} is bad")
-               } 
+               }
             }
         """
 
@@ -2400,9 +2587,15 @@ org:foo:{require [1.0,); reject 1.2} -> 1.1
         outputContains """Task :dependencyInsight
 org:bar:1.0
    variant "compile" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-api
-      org.gradle.component.category = library (not requested)
+      org.gradle.status              = release (not requested)
+      org.gradle.usage               = java-api
+      org.gradle.libraryelements     = jar (compatible with: classes)
+      org.gradle.category            = library
+
+      Requested attributes not found in the selected variant:
+         org.gradle.dependency.bundling = external
+         org.gradle.jvm.environment     = standard-jvm
+         org.gradle.jvm.version         = ${JavaVersion.current().majorVersion}
    ]
    Selection reasons:
       - Rejection : 1.2 by rule because version 1.2 is bad
@@ -2413,9 +2606,15 @@ org:bar:[1.0,) -> 1.0
 
 org:foo:1.1
    variant "compile" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-api
-      org.gradle.component.category = library (not requested)
+      org.gradle.status              = release (not requested)
+      org.gradle.usage               = java-api
+      org.gradle.libraryelements     = jar (compatible with: classes)
+      org.gradle.category            = library
+
+      Requested attributes not found in the selected variant:
+         org.gradle.dependency.bundling = external
+         org.gradle.jvm.environment     = standard-jvm
+         org.gradle.jvm.version         = ${JavaVersion.current().majorVersion}
    ]
    Selection reasons:
       - Was requested : rejected version 1.2
@@ -2425,7 +2624,8 @@ org:foo:{require [1.0,); reject 1.2} -> 1.1
 """
     }
 
-
+    @Unroll
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "renders dependency from BOM as a constraint"() {
         given:
         def leaf = mavenRepo.module("org", "leaf", "1.0").publish()
@@ -2442,7 +2642,7 @@ org:foo:{require [1.0,); reject 1.2} -> 1.1
             }
 
             dependencies {
-                implementation platform('org:bom:1.0')
+                implementation platform('org:bom:1.0') $conf
                 implementation 'org:leaf'
             }
         """
@@ -2454,9 +2654,15 @@ org:foo:{require [1.0,); reject 1.2} -> 1.1
         outputContains """
 org:leaf:1.0 (by constraint)
    variant "compile" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-api
-      org.gradle.component.category = library (not requested)
+      org.gradle.status              = release (not requested)
+      org.gradle.usage               = java-api
+      org.gradle.libraryelements     = jar (compatible with: classes)
+      org.gradle.category            = library
+
+      Requested attributes not found in the selected variant:
+         org.gradle.dependency.bundling = external
+         org.gradle.jvm.environment     = standard-jvm
+         org.gradle.jvm.version         = ${JavaVersion.current().majorVersion}
    ]
 
 org:leaf:1.0
@@ -2466,8 +2672,13 @@ org:leaf:1.0
 org:leaf -> 1.0
 \\--- compileClasspath
 """
+        where:
+        conf << ["",
+                 // this is just a sanity check. Nobody should ever write this.
+                 "{ capabilities { requireCapability('org:bom-derived-platform') } }" ]
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "shows published dependency reason"() {
         given:
         mavenRepo.with {
@@ -2478,7 +2689,6 @@ org:leaf -> 1.0
                 .publish()
 
         }
-        FeaturePreviewsFixture.enableGradleMetadata(settingsFile)
 
         file("build.gradle") << """
             apply plugin: 'java-library'
@@ -2499,9 +2709,15 @@ org:leaf -> 1.0
         outputContains """
 org.test:leaf:1.0
    variant "compile" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-api
-      org.gradle.component.category = library (not requested)
+      org.gradle.status              = release (not requested)
+      org.gradle.usage               = java-api
+      org.gradle.libraryelements     = jar (compatible with: classes)
+      org.gradle.category            = library
+
+      Requested attributes not found in the selected variant:
+         org.gradle.dependency.bundling = external
+         org.gradle.jvm.environment     = standard-jvm
+         org.gradle.jvm.version         = ${JavaVersion.current().majorVersion}
    ]
    Selection reasons:
       - Was requested : first reason
@@ -2512,6 +2728,7 @@ org.test:leaf:1.0
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "mentions web-based dependency insight report available using build scans"() {
         given:
         mavenRepo.module("org", "leaf1").publish()
@@ -2544,9 +2761,10 @@ org.test:leaf:1.0
         outputContains """
 org:leaf2:1.0
    variant "runtime" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-runtime (not requested)
-      org.gradle.component.category = library (not requested)
+      org.gradle.status          = release (not requested)
+      org.gradle.usage           = java-runtime (not requested)
+      org.gradle.libraryelements = jar (not requested)
+      org.gradle.category        = library (not requested)
    ]
 
 org:leaf2:1.0
@@ -2561,6 +2779,7 @@ A web-based, searchable dependency report is available by adding the --scan opti
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "renders multiple rejected modules"() {
         given:
         mavenRepo.module("org", "foo", "1.0").publish()
@@ -2624,7 +2843,7 @@ org:bar:[1.0,) FAILED
 org:foo: (by constraint) FAILED
    Failures:
       - Could not resolve org:foo:{reject 1.0 & 1.1 & 1.2}.
-          - Cannot find a version of 'org:foo' that satisfies the version constraints: 
+          - Cannot find a version of 'org:foo' that satisfies the version constraints:
                Dependency path ':insight-test:unspecified' --> 'org:foo:[1.0,)'
                Constraint path ':insight-test:unspecified' --> 'org:foo:{reject 1.0 & 1.1 & 1.2}'
 
@@ -2640,6 +2859,7 @@ org:foo:[1.0,) FAILED
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "renders multiple rejection reasons for module"() {
         given:
         mavenRepo.module("org", "foo", "1.0").publish()
@@ -2677,13 +2897,19 @@ org:foo:[1.0,) FAILED
         outputContains """
 org:foo:1.0
    variant "compile" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-api
-      org.gradle.component.category = library (not requested)
+      org.gradle.status              = release (not requested)
+      org.gradle.usage               = java-api
+      org.gradle.libraryelements     = jar (compatible with: classes)
+      org.gradle.category            = library
+
+      Requested attributes not found in the selected variant:
+         org.gradle.dependency.bundling = external
+         org.gradle.jvm.environment     = standard-jvm
+         org.gradle.jvm.version         = ${JavaVersion.current().majorVersion}
    ]
    Selection reasons:
-      - Was requested : rejected versions 1.2, 1.1
       - By constraint
+      - Was requested : rejected versions 1.2, 1.1
 
 org:foo:{reject 1.2} -> 1.0
 \\--- compileClasspath
@@ -2693,6 +2919,7 @@ org:foo:{require [1.0,); reject 1.1} -> 1.0
 """
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "shows all published dependency reasons"() {
         given:
         mavenRepo.with {
@@ -2708,8 +2935,6 @@ org:foo:{require [1.0,); reject 1.1} -> 1.0
                 .withModuleMetadata()
                 .publish()
         }
-
-        FeaturePreviewsFixture.enableGradleMetadata(settingsFile)
 
         file("build.gradle") << """
             apply plugin: 'java-library'
@@ -2730,9 +2955,15 @@ org:foo:{require [1.0,); reject 1.1} -> 1.0
         then:
         outputContains """org.test:leaf:1.0
    variant "compile" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-api
-      org.gradle.component.category = library (not requested)
+      org.gradle.status              = release (not requested)
+      org.gradle.usage               = java-api
+      org.gradle.libraryelements     = jar (compatible with: classes)
+      org.gradle.category            = library
+
+      Requested attributes not found in the selected variant:
+         org.gradle.dependency.bundling = external
+         org.gradle.jvm.environment     = standard-jvm
+         org.gradle.jvm.version         = ${JavaVersion.current().majorVersion}
    ]
    Selection reasons:
       - Was requested : first reason
@@ -2748,6 +2979,7 @@ org.test:leaf:1.0
     }
 
     @Unroll
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "shows that version is rejected because of attributes (#type)"() {
         mavenRepo.module("org", "foo", "1.0").publish()
         mavenRepo.module("org", "foo", "1.1").publish()
@@ -2774,7 +3006,7 @@ org.test:leaf:1.0
 
             dependencies {
                 implementation('org:foo:[1.0,)') ${type=='dependency'?attributes:''}
-                
+
                 components.all { details ->
                    attributes {
                       def colors = ['1.0' : 'blue', '1.1': 'green', '1.2': 'red']
@@ -2791,17 +3023,33 @@ org.test:leaf:1.0
         outputContains """Task :dependencyInsight
 org:foo:1.0
    variant "compile" [
-      color                         = blue
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-api
-      org.gradle.component.category = library (not requested)
+      color                          = blue
+      org.gradle.status              = release (not requested)
+      org.gradle.usage               = java-api
+      org.gradle.libraryelements     = jar (compatible with: classes)
+      org.gradle.category            = library
+
+      Requested attributes not found in the selected variant:
+         org.gradle.dependency.bundling = external
+         org.gradle.jvm.environment     = standard-jvm
+         org.gradle.jvm.version         = ${JavaVersion.current().majorVersion}
    ]
    Selection reasons:
       - Rejection : version 1.2:
           - Attribute 'color' didn't match. Requested 'blue', was: 'red'
+          - Attribute 'org.gradle.category' didn't match. Requested 'library', was: not found
+          - Attribute 'org.gradle.dependency.bundling' didn't match. Requested 'external', was: not found
+          - Attribute 'org.gradle.jvm.environment' didn't match. Requested 'standard-jvm', was: not found
+          - Attribute 'org.gradle.jvm.version' didn't match. Requested '${JavaVersion.current().majorVersion}', was: not found
+          - Attribute 'org.gradle.libraryelements' didn't match. Requested 'classes', was: not found
           - Attribute 'org.gradle.usage' didn't match. Requested 'java-api', was: not found
       - Rejection : version 1.1:
           - Attribute 'color' didn't match. Requested 'blue', was: 'green'
+          - Attribute 'org.gradle.category' didn't match. Requested 'library', was: not found
+          - Attribute 'org.gradle.dependency.bundling' didn't match. Requested 'external', was: not found
+          - Attribute 'org.gradle.jvm.environment' didn't match. Requested 'standard-jvm', was: not found
+          - Attribute 'org.gradle.jvm.version' didn't match. Requested '${JavaVersion.current().majorVersion}', was: not found
+          - Attribute 'org.gradle.libraryelements' didn't match. Requested 'classes', was: not found
           - Attribute 'org.gradle.usage' didn't match. Requested 'java-api', was: not found
 
 org:foo:[1.0,) -> 1.0
@@ -2811,6 +3059,7 @@ org:foo:[1.0,) -> 1.0
         type << ['configuration', 'dependency']
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def "reports 2nd level dependency conflicts"() {
         given:
         mavenRepo.with {
@@ -2859,9 +3108,15 @@ org:foo:[1.0,) -> 1.0
         outputContains """> Task :dependencyInsight
 planet:mercury:1.0.2
    variant "compile" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-api
-      org.gradle.component.category = library (not requested)
+      org.gradle.status              = release (not requested)
+      org.gradle.usage               = java-api
+      org.gradle.libraryelements     = jar (compatible with: classes)
+      org.gradle.category            = library
+
+      Requested attributes not found in the selected variant:
+         org.gradle.dependency.bundling = external
+         org.gradle.jvm.environment     = standard-jvm
+         org.gradle.jvm.version         = ${JavaVersion.current().majorVersion}
    ]
    Selection reasons:
       - By conflict resolution : between versions 1.0.2 and 1.0.1
@@ -2886,12 +3141,18 @@ planet:mercury:1.0.1 -> 1.0.2
         outputContains """> Task :dependencyInsight
 planet:venus:2.0.1
    variant "compile" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-api
-      org.gradle.component.category = library (not requested)
+      org.gradle.status              = release (not requested)
+      org.gradle.usage               = java-api
+      org.gradle.libraryelements     = jar (compatible with: classes)
+      org.gradle.category            = library
+
+      Requested attributes not found in the selected variant:
+         org.gradle.dependency.bundling = external
+         org.gradle.jvm.environment     = standard-jvm
+         org.gradle.jvm.version         = ${JavaVersion.current().majorVersion}
    ]
    Selection reasons:
-      - By conflict resolution : between versions 2.0.0, 2.0.1 and 1.0
+      - By conflict resolution : between versions 2.0.1, 2.0.0 and 1.0
 
 planet:venus:2.0.1
 \\--- planet:mars:4.0.0
@@ -2913,9 +3174,15 @@ planet:venus:2.0.0 -> 2.0.1
         outputContains """> Task :dependencyInsight
 planet:pluto:1.0.0
    variant "compile" [
-      org.gradle.status             = release (not requested)
-      org.gradle.usage              = java-api
-      org.gradle.component.category = library (not requested)
+      org.gradle.status              = release (not requested)
+      org.gradle.usage               = java-api
+      org.gradle.libraryelements     = jar (compatible with: classes)
+      org.gradle.category            = library
+
+      Requested attributes not found in the selected variant:
+         org.gradle.dependency.bundling = external
+         org.gradle.jvm.environment     = standard-jvm
+         org.gradle.jvm.version         = ${JavaVersion.current().majorVersion}
    ]
 
 planet:pluto:1.0.0
@@ -2929,6 +3196,57 @@ planet:pluto:1.0.0
           |    \\--- compileClasspath
           \\--- planet:jupiter:5.0.0 (requested planet:venus:1.0) (*)
 """
+    }
+
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
+    def "reports a strictly on a transitive"() {
+        given:
+        def foo12 = mavenRepo.module("org", "foo", "1.2").publish()
+        mavenRepo.module("org", "foo", "1.5").publish()
+        mavenRepo.module("org", "bar", "1.0").dependsOn(foo12).publish()
+        buildFile << """
+            apply plugin: 'java-library'
+
+            repositories {
+               maven { url "${mavenRepo.uri}" }
+            }
+
+            dependencies {
+                implementation 'org:bar:1.0'
+                constraints {
+                    implementation 'org:foo:1.5!!'
+                }
+            }
+"""
+
+        when:
+        succeeds 'dependencyInsight', '--dependency', 'foo'
+
+        then:
+        outputContains("""> Task :dependencyInsight
+org:foo:1.5
+   variant "compile" [
+      org.gradle.status              = release (not requested)
+      org.gradle.usage               = java-api
+      org.gradle.libraryelements     = jar (compatible with: classes)
+      org.gradle.category            = library
+
+      Requested attributes not found in the selected variant:
+         org.gradle.dependency.bundling = external
+         org.gradle.jvm.environment     = standard-jvm
+         org.gradle.jvm.version         = ${JavaVersion.current().majorVersion}
+   ]
+   Selection reasons:
+      - By constraint
+      - By ancestor
+
+org:foo:{strictly 1.5} -> 1.5
+\\--- compileClasspath
+
+org:foo:1.2 -> 1.5
+\\--- org:bar:1.0
+     \\--- compileClasspath
+""")
     }
 
 

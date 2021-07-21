@@ -21,8 +21,8 @@ import org.gradle.api.specs.Spec;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.gradle.util.CollectionUtils.filter;
-import static org.gradle.util.CollectionUtils.join;
+import static org.gradle.util.internal.CollectionUtils.filter;
+import static org.gradle.util.internal.CollectionUtils.join;
 
 public class GroupedTaskFixture {
 
@@ -63,5 +63,13 @@ public class GroupedTaskFixture {
             }
         });
         return join("\n", nonEmptyOutputs);
+    }
+
+    public GroupedTaskFixture assertOutputContains(String... text) {
+        String output = getOutput();
+        for (String s : text) {
+            assert output.contains(s);
+        }
+        return this;
     }
 }

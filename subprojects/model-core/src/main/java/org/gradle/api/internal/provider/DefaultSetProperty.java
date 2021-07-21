@@ -16,26 +16,57 @@
 
 package org.gradle.api.internal.provider;
 
+import com.google.common.collect.ImmutableCollection;
 import com.google.common.collect.ImmutableSet;
 import org.gradle.api.provider.Provider;
 import org.gradle.api.provider.SetProperty;
+import org.gradle.internal.Cast;
 
-import java.util.Collection;
+import javax.annotation.Nullable;
 import java.util.Set;
+import java.util.function.Supplier;
 
 public class DefaultSetProperty<T> extends AbstractCollectionProperty<T, Set<T>> implements SetProperty<T> {
-    public DefaultSetProperty(Class<T> elementType) {
-        super(Set.class, elementType);
+    private static final Supplier<ImmutableCollection.Builder<Object>> FACTORY = new Supplier<ImmutableCollection.Builder<Object>>() {
+        @Override
+        public ImmutableCollection.Builder<Object> get() {
+            return ImmutableSet.builder();
+        }
+    };
+    public DefaultSetProperty(PropertyHost host, Class<T> elementType) {
+        super(host, Set.class, elementType, Cast.uncheckedNonnullCast(FACTORY));
     }
 
     @Override
-    protected Set<T> fromValue(Collection<T> values) {
-        return ImmutableSet.copyOf(values);
+    protected Set<T> emptyCollection() {
+        return ImmutableSet.of();
+    }
+
+    @Override
+    public Class<?> publicType() {
+        return SetProperty.class;
+    }
+
+    @Override
+    public int getFactoryId() {
+        return ManagedFactories.SetPropertyManagedFactory.FACTORY_ID;
     }
 
     @Override
     public SetProperty<T> empty() {
         super.empty();
+        return this;
+    }
+
+    @Override
+    public SetProperty<T> value(@Nullable Iterable<? extends T> elements) {
+        super.value(elements);
+        return this;
+    }
+
+    @Override
+    public SetProperty<T> value(Provider<? extends Iterable<? extends T>> provider) {
+        super.value(provider);
         return this;
     }
 

@@ -23,17 +23,19 @@ import org.gradle.api.artifacts.ConfigurationVariant;
 import org.gradle.api.artifacts.PublishArtifact;
 import org.gradle.api.artifacts.PublishArtifactSet;
 import org.gradle.api.attributes.AttributeContainer;
-import org.gradle.api.internal.CollectionCallbackActionDecorator;
-import org.gradle.api.internal.DefaultDomainObjectSet;
 import org.gradle.api.internal.artifacts.ConfigurationVariantInternal;
 import org.gradle.api.internal.artifacts.DefaultPublishArtifactSet;
 import org.gradle.api.internal.attributes.AttributeContainerInternal;
 import org.gradle.api.internal.attributes.ImmutableAttributeContainerWithErrorMessage;
 import org.gradle.api.internal.attributes.ImmutableAttributesFactory;
+import org.gradle.api.internal.collections.DomainObjectCollectionFactory;
 import org.gradle.api.internal.file.FileCollectionFactory;
 import org.gradle.internal.Describables;
 import org.gradle.internal.DisplayName;
+import org.gradle.internal.Factory;
 import org.gradle.internal.typeconversion.NotationParser;
+
+import java.util.List;
 
 public class DefaultVariant implements ConfigurationVariantInternal {
     private final Describable parentDisplayName;
@@ -41,18 +43,20 @@ public class DefaultVariant implements ConfigurationVariantInternal {
     private AttributeContainerInternal attributes;
     private final NotationParser<Object, ConfigurablePublishArtifact> artifactNotationParser;
     private final PublishArtifactSet artifacts;
+    private Factory<List<PublishArtifact>> lazyArtifacts;
 
-    public DefaultVariant(Describable parentDisplayName, String name,
+    public DefaultVariant(Describable parentDisplayName,
+                          String name,
                           AttributeContainerInternal parentAttributes,
                           NotationParser<Object, ConfigurablePublishArtifact> artifactNotationParser,
                           FileCollectionFactory fileCollectionFactory,
                           ImmutableAttributesFactory cache,
-                          CollectionCallbackActionDecorator collectionCallbackActionDecorator) {
+                          DomainObjectCollectionFactory domainObjectCollectionFactory) {
         this.parentDisplayName = parentDisplayName;
         this.name = name;
         attributes = cache.mutable(parentAttributes);
         this.artifactNotationParser = artifactNotationParser;
-        artifacts = new DefaultPublishArtifactSet(getAsDescribable(), new DefaultDomainObjectSet<PublishArtifact>(PublishArtifact.class, collectionCallbackActionDecorator), fileCollectionFactory);
+        artifacts = new DefaultPublishArtifactSet(getAsDescribable(), domainObjectCollectionFactory.newDomainObjectSet(PublishArtifact.class), fileCollectionFactory);
     }
 
     @Override
@@ -61,7 +65,11 @@ public class DefaultVariant implements ConfigurationVariantInternal {
     }
 
     public OutgoingVariant convertToOutgoingVariant() {
-        return new LeafOutgoingVariant(getAsDescribable(), attributes, artifacts);
+        return new LeafOutgoingVariant(getAsDescribable(), attributes, getArtifacts());
+    }
+
+    public void visit(ConfigurationInternal.VariantVisitor visitor) {
+        visitor.visitChildVariant(name, getAsDescribable(), attributes.asImmutable(), getArtifacts());
     }
 
     private DisplayName getAsDescribable() {
@@ -81,6 +89,10 @@ public class DefaultVariant implements ConfigurationVariantInternal {
 
     @Override
     public PublishArtifactSet getArtifacts() {
+        if (lazyArtifacts != null) {
+            artifacts.addAll(lazyArtifacts.create());
+            lazyArtifacts = null;
+        }
         return artifacts;
     }
 
@@ -99,6 +111,11 @@ public class DefaultVariant implements ConfigurationVariantInternal {
     @Override
     public String toString() {
         return getAsDescribable().getDisplayName();
+    }
+
+    @Override
+    public void artifactsProvider(Factory<List<PublishArtifact>> artifacts) {
+        this.lazyArtifacts = artifacts;
     }
 
     @Override

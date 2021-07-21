@@ -44,7 +44,7 @@ throw new RuntimeException("should not run")
             build.withCancellationToken(cancel.token())
             collectOutputs(build)
             build.run(resultHandler)
-            sync.waitForAllPendingCalls()
+            sync.waitForAllPendingCalls(resultHandler)
             cancel.cancel()
             sync.releaseAll()
             resultHandler.finished()
@@ -69,7 +69,7 @@ throw new RuntimeException("should not run")
             build.withCancellationToken(cancel.token())
             collectOutputs(build)
             build.run(resultHandler)
-            sync.waitForAllPendingCalls()
+            sync.waitForAllPendingCalls(resultHandler)
             cancel.cancel()
             sync.releaseAll()
             resultHandler.finished()
@@ -96,14 +96,14 @@ throw new RuntimeException("should not run")
             model.withCancellationToken(cancel.token())
             collectOutputs(model)
             model.get(resultHandler)
-            sync.waitForAllPendingCalls()
+            sync.waitForAllPendingCalls(resultHandler)
             cancel.cancel()
             sync.releaseAll()
             resultHandler.finished()
         }
 
         then:
-        configureWasCancelled(resultHandler, "Could not fetch model of type 'GradleProject' using Gradle")
+        configureWasCancelled(resultHandler, "Could not fetch model of type 'GradleProject' using")
 
         where:
         configureOnDemand << [true, false]
@@ -123,14 +123,14 @@ throw new RuntimeException("should not run")
             action.withCancellationToken(cancel.token())
             collectOutputs(action)
             action.run(resultHandler)
-            sync.waitForAllPendingCalls()
+            sync.waitForAllPendingCalls(resultHandler)
             cancel.cancel()
             sync.releaseAll()
             resultHandler.finished()
         }
 
         then:
-        configureWasCancelled(resultHandler, "Could not run build action using Gradle")
+        configureWasCancelled(resultHandler, "Could not run build action using")
 
         where:
         configureOnDemand << [true, false]
@@ -162,7 +162,7 @@ task notExecuted(dependsOn: hang) {
             build.withCancellationToken(cancel.token())
             collectOutputs(build)
             build.run(resultHandler)
-            sync.waitForAllPendingCalls()
+            sync.waitForAllPendingCalls(resultHandler)
             cancel.cancel()
             sync.releaseAll()
             resultHandler.finished()
@@ -192,7 +192,7 @@ task hang {
             build.withCancellationToken(cancel.token())
             collectOutputs(build)
             build.run(resultHandler)
-            sync.waitForAllPendingCalls()
+            sync.waitForAllPendingCalls(resultHandler)
             cancel.cancel()
             sync.releaseAll()
             resultHandler.finished()
@@ -223,14 +223,14 @@ task hang {
             build.withCancellationToken(cancel.token())
             collectOutputs(build)
             build.run(resultHandler)
-            sync.waitForAllPendingCalls()
+            sync.waitForAllPendingCalls(resultHandler)
             cancel.cancel()
             resultHandler.finished()
         }
 
         then:
         resultHandler.assertFailedWith(BuildCancelledException)
-        resultHandler.failure.message.startsWith("Could not execute build using Gradle")
+        resultHandler.failure.message.startsWith("Could not execute build using")
         if (targetDist.toolingApiHasCauseOnForcedCancel) {
             resultHandler.failure.cause.message.startsWith("Daemon was stopped to handle build cancel request.")
         }

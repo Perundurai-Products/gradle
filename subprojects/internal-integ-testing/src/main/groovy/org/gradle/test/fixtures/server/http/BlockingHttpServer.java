@@ -22,14 +22,18 @@ import com.sun.net.httpserver.HttpServer;
 import org.gradle.api.Action;
 import org.gradle.internal.ErroringAction;
 import org.gradle.internal.work.WorkerLeaseService;
+import org.gradle.test.fixtures.ResettableExpectations;
 import org.hamcrest.Matcher;
 import org.junit.rules.ExternalResource;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -39,21 +43,27 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.logging.ConsoleHandler;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * An HTTP server that allows a test to synchronize and make assertions about concurrent activities that happen in another process.
  * For example, can be used to that certain tasks do or do not execute in parallel.
  */
-public class BlockingHttpServer extends ExternalResource {
+public class BlockingHttpServer extends ExternalResource implements ResettableExpectations {
     private static final AtomicInteger COUNTER = new AtomicInteger();
     private static final ExecutorService EXECUTOR_SERVICE = Executors.newCachedThreadPool();
     private final Lock lock = new ReentrantLock();
-    private final HttpServer server;
-    private HttpContext context;
+    protected final HttpServer server;
+    private final HttpContext context;
     private final ChainingHttpHandler handler;
-    private final int timeoutMs;
+    private final Duration timeout;
     private final int serverId;
+    private final Scheme scheme;
     private boolean running;
+    private int clientVarCounter;
+    private String hostAlias;
 
     public BlockingHttpServer() throws IOException {
         this(120000);
@@ -61,12 +71,21 @@ public class BlockingHttpServer extends ExternalResource {
 
     public BlockingHttpServer(int timeoutMs) throws IOException {
         // Use an OS selected port
-        server = HttpServer.create(new InetSocketAddress(0), 10);
-        server.setExecutor(EXECUTOR_SERVICE);
-        serverId = COUNTER.incrementAndGet();
-        handler = new ChainingHttpHandler(lock, timeoutMs, COUNTER, new MustBeRunning());
-        context = server.createContext("/", handler);
-        this.timeoutMs = timeoutMs;
+        this(HttpServer.create(new InetSocketAddress(0), 10), timeoutMs, Scheme.HTTP);
+    }
+
+    public void setHostAlias(String hostAlias) {
+        this.hostAlias = hostAlias;
+    }
+
+    protected BlockingHttpServer(HttpServer server, int timeoutMs, Scheme scheme) {
+        this.server = server;
+        this.server.setExecutor(EXECUTOR_SERVICE);
+        this.serverId = COUNTER.incrementAndGet();
+        this.handler = new ChainingHttpHandler(lock, timeoutMs, COUNTER, new MustBeRunning());
+        this.context = server.createContext("/", handler);
+        this.timeout = Duration.ofMillis(timeoutMs);
+        this.scheme = scheme;
     }
 
     /**
@@ -74,7 +93,11 @@ public class BlockingHttpServer extends ExternalResource {
      */
     public URI getUri() {
         try {
-            return new URI("http://localhost:" + getPort());
+            String host = hostAlias;
+            if (host == null) {
+                host = scheme.host;
+            }
+            return new URI(scheme.scheme + "://" + host + ":" + getPort());
         } catch (URISyntaxException e) {
             throw new RuntimeException(e);
         }
@@ -85,7 +108,7 @@ public class BlockingHttpServer extends ExternalResource {
      */
     public URI uri(String resource) {
         try {
-            return new URI("http", null, "localhost", getPort(), "/" + resource, null, null);
+            return new URI(scheme.scheme, null, scheme.host, getPort(), "/" + resource, null, null);
         } catch (URISyntaxException e) {
             throw new RuntimeException(e);
         }
@@ -95,12 +118,7 @@ public class BlockingHttpServer extends ExternalResource {
      * Returns Java statements to get the given resource.
      */
     public String callFromBuild(String resource) {
-        URI uri = uri(resource);
-        return "System.out.println(\"calling " + uri + "\"); try { new java.net.URL(\"" + uri + "\").openConnection().getContentLength(); } catch(Exception e) { throw new RuntimeException(e); }; System.out.println(\"[G] response received\");";
-    }
-
-    public String callFromTaskAction(String resource) {
-        return "getServices().get(" + WorkerLeaseService.class.getCanonicalName() + ".class).withoutProjectLock(new Runnable() { void run() { " + callFromBuild(resource) + " } });";
+        return callFromBuildUsingExpression("\"" + resource + "\"");
     }
 
     /**
@@ -108,7 +126,34 @@ public class BlockingHttpServer extends ExternalResource {
      */
     public String callFromBuildUsingExpression(String expression) {
         String uriExpression = "\"" + getUri() + "/\" + " + expression;
-        return "System.out.println(\"calling \" + " + uriExpression + "); try { new java.net.URL(" + uriExpression + ").openConnection().getContentLength(); } catch(Exception e) { throw new RuntimeException(e); }; System.out.println(\"[G] response received\");";
+        int count = clientVarCounter++;
+        String connectionVar = "connection" + count;
+        String urlVar = "url" + count;
+        String streamVar = "inputStream" + count;
+        StringWriter result = new StringWriter();
+        PrintWriter writer = new PrintWriter(result);
+        writer.print("String " + urlVar + " = " + uriExpression + ";");
+        writer.print("System.out.println(\"[G] calling \" + " + urlVar + ");");
+        writer.print("try {");
+        writer.print("  java.net.URLConnection " + connectionVar + " = new java.net.URL(" + urlVar + ").openConnection();");
+        writer.print("  " + connectionVar + ".setReadTimeout(0);"); // to avoid silent retry
+        writer.print("  " + connectionVar + ".connect();");
+        writer.print("  java.io.InputStream " + streamVar + " = " + connectionVar + ".getInputStream();");
+        writer.print("  try {");
+        writer.print("    while (" + streamVar + ".read() >= 0) {}"); // read entire response
+        writer.print("  } finally {");
+        writer.print("    " + streamVar + ".close();");
+        writer.print("  }");
+        writer.print("} catch(Exception e) {");
+        writer.print("  System.out.println(\"[G] error response received for \" + " + urlVar + ");");
+        writer.print("  throw new RuntimeException(\"Received error response from \" + " + urlVar + ", e);");
+        writer.print("};");
+        writer.println("System.out.println(\"[G] response received for \" + " + urlVar + ");");
+        return result.toString();
+    }
+
+    public String callFromTaskAction(String resource) {
+        return "getServices().get(" + WorkerLeaseService.class.getCanonicalName() + ".class).withoutProjectLock(new Runnable() { void run() { " + callFromBuild(resource) + " } });";
     }
 
     /**
@@ -127,7 +172,7 @@ public class BlockingHttpServer extends ExternalResource {
      * Expects the given requests to be made concurrently. Blocks each request until they have all been received then releases them all.
      */
     public void expectConcurrent(String... expectedRequests) {
-        List<ResourceExpectation> expectations = new ArrayList<ResourceExpectation>();
+        List<ResourceExpectation> expectations = new ArrayList<>();
         for (String request : expectedRequests) {
             expectations.add(doGet(request));
         }
@@ -138,7 +183,7 @@ public class BlockingHttpServer extends ExternalResource {
      * Expects the given requests to be made concurrently. Blocks each request until they have all been received then releases them all.
      */
     public void expectConcurrent(Collection<String> expectedRequests) {
-        List<ResourceExpectation> expectations = new ArrayList<ResourceExpectation>();
+        List<ResourceExpectation> expectations = new ArrayList<>();
         for (String request : expectedRequests) {
             expectations.add(doGet(request));
         }
@@ -149,7 +194,7 @@ public class BlockingHttpServer extends ExternalResource {
      * Expects the given requests to be made concurrently. Blocks each request until they have all been received then releases them all.
      */
     public void expectConcurrent(ExpectedRequest... expectedCalls) {
-        List<ResourceExpectation> expectations = new ArrayList<ResourceExpectation>();
+        List<ResourceExpectation> expectations = new ArrayList<>();
         for (ExpectedRequest call : expectedCalls) {
             expectations.add((ResourceExpectation) call);
         }
@@ -157,12 +202,19 @@ public class BlockingHttpServer extends ExternalResource {
     }
 
     private void addNonBlockingHandler(final Collection<? extends ResourceExpectation> expectations) {
-        handler.addHandler(new ChainingHttpHandler.HandlerFactory<TrackingHttpHandler>() {
-            @Override
-            public TrackingHttpHandler create(WaitPrecondition previous) {
-                return new CyclicBarrierRequestHandler(lock, timeoutMs, previous, expectations);
-            }
-        });
+        handler.addHandler(previous -> new ExpectAllRequestsThenReleaseAll(lock, serverId, timeout, previous, expectations, EXECUTOR_SERVICE));
+    }
+
+    /**
+     * Expects the given requests to be made. Blocks until the given number of concurrent requests have been received, then releases the requests. Repeats
+     * until all of the requests have been received.
+     */
+    public void expectConcurrent(int concurrent, String... expectedRequests) {
+        List<ResourceExpectation> expectations = new ArrayList<>();
+        for (String request : expectedRequests) {
+            expectations.add(doGet(request));
+        }
+        handler.addHandler(previous -> new ExpectMaxNRequestsThenReleaseOne(lock, serverId, timeout, concurrent, previous, expectations, EXECUTOR_SERVICE));
     }
 
     /**
@@ -194,7 +246,7 @@ public class BlockingHttpServer extends ExternalResource {
     }
 
     private ExpectMethod doGet(String path) {
-        return new ExpectMethod("GET", normalizePath(path), timeoutMs, lock);
+        return new ExpectMethod("GET", normalizePath(path), timeout, lock);
     }
 
     /**
@@ -223,7 +275,7 @@ public class BlockingHttpServer extends ExternalResource {
      * Is not considered "complete" until all expected calls have been received.
      */
     public BlockingHandler expectConcurrentAndBlock(int concurrent, String... expectedCalls) {
-        List<ResourceExpectation> expectations = new ArrayList<ResourceExpectation>();
+        List<ResourceExpectation> expectations = new ArrayList<>();
         for (String call : expectedCalls) {
             expectations.add(doGet(call));
         }
@@ -235,7 +287,7 @@ public class BlockingHttpServer extends ExternalResource {
      * Since the expectations are optional, they are still considered "complete" even if not all expected calls have been received.
      */
     public BlockingHandler expectOptionalAndBlock(int concurrent, String... optionalExpectedCalls) {
-        List<ResourceExpectation> expectations = new ArrayList<ResourceExpectation>();
+        List<ResourceExpectation> expectations = new ArrayList<>();
         for (String call : optionalExpectedCalls) {
             expectations.add(doGet(call));
         }
@@ -254,7 +306,7 @@ public class BlockingHttpServer extends ExternalResource {
      * Is not considered "complete" until all expected calls have been received.
      */
     public BlockingHandler expectConcurrentAndBlock(int concurrent, ExpectedRequest... expectedRequests) {
-        List<ResourceExpectation> expectations = new ArrayList<ResourceExpectation>();
+        List<ResourceExpectation> expectations = new ArrayList<>();
         for (ExpectedRequest request : expectedRequests) {
             expectations.add((ResourceExpectation) request);
         }
@@ -262,21 +314,11 @@ public class BlockingHttpServer extends ExternalResource {
     }
 
     private BlockingHandler addBlockingHandler(final int concurrent, final Collection<? extends ResourceExpectation> expectations) {
-        return handler.addHandler(new ChainingHttpHandler.HandlerFactory<CyclicBarrierAnyOfRequestHandler>() {
-            @Override
-            public CyclicBarrierAnyOfRequestHandler create(WaitPrecondition previous) {
-                return new CyclicBarrierAnyOfRequestHandler(lock, serverId, timeoutMs, concurrent, previous, expectations);
-            }
-        });
+        return handler.addHandler(previous -> new ExpectMaxNConcurrentRequests(lock, serverId, timeout, concurrent, previous, expectations));
     }
 
     private BlockingHandler addBlockingOptionalHandler(final int concurrent, final Collection<? extends ResourceExpectation> expectations) {
-        return handler.addHandler(new ChainingHttpHandler.HandlerFactory<CyclicBarrierAnyOfRequestHandler>() {
-            @Override
-            public CyclicBarrierAnyOfRequestHandler create(WaitPrecondition previous) {
-                return new CyclicBarrierAnyOfOptionalRequestHandler(lock, serverId, timeoutMs, concurrent, previous, expectations);
-            }
-        });
+        return handler.addHandler(previous -> new MaybeNConcurrentRequests(lock, serverId, timeout, concurrent, previous, expectations));
     }
 
     /**
@@ -324,6 +366,11 @@ public class BlockingHttpServer extends ExternalResource {
         });
     }
 
+    @Override
+    public void resetExpectations() {
+        handler.resetExpectations();
+    }
+
     /**
      * For testing this fixture only.
      */
@@ -341,6 +388,17 @@ public class BlockingHttpServer extends ExternalResource {
             throw new IllegalStateException("Cannot get HTTP port as server is not running.");
         }
         return server.getAddress().getPort();
+    }
+
+    /**
+     * To help with debugging the underlying {@link com.sun.net.httpserver.HttpServer}.
+     */
+    public static void enableServerLogging() {
+        final ConsoleHandler handler = new ConsoleHandler();
+        handler.setLevel(Level.ALL);
+        final Logger logger = Logger.getLogger("com.sun.net.httpserver");
+        logger.setLevel(Level.ALL);
+        logger.addHandler(handler);
     }
 
     static String normalizePath(String path) {
@@ -439,6 +497,23 @@ public class BlockingHttpServer extends ExternalResource {
          * Waits for the expected number of concurrent requests to be received.
          */
         void waitForAllPendingCalls();
+
+        /**
+         * Waits for the expected number of concurrent requests to be received or until the given {@link FailureTracker} provides a
+         * failure captured during execution which should be reported without waiting further.
+         */
+        void waitForAllPendingCalls(FailureTracker failureTracker);
+    }
+
+    public interface FailureTracker {
+        FailureTracker NO_FAILURE_TRACKER = new FailureTracker() {
+            @Override
+            public RuntimeException getFailure() {
+                return null;
+            }
+        };
+
+        RuntimeException getFailure();
     }
 
     private static class SendEmptyResponse extends ErroringAction<HttpExchange> {
@@ -459,6 +534,19 @@ public class BlockingHttpServer extends ExternalResource {
             } finally {
                 lock.unlock();
             }
+        }
+    }
+
+    protected enum Scheme {
+        HTTP("http", "127.0.0.1"),
+        HTTPS("https", "localhost");
+
+        private final String scheme;
+        private final String host;
+
+        Scheme(String scheme, String host) {
+            this.scheme = scheme;
+            this.host = host;
         }
     }
 }

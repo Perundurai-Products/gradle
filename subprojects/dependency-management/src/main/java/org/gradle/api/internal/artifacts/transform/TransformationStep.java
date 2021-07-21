@@ -18,11 +18,18 @@ package org.gradle.api.internal.artifacts.transform;
 
 import com.google.common.collect.ImmutableList;
 import org.gradle.api.Action;
+import org.gradle.api.internal.DomainObjectContext;
 import org.gradle.api.internal.attributes.ImmutableAttributes;
+import org.gradle.api.internal.project.ProjectInternal;
+import org.gradle.api.internal.tasks.NodeExecutionContext;
+import org.gradle.api.internal.tasks.TaskDependencyContainer;
+import org.gradle.api.internal.tasks.TaskDependencyResolveContext;
 import org.gradle.internal.Try;
+import org.gradle.internal.execution.fingerprint.InputFingerprinter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
 import java.io.File;
 
 /**
@@ -30,15 +37,28 @@ import java.io.File;
  *
  * Transforms a subject by invoking a transformer on each of the subjects files.
  */
-public class TransformationStep implements Transformation {
+public class TransformationStep implements Transformation, TaskDependencyContainer {
     private static final Logger LOGGER = LoggerFactory.getLogger(TransformationStep.class);
 
     private final Transformer transformer;
-    private final TransformerInvoker transformerInvoker;
+    private final TransformerInvocationFactory transformerInvocationFactory;
+    private final ProjectInternal owningProject;
+    private final InputFingerprinter globalInputFingerprinter;
 
-    public TransformationStep(Transformer transformer, TransformerInvoker transformerInvoker) {
+    public TransformationStep(Transformer transformer, TransformerInvocationFactory transformerInvocationFactory, DomainObjectContext owner, InputFingerprinter globalInputFingerprinter) {
         this.transformer = transformer;
-        this.transformerInvoker = transformerInvoker;
+        this.transformerInvocationFactory = transformerInvocationFactory;
+        this.globalInputFingerprinter = globalInputFingerprinter;
+        this.owningProject = owner.getProject();
+    }
+
+    public Transformer getTransformer() {
+        return transformer;
+    }
+
+    @Nullable
+    public ProjectInternal getOwningProject() {
+        return owningProject;
     }
 
     @Override
@@ -51,24 +71,47 @@ public class TransformationStep implements Transformation {
         return 1;
     }
 
-    @Override
-    public Try<TransformationSubject> transform(TransformationSubject subjectToTransform, ExecutionGraphDependenciesResolver dependenciesResolver) {
+    public CacheableInvocation<TransformationSubject> createInvocation(TransformationSubject subjectToTransform, TransformUpstreamDependencies upstreamDependencies, @Nullable NodeExecutionContext context) {
         if (LOGGER.isInfoEnabled()) {
             LOGGER.info("Transforming {} with {}", subjectToTransform.getDisplayName(), transformer.getDisplayName());
         }
-        ImmutableList<File> primaryInputs = subjectToTransform.getFiles();
-        return dependenciesResolver.forTransformer(transformer).flatMap(dependencies -> {
-            ImmutableList.Builder<File> builder = ImmutableList.builder();
-            for (File primaryInput : primaryInputs) {
-                Try<ImmutableList<File>> result = transformerInvoker.invoke(transformer, primaryInput, dependencies, subjectToTransform);
 
-                if (result.getFailure().isPresent()) {
-                    return Try.failure(result.getFailure().get());
+        InputFingerprinter inputFingerprinter = context != null ? context.getService(InputFingerprinter.class) : globalInputFingerprinter;
+
+        Try<ArtifactTransformDependencies> resolvedDependencies = upstreamDependencies.computeArtifacts();
+        return resolvedDependencies
+            .map(dependencies -> {
+                ImmutableList<File> inputArtifacts = subjectToTransform.getFiles();
+                if (inputArtifacts.isEmpty()) {
+                    return CacheableInvocation.cached(Try.successful(subjectToTransform.createSubjectFromResult(ImmutableList.of())));
+                } else if (inputArtifacts.size() > 1) {
+                    return CacheableInvocation.nonCached(() ->
+                        doTransform(subjectToTransform, inputFingerprinter, dependencies, inputArtifacts)
+                    );
+                } else {
+                    File inputArtifact = inputArtifacts.get(0);
+                    return transformerInvocationFactory.createInvocation(transformer, inputArtifact, dependencies, subjectToTransform, inputFingerprinter)
+                        .map(subjectToTransform::createSubjectFromResult);
                 }
-                builder.addAll(result.get());
+            })
+            .getOrMapFailure(failure -> CacheableInvocation.cached(Try.failure(failure)));
+    }
+
+    private Try<TransformationSubject> doTransform(TransformationSubject subjectToTransform, InputFingerprinter inputFingerprinter, ArtifactTransformDependencies dependencies, ImmutableList<File> inputArtifacts) {
+        ImmutableList.Builder<File> builder = ImmutableList.builder();
+        for (File inputArtifact : inputArtifacts) {
+            Try<ImmutableList<File>> result = transformerInvocationFactory.createInvocation(transformer, inputArtifact, dependencies, subjectToTransform, inputFingerprinter).invoke();
+
+            if (result.getFailure().isPresent()) {
+                return Try.failure(result.getFailure().get());
             }
-            return Try.successful(subjectToTransform.createSubjectFromResult(builder.build()));
-        });
+            builder.addAll(result.get());
+        }
+        return Try.successful(subjectToTransform.createSubjectFromResult(builder.build()));
+    }
+
+    public void isolateParametersIfNotAlready() {
+        transformer.isolateParametersIfNotAlready();
     }
 
     @Override
@@ -92,24 +135,11 @@ public class TransformationStep implements Transformation {
 
     @Override
     public String toString() {
-        return String.format("%s@%s", transformer.getDisplayName(), transformer.getSecondaryInputHash());
+        return transformer.getDisplayName();
     }
 
     @Override
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (o == null || getClass() != o.getClass()) {
-            return false;
-        }
-
-        TransformationStep that = (TransformationStep) o;
-        return transformer.equals(that.transformer);
-    }
-
-    @Override
-    public int hashCode() {
-        return transformer.hashCode();
+    public void visitDependencies(TaskDependencyResolveContext context) {
+        transformer.visitDependencies(context);
     }
 }

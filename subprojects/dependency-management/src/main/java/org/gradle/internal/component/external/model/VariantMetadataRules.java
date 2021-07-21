@@ -18,7 +18,9 @@ package org.gradle.internal.component.external.model;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import org.gradle.api.Action;
-import org.gradle.api.InvalidUserDataException;
+import org.gradle.api.artifacts.MutableVariantFilesMetadata;
+import org.gradle.api.artifacts.ModuleVersionIdentifier;
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier;
 import org.gradle.api.capabilities.CapabilitiesMetadata;
 import org.gradle.api.artifacts.DependencyConstraintMetadata;
 import org.gradle.api.artifacts.DependencyConstraintsMetadata;
@@ -31,7 +33,8 @@ import org.gradle.api.internal.attributes.AttributeContainerInternal;
 import org.gradle.api.internal.attributes.ImmutableAttributes;
 import org.gradle.api.internal.attributes.ImmutableAttributesFactory;
 import org.gradle.api.specs.Spec;
-import org.gradle.internal.Cast;
+import org.gradle.internal.component.model.ComponentArtifactMetadata;
+import org.gradle.internal.component.model.VariantFilesRules;
 import org.gradle.internal.component.model.CapabilitiesRules;
 import org.gradle.internal.component.model.DependencyMetadataRules;
 import org.gradle.internal.component.model.VariantAttributesRules;
@@ -39,26 +42,22 @@ import org.gradle.internal.component.model.VariantResolveMetadata;
 import org.gradle.internal.reflect.Instantiator;
 import org.gradle.internal.typeconversion.NotationParser;
 
-import java.util.Iterator;
+import java.util.ArrayList;
 import java.util.List;
 
 public class VariantMetadataRules {
     private final ImmutableAttributesFactory attributesFactory;
+    private final ModuleVersionIdentifier moduleVersionId;
+    private final List<AdditionalVariant> additionalVariants = Lists.newArrayList();
+
     private DependencyMetadataRules dependencyMetadataRules;
     private VariantAttributesRules variantAttributesRules;
     private CapabilitiesRules capabilitiesRules;
-    private VariantDerivationStrategy variantDerivationStrategy = new NoOpDerivationStrategy();
+    private VariantFilesRules variantFilesRules;
 
-    public VariantMetadataRules(ImmutableAttributesFactory attributesFactory) {
+    public VariantMetadataRules(ImmutableAttributesFactory attributesFactory, ModuleVersionIdentifier moduleVersionId) {
         this.attributesFactory = attributesFactory;
-    }
-
-    public VariantDerivationStrategy getVariantDerivationStrategy() {
-        return variantDerivationStrategy;
-    }
-
-    public void setVariantDerivationStrategy(VariantDerivationStrategy variantDerivationStrategy) {
-        this.variantDerivationStrategy = variantDerivationStrategy;
+        this.moduleVersionId = moduleVersionId;
     }
 
     public ImmutableAttributes applyVariantAttributeRules(VariantResolveMetadata variant, AttributeContainerInternal source) {
@@ -70,7 +69,13 @@ public class VariantMetadataRules {
 
     public CapabilitiesMetadata applyCapabilitiesRules(VariantResolveMetadata variant, CapabilitiesMetadata capabilities) {
         if (capabilitiesRules != null) {
-            MutableCapabilities mutableCapabilities = new MutableCapabilities(Lists.newArrayList(capabilities.getCapabilities()));
+            ArrayList<Capability> descriptors = Lists.newArrayList(capabilities.getCapabilities());
+            if (descriptors.isEmpty()) {
+                // we must add the implicit capability here because it is assumed that if there's a rule
+                // "addCapability" would effectively _add_ a capability, so the implicit one must not be forgotten
+                descriptors.add(new ImmutableCapability(moduleVersionId.getGroup(), moduleVersionId.getName(), moduleVersionId.getVersion()));
+            }
+            DefaultMutableCapabilities mutableCapabilities = new DefaultMutableCapabilities(descriptors);
             return capabilitiesRules.execute(variant, mutableCapabilities);
         }
         return capabilities;
@@ -81,6 +86,20 @@ public class VariantMetadataRules {
             return dependencyMetadataRules.execute(variant, configDependencies);
         }
         return configDependencies;
+    }
+
+    public <T extends ComponentArtifactMetadata> ImmutableList<T> applyVariantFilesMetadataRulesToArtifacts(VariantResolveMetadata variant, ImmutableList<T> declaredArtifacts, ModuleComponentIdentifier componentIdentifier) {
+        if (variantFilesRules != null) {
+            return variantFilesRules.executeForArtifacts(variant, declaredArtifacts, componentIdentifier);
+        }
+        return declaredArtifacts;
+    }
+
+    public <T extends ComponentVariant.File> ImmutableList<T> applyVariantFilesMetadataRulesToFiles(VariantResolveMetadata variant, ImmutableList<T> declaredFiles, ModuleComponentIdentifier componentIdentifier) {
+        if (variantFilesRules != null) {
+            return variantFilesRules.executeForFiles(variant, declaredFiles, componentIdentifier);
+        }
+        return declaredFiles;
     }
 
     public void addDependencyAction(Instantiator instantiator, NotationParser<Object, DirectDependencyMetadata> dependencyNotationParser, NotationParser<Object, DependencyConstraintMetadata> dependencyConstraintNotationParser, VariantAction<? super DirectDependenciesMetadata> action) {
@@ -109,6 +128,25 @@ public class VariantMetadataRules {
             capabilitiesRules = new CapabilitiesRules();
         }
         capabilitiesRules.addCapabilitiesAction(action);
+    }
+
+    public void addVariantFilesAction(VariantAction<? super MutableVariantFilesMetadata> action) {
+        if (variantFilesRules == null) {
+            variantFilesRules = new VariantFilesRules();
+        }
+        variantFilesRules.addFilesAction(action);
+    }
+
+    public void addVariant(String name) {
+        additionalVariants.add(new AdditionalVariant(name));
+    }
+
+    public void addVariant(String name, String basedOn, boolean lenient) {
+        additionalVariants.add(new AdditionalVariant(name, basedOn, lenient));
+    }
+
+    public List<AdditionalVariant> getAdditionalVariants() {
+        return additionalVariants;
     }
 
     public static VariantMetadataRules noOp() {
@@ -145,12 +183,7 @@ public class VariantMetadataRules {
         private final static ImmutableRules INSTANCE = new ImmutableRules();
 
         private ImmutableRules() {
-            super(null);
-        }
-
-        @Override
-        public void setVariantDerivationStrategy(VariantDerivationStrategy variantDerivationStrategy) {
-            throw new UnsupportedOperationException("You are probably trying to set the derivation strategy to something that wasn't supposed to be mutable");
+            super(null, null);
         }
 
         @Override
@@ -172,47 +205,6 @@ public class VariantMetadataRules {
         public void addCapabilitiesAction(VariantAction<? super MutableCapabilitiesMetadata> action) {
             throw new UnsupportedOperationException("You are probably trying to change capabilities of something that wasn't supposed to be mutable");
         }
-    }
-
-    private static class MutableCapabilities implements MutableCapabilitiesMetadata {
-        private final List<Capability> descriptors;
-
-        private MutableCapabilities(List<Capability> descriptors) {
-            this.descriptors = descriptors;
-        }
-
-        @Override
-        public void addCapability(String group, String name, String version) {
-            for (Capability descriptor : descriptors) {
-                if (descriptor.getGroup().equals(group) && descriptor.getName().equals(name) && !descriptor.getVersion().equals(version)) {
-                    throw new InvalidUserDataException("Cannot add capability " + group + ":" + name + " with version " + version + " because it's already defined with version " + descriptor.getVersion());
-                }
-            }
-            descriptors.add(new ImmutableCapability(group, name, version));
-        }
-
-        @Override
-        public void removeCapability(String group, String name) {
-            Iterator<Capability> it = descriptors.iterator();
-            while (it.hasNext()) {
-                Capability next = it.next();
-                if (next.getGroup().equals(group) && next.getName().equals(name)) {
-                    it.remove();
-                }
-            }
-        }
-
-        @Override
-        public CapabilitiesMetadata asImmutable() {
-            ImmutableList<ImmutableCapability> capabilities = Cast.uncheckedCast(getCapabilities());
-            return new ImmutableCapabilities(capabilities);
-        }
-
-        @Override
-        public List<? extends Capability> getCapabilities() {
-            return ImmutableList.copyOf(descriptors);
-        }
-
     }
 
 }

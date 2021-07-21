@@ -23,7 +23,7 @@ import org.gradle.internal.jvm.Jvm
 import org.gradle.process.ExecResult
 import org.gradle.test.fixtures.concurrent.ConcurrentSpec
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
-import org.gradle.util.GUtil
+import org.gradle.util.internal.GUtil
 import org.gradle.util.UsesNativeServices
 import org.junit.Rule
 import spock.lang.Ignore
@@ -35,7 +35,7 @@ import java.util.concurrent.Executor
 @UsesNativeServices
 @Timeout(60)
 class DefaultExecHandleSpec extends ConcurrentSpec {
-    @Rule final TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
+    @Rule final TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider(getClass())
     private BuildCancellationToken buildCancellationToken = Mock(BuildCancellationToken)
 
     void "forks process"() {
@@ -328,7 +328,6 @@ class DefaultExecHandleSpec extends ConcurrentSpec {
         execHandle.abort()
     }
 
-    @Ignore //not yet implemented
     void "can detach from long daemon and then wait for finish"() {
         def out = new ByteArrayOutputStream()
         def execHandle = handle().setStandardOutput(out).args(args(SlowDaemonApp.class, "200")).build()
@@ -347,7 +346,6 @@ class DefaultExecHandleSpec extends ConcurrentSpec {
         execHandle.state == ExecHandleState.SUCCEEDED
     }
 
-    @Ignore //not yet implemented
     void "can detach from fast app then wait for finish"() {
         def out = new ByteArrayOutputStream()
         def execHandle = handle().setStandardOutput(out).args(args(TestApp.class)).build()
@@ -373,7 +371,7 @@ class DefaultExecHandleSpec extends ConcurrentSpec {
         then:
         execHandle.state == ExecHandleState.FAILED
         detachResult.processCompleted
-        detachResult.execResult.exitValue == 72
+        detachResult.executionResult.get().exitValue == 72
     }
 
     void "can redirect error stream"() {
@@ -445,13 +443,22 @@ class DefaultExecHandleSpec extends ConcurrentSpec {
 
     private DefaultExecHandleBuilder handle() {
         new DefaultExecHandleBuilder(TestFiles.pathToFileResolver(), executor, buildCancellationToken)
-                .executable(Jvm.current().getJavaExecutable().getAbsolutePath())
-                .setTimeout(20000) //sanity timeout
-                .workingDir(tmpDir.getTestDirectory())
+            .executable(Jvm.current().getJavaExecutable().getAbsolutePath())
+            .setTimeout(20000) //sanity timeout
+            .workingDir(tmpDir.getTestDirectory())
+            .environment('CLASSPATH', mergeClasspath())
     }
 
-    private List args(Class mainClass, String ... args) {
-        GUtil.flattenElements("-cp", System.getProperty("java.class.path"), mainClass.getName(), args)
+    private String mergeClasspath() {
+        if (System.getenv('CLASSPATH') == null) {
+            return System.getProperty('java.class.path')
+        } else {
+            return "${System.getenv('CLASSPATH')}${File.pathSeparator}${System.getProperty('java.class.path')}"
+        }
+    }
+
+    private List args(Class mainClass, String... args) {
+        GUtil.flattenElements(mainClass.getName(), args)
     }
 
     public static class BrokenApp {
@@ -471,7 +478,7 @@ class DefaultExecHandleSpec extends ConcurrentSpec {
             System.out.println("I'm the daemon")
             System.out.close()
             System.err.close()
-            int napTime = (args.length == 0) ? 10000L : Integer.valueOf(args[0])
+            int napTime = (args.length == 0) ? 10000L : Integer.parseInt(args[0])
             Thread.sleep(napTime)
         }
     }

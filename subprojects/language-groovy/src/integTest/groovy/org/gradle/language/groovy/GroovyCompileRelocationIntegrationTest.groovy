@@ -16,16 +16,26 @@
 
 package org.gradle.language.groovy
 
-import org.gradle.integtests.fixtures.AbstractProjectRelocationIntegrationTest
+import org.gradle.integtests.fixtures.ForkCapableRelocationIntegrationTest
 import org.gradle.test.fixtures.file.TestFile
 
 import static org.gradle.util.JarUtils.jarWithContents
 
-class GroovyCompileRelocationIntegrationTest extends AbstractProjectRelocationIntegrationTest {
+class GroovyCompileRelocationIntegrationTest extends ForkCapableRelocationIntegrationTest {
 
     @Override
     protected String getTaskName() {
         return ":compile"
+    }
+
+    @Override
+    String getDaemonConfiguration() {
+        return "compile.groovyOptions.fork = true"
+    }
+
+    @Override
+    String getForkOptionsObject() {
+        return "compile.groovyOptions.forkOptions"
     }
 
     @Override
@@ -40,7 +50,7 @@ class GroovyCompileRelocationIntegrationTest extends AbstractProjectRelocationIn
             task compile(type: GroovyCompile) {
                 sourceCompatibility = JavaVersion.current()
                 targetCompatibility = JavaVersion.current()
-                destinationDir = file("build/classes")
+                destinationDirectory = file("build/classes")
                 source "src/main/groovy"
                 classpath = files()
                 groovyClasspath = files('libs')

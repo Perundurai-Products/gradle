@@ -16,7 +16,9 @@
 
 package org.gradle.internal.locking;
 
+import com.google.common.collect.ImmutableSet;
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier;
+import org.gradle.api.internal.artifacts.dsl.dependencies.LockEntryFilter;
 
 import java.util.HashSet;
 import java.util.List;
@@ -24,38 +26,26 @@ import java.util.Set;
 
 class LockEntryFilterFactory {
 
-    private static final LockEntryFilter FILTERS_NONE = new LockEntryFilter() {
-        @Override
-        public boolean isSatisfiedBy(ModuleComponentIdentifier element) {
-            return false;
-        }
+    protected static final LockEntryFilter FILTERS_NONE = element -> false;
+    private static final LockEntryFilter FILTERS_ALL = element -> true;
 
-    };
-
-    private static final LockEntryFilter FILTERS_ALL = new LockEntryFilter() {
-        @Override
-        public boolean isSatisfiedBy(ModuleComponentIdentifier element) {
-            return true;
-        }
-
-    };
     private static final String WILDCARD_SUFFIX = "*";
     public static final String MODULE_SEPARATOR = ":";
 
-    static LockEntryFilter forParameter(List<String> lockedDependenciesToUpdate) {
-        if (lockedDependenciesToUpdate.isEmpty()) {
+    static LockEntryFilter forParameter(List<String> dependencyNotations, String context, boolean allowFullWildcard) {
+        if (dependencyNotations.isEmpty()) {
             return FILTERS_NONE;
         }
-        HashSet<LockEntryFilter> lockEntryFilters = new HashSet<LockEntryFilter>();
-        for (String lockExcludes : lockedDependenciesToUpdate) {
+        HashSet<LockEntryFilter> lockEntryFilters = new HashSet<>();
+        for (String lockExcludes : dependencyNotations) {
             for (String lockExclude : lockExcludes.split(",")) {
                 String[] split = lockExclude.split(MODULE_SEPARATOR);
-                validateNotation(lockExclude, split);
+                validateNotation(lockExclude, split, allowFullWildcard, context);
 
                 lockEntryFilters.add(createFilter(split[0], split[1]));
             }
             if (lockEntryFilters.isEmpty()) {
-                throwInvalid(lockExcludes);
+                throwInvalid(lockExcludes, context);
             }
         }
 
@@ -66,8 +56,8 @@ class LockEntryFilterFactory {
         }
     }
 
-    private static void throwInvalid(String lockExclude) {
-        throw new IllegalArgumentException("Update lock format must be <group>:<artifact> but '" + lockExclude + "' is invalid.");
+    private static void throwInvalid(String lockExclude, String context) {
+        throw new IllegalArgumentException(context + " format must be <group>:<artifact> but '" + lockExclude + "' is invalid.");
     }
 
     private static LockEntryFilter createFilter(final String group, final String module) {
@@ -78,17 +68,38 @@ class LockEntryFilterFactory {
         return new GroupModuleLockEntryFilter(group, module);
     }
 
-    private static void validateNotation(String lockExclude, String[] split) {
+    private static void validateNotation(String lockExclude, String[] split, boolean allowFullWildcard, String context) {
         if (split.length != 2) {
-            throwInvalid(lockExclude);
+            throwInvalid(lockExclude, context);
         }
         String group = split[0];
         String module = split[1];
 
         if ((group.contains(WILDCARD_SUFFIX) && !group.endsWith(WILDCARD_SUFFIX)) || (module.contains(WILDCARD_SUFFIX) && !module.endsWith(WILDCARD_SUFFIX))) {
-            throwInvalid(lockExclude);
+            throwInvalid(lockExclude, context);
         }
 
+        if (!allowFullWildcard && group.equals(WILDCARD_SUFFIX) && module.equals(WILDCARD_SUFFIX)) {
+            throwInvalid(lockExclude, context);
+        }
+
+    }
+
+    public static LockEntryFilter combine(LockEntryFilter firstFilter, LockEntryFilter secondFilter) {
+        if (firstFilter == FILTERS_NONE) {
+            return secondFilter;
+        }
+        if (secondFilter == FILTERS_NONE) {
+            return firstFilter;
+        }
+        if (firstFilter == FILTERS_ALL) {
+            return firstFilter;
+        }
+        if (secondFilter == FILTERS_ALL) {
+            return secondFilter;
+        }
+
+        return new AggregateLockEntryFilter(ImmutableSet.of(firstFilter, secondFilter));
     }
 
     private static class AggregateLockEntryFilter implements LockEntryFilter {
@@ -118,6 +129,7 @@ class LockEntryFilterFactory {
             this.module = module;
         }
 
+        @Override
         public boolean isSatisfiedBy(ModuleComponentIdentifier id) {
             return matches(group, id.getGroup()) && matches(module, id.getModule());
         }

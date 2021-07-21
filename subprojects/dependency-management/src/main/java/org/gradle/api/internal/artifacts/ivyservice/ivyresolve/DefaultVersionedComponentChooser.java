@@ -15,7 +15,6 @@
  */
 package org.gradle.api.internal.artifacts.ivyservice.ivyresolve;
 
-import com.google.common.collect.Lists;
 import org.gradle.api.Action;
 import org.gradle.api.artifacts.ComponentMetadata;
 import org.gradle.api.artifacts.ComponentSelection;
@@ -39,7 +38,7 @@ import org.gradle.internal.resolve.RejectedByRuleVersion;
 import org.gradle.internal.resolve.result.BuildableModuleComponentMetaDataResolveResult;
 import org.gradle.internal.resolve.result.ComponentSelectionContext;
 import org.gradle.internal.rules.SpecRuleAction;
-import org.gradle.util.CollectionUtils;
+import org.gradle.util.internal.CollectionUtils;
 
 import javax.annotation.Nullable;
 import java.util.Collection;
@@ -60,7 +59,8 @@ class DefaultVersionedComponentChooser implements VersionedComponentChooser {
         this.attributesSchema = (AttributesSchemaInternal) attributesSchema;
     }
 
-    public ComponentResolveMetadata selectNewestComponent(ComponentResolveMetadata one, ComponentResolveMetadata two) {
+    @Override
+    public ComponentResolveMetadata selectNewestComponent(@Nullable ComponentResolveMetadata one, @Nullable ComponentResolveMetadata two) {
         if (one == null || two == null) {
             return two == null ? one : two;
         }
@@ -81,15 +81,23 @@ class DefaultVersionedComponentChooser implements VersionedComponentChooser {
         return componentResolveMetadata.isMissing();
     }
 
+    @Override
     public void selectNewestMatchingComponent(Collection<? extends ModuleComponentResolveState> versions, ComponentSelectionContext result, VersionSelector requestedVersionMatcher, VersionSelector rejectedVersionSelector, ImmutableAttributes consumerAttributes) {
         Collection<SpecRuleAction<? super ComponentSelection>> rules = componentSelectionRules.getRules();
 
         // Loop over all listed versions, sorted by LATEST first
         List<ModuleComponentResolveState> resolveStates = sortLatestFirst(versions);
-        resolveStates = filterModules(resolveStates, result);
+        Action<? super ArtifactResolutionDetails> contentFilter = result.getContentFilter();
         for (ModuleComponentResolveState candidate : resolveStates) {
-            DefaultMetadataProvider metadataProvider = createMetadataProvider(candidate);
+            if (contentFilter != null) {
+                DynamicArtifactResolutionDetails details = new DynamicArtifactResolutionDetails(candidate, result.getConfigurationName(), result.getConsumerAttributes());
+                contentFilter.execute(details);
+                if (!details.found) {
+                    continue;
+                }
+            }
 
+            DefaultMetadataProvider metadataProvider = createMetadataProvider(candidate);
             boolean versionMatches = versionMatches(requestedVersionMatcher, candidate, metadataProvider);
             if (metadataIsNotUsable(result, metadataProvider)) {
                 return;
@@ -129,24 +137,7 @@ class DefaultVersionedComponentChooser implements VersionedComponentChooser {
         result.noMatchFound();
     }
 
-    private List<ModuleComponentResolveState> filterModules(List<ModuleComponentResolveState> resolveStates, ComponentSelectionContext result) {
-        Action<? super ArtifactResolutionDetails> contentFilter = result.getContentFilter();
-        if (contentFilter == null) {
-            return resolveStates;
-        }
-        List<ModuleComponentResolveState> out = Lists.newArrayListWithCapacity(resolveStates.size());
-        String configurationName = result.getConfigurationName();
-        ImmutableAttributes consumerAttributes = result.getConsumerAttributes();
-        for (ModuleComponentResolveState resolveState : resolveStates) {
-            DynamicArtifactResolutionDetails details = new DynamicArtifactResolutionDetails(resolveState, configurationName, consumerAttributes);
-            contentFilter.execute(details);
-            if (details.found) {
-                out.add(resolveState);
-            }
-        }
-        return out;
-    }
-
+    @Nullable
     private RejectedByAttributesVersion tryRejectByAttributes(ModuleComponentIdentifier id, MetadataProvider provider, ImmutableAttributes consumerAttributes) {
         if (consumerAttributes.isEmpty()) {
             return null;
@@ -190,9 +181,6 @@ class DefaultVersionedComponentChooser implements VersionedComponentChooser {
         BuildableModuleComponentMetaDataResolveResult metaDataResult = provider.getResult();
         switch (metaDataResult.getState()) {
             case Unknown:
-                // For example, when using a local access to resolve something remote
-                result.noMatchFound();
-                break;
             case Missing:
                 result.noMatchFound();
                 break;
@@ -213,10 +201,12 @@ class DefaultVersionedComponentChooser implements VersionedComponentChooser {
         }
     }
 
+    @Override
     public RejectedByRuleVersion isRejectedComponent(ModuleComponentIdentifier candidateIdentifier, MetadataProvider metadataProvider) {
         return isRejectedByRule(candidateIdentifier, componentSelectionRules.getRules(), metadataProvider);
     }
 
+    @Nullable
     private RejectedByRuleVersion isRejectedByRule(ModuleComponentIdentifier candidateIdentifier, Collection<SpecRuleAction<? super ComponentSelection>> rules, MetadataProvider metadataProvider) {
         ComponentSelectionInternal selection = new DefaultComponentSelection(candidateIdentifier, metadataProvider);
         rulesProcessor.apply(selection, rules, metadataProvider);

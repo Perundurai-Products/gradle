@@ -15,8 +15,12 @@
  */
 package org.gradle.groovy.compile
 import org.gradle.internal.jvm.Jvm
+import org.junit.Assume
 import spock.lang.Issue
 
+/**
+ * Tests in this class use on disk build files - see resources/org/gradle/groovy/compile/GroovyCompilerIntegrationSpec/**
+ */
 abstract class GroovyCompilerIntegrationSpec extends BasicGroovyCompilerIntegrationSpec {
     def "canUseBuiltInAstTransform"() {
         if (versionLowerThan('1.6')) {
@@ -87,11 +91,25 @@ abstract class GroovyCompilerIntegrationSpec extends BasicGroovyCompilerIntegrat
     }
 
     def canJointCompileWithJavaCompilerExecutable() {
+        Assume.assumeTrue("Setup invalid with toolchains", !getClass().name.contains('Toolchain'))
         args("-PjdkHome=${Jvm.current().getJavaHome().absolutePath}")
 
         expect:
         succeeds("compileGroovy")
         groovyClassFile("GroovyCode.class").exists()
         groovyClassFile("JavaCode.class").exists()
+    }
+
+    @Issue("gradle/gradle#5908")
+    def "canUseAstTransformWithAsm"() {
+        if (versionLowerThan('1.8')) {
+            return
+        }
+
+        when:
+        run("test")
+
+        then:
+        noExceptionThrown()
     }
 }

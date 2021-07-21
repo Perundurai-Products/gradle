@@ -18,9 +18,11 @@ package org.gradle.integtests
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 import org.gradle.test.fixtures.file.TestFile
+import org.gradle.util.Requires
+import org.gradle.util.TestPrecondition
 import spock.lang.Issue
 
-import static org.gradle.util.TextUtil.escapeString
+import static org.gradle.util.internal.TextUtil.escapeString
 
 @Issue("https://github.com/gradle/gradle/issues/1498")
 class ScalaAnnotationProcessingIntegrationTest extends AbstractIntegrationSpec {
@@ -37,7 +39,7 @@ class ScalaAnnotationProcessingIntegrationTest extends AbstractIntegrationSpec {
         skipped(':compileJava')
         executedAndNotSkipped(':compileScala')
         result.assertHasErrorOutput('error: package org.gradle does not exist')
-        failure.assertHasCause('javac returned nonzero exit code')
+        failure.assertHasCause('javac returned non-zero exit code')
     }
 
     def "does not process annotation for Java class if annotation processor is only available on classpath"() {
@@ -89,6 +91,47 @@ class ScalaAnnotationProcessingIntegrationTest extends AbstractIntegrationSpec {
         new File(testDirectory, 'generated.txt').exists()
     }
 
+    def "processes annotation for Java class with processor option if annotation processor is available on processor path"() {
+        when:
+        AnnotationProcessorPublisher annotationProcessorPublisher = new AnnotationProcessorPublisher()
+        annotationProcessorPublisher.writeSourceFiles()
+        inDirectory(annotationProcessorPublisher.projectDir).withTasks('publish').run()
+
+        then:
+        annotationProcessorPublisher.publishedJarFile.isFile()
+        annotationProcessorPublisher.publishedPomFile.isFile()
+
+        when:
+        buildFile << basicScalaProject()
+        buildFile << annotationProcessorDependency(annotationProcessorPublisher.repoDir, annotationProcessorPublisher.dependencyCoordinates)
+        buildFile << """
+            configurations.annotationProcessor.extendsFrom configurations.compileOnly
+            compileScala.options.compilerArgumentProviders.add(new FileNameProvider("foo"))
+
+            class FileNameProvider implements CommandLineArgumentProvider {
+                @Internal
+                String fileName
+
+                FileNameProvider(String fileName) {
+                    this.fileName = fileName
+                }
+
+                @Override
+                List<String> asArguments() {
+                    ["-AfileName=\${fileName}".toString()]
+                }
+            }
+        """
+        file('src/main/scala/MyClass.java') << javaClassWithCustomAnnotation()
+
+        succeeds 'compileScala'
+
+        then:
+        skipped(':compileJava')
+        executedAndNotSkipped(':compileScala')
+        new File(testDirectory, 'foo.txt').exists()
+    }
+
     def "cannot use external annotation processor for Java class, from classpath"() {
         given:
         buildFile << basicScalaProject()
@@ -103,6 +146,8 @@ class ScalaAnnotationProcessingIntegrationTest extends AbstractIntegrationSpec {
         executedAndNotSkipped(':compileScala')
     }
 
+    // https://github.com/rzwitserloot/lombok/issues/2681
+    @Requires(TestPrecondition.JDK15_OR_EARLIER)
     def "can use external annotation processor for Java class, from processor path"() {
         given:
         buildFile << basicScalaProject()
@@ -122,12 +167,14 @@ class ScalaAnnotationProcessingIntegrationTest extends AbstractIntegrationSpec {
 
     static String basicScalaProject() {
         """
-            apply plugin: 'scala'
+            plugins {
+                id("scala")
+            }
 
             ${mavenCentralRepository()}
-            
+
             dependencies {
-                compile 'org.scala-lang:scala-library:2.11.12'
+                implementation 'org.scala-lang:scala-library:2.11.12'
             }
         """
     }
@@ -151,7 +198,7 @@ class ScalaAnnotationProcessingIntegrationTest extends AbstractIntegrationSpec {
     static String lombokDependency() {
         """
             dependencies {
-                compileOnly 'org.projectlombok:lombok:1.16.22'
+                compileOnly 'org.projectlombok:lombok:1.18.18'
             }
         """
     }
@@ -168,7 +215,7 @@ class ScalaAnnotationProcessingIntegrationTest extends AbstractIntegrationSpec {
             @lombok.Value
             public class Test {
                 String test;
-                
+
                 static {
                     new Test("test").getTest();
                 }
@@ -240,10 +287,10 @@ class ScalaAnnotationProcessingIntegrationTest extends AbstractIntegrationSpec {
         private void writeProcessorSourceFile() {
             file("$name/src/main/java/org/gradle/Custom.java") << """
                 package org.gradle;
-                
+
                 import java.lang.annotation.*;
-                
-                @Target(ElementType.TYPE) 
+
+                @Target(ElementType.TYPE)
                 @Retention(RetentionPolicy.CLASS)
                 public @interface Custom {}
             """
@@ -254,6 +301,7 @@ class ScalaAnnotationProcessingIntegrationTest extends AbstractIntegrationSpec {
                 import javax.annotation.processing.*;
                 import javax.lang.model.SourceVersion;
                 import javax.lang.model.element.TypeElement;
+                import java.util.Collections;
                 import java.util.Set;
                 import java.io.PrintStream;
                 import java.io.File;
@@ -266,8 +314,10 @@ class ScalaAnnotationProcessingIntegrationTest extends AbstractIntegrationSpec {
                     public synchronized void init(ProcessingEnvironment processingEnv) {
                         super.init(processingEnv);
 
+                        String fileName = processingEnv.getOptions().getOrDefault("fileName", "generated");
+
                         try {
-                            new File("${escapeString(testDirectory.absolutePath)}/generated.txt").createNewFile();
+                            new File("${escapeString(testDirectory.absolutePath)}/" + fileName + ".txt").createNewFile();
                         } catch (IOException e) {
                             throw new RuntimeException(e);
                         }
@@ -276,6 +326,11 @@ class ScalaAnnotationProcessingIntegrationTest extends AbstractIntegrationSpec {
                     @Override
                     public boolean process(Set<? extends TypeElement> annotations, RoundEnvironment roundEnv) {
                         return false;
+                    }
+
+                    @Override
+                    public Set<String> getSupportedOptions() {
+                        return Collections.singleton("fileName");
                     }
                 }
             """

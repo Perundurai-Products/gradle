@@ -20,11 +20,10 @@ import org.gradle.api.attributes.Attribute
 import org.gradle.api.internal.attributes.DefaultImmutableAttributesFactory
 import org.gradle.api.internal.attributes.ImmutableAttributes
 import org.gradle.api.internal.attributes.ImmutableAttributesFactory
-import org.gradle.api.internal.model.NamedObjectInstantiator
 
 class AttributeTestUtil {
     static ImmutableAttributesFactory attributesFactory() {
-        return new DefaultImmutableAttributesFactory(SnapshotTestUtil.valueSnapshotter(), NamedObjectInstantiator.INSTANCE)
+        return new DefaultImmutableAttributesFactory(SnapshotTestUtil.valueSnapshotter(), TestUtil.objectInstantiator())
     }
 
     static ImmutableAttributes attributes(Map<String, ?> values) {
@@ -35,5 +34,9 @@ class AttributeTestUtil {
             }
         }
         return attrs
+    }
+
+    static <T> T named(Class<T> clazz, String value) {
+        TestUtil.objectInstantiator().named(clazz, value)
     }
 }

@@ -26,14 +26,13 @@ import com.google.common.collect.Maps;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.SetMultimap;
 import org.gradle.api.Transformer;
+import org.gradle.api.artifacts.DependencyConstraint;
 import org.gradle.api.artifacts.ModuleVersionIdentifier;
 import org.gradle.api.artifacts.PublishArtifact;
 import org.gradle.api.artifacts.component.ComponentIdentifier;
-import org.gradle.api.attributes.AttributeContainer;
+import org.gradle.api.attributes.Category;
 import org.gradle.api.capabilities.CapabilitiesMetadata;
 import org.gradle.api.internal.artifacts.configurations.ConfigurationInternal;
-import org.gradle.api.internal.artifacts.configurations.OutgoingVariant;
-import org.gradle.api.internal.artifacts.dsl.dependencies.PlatformSupport;
 import org.gradle.api.internal.artifacts.ivyservice.moduleconverter.dependencies.LocalConfigurationMetadataBuilder;
 import org.gradle.api.internal.attributes.AttributeValue;
 import org.gradle.api.internal.attributes.AttributesSchemaInternal;
@@ -41,21 +40,26 @@ import org.gradle.api.internal.attributes.ImmutableAttributes;
 import org.gradle.internal.Describables;
 import org.gradle.internal.DisplayName;
 import org.gradle.internal.component.external.model.ImmutableCapabilities;
+import org.gradle.internal.component.external.model.VirtualComponentIdentifier;
 import org.gradle.internal.component.model.ComponentArtifactMetadata;
 import org.gradle.internal.component.model.ComponentResolveMetadata;
 import org.gradle.internal.component.model.ConfigurationMetadata;
 import org.gradle.internal.component.model.DefaultVariantMetadata;
 import org.gradle.internal.component.model.ExcludeMetadata;
+import org.gradle.internal.component.model.ImmutableModuleSources;
 import org.gradle.internal.component.model.IvyArtifactName;
 import org.gradle.internal.component.model.LocalOriginDependencyMetadata;
-import org.gradle.internal.component.model.ModuleSource;
+import org.gradle.internal.component.model.ModuleSources;
 import org.gradle.internal.component.model.VariantResolveMetadata;
+import org.gradle.internal.deprecation.DeprecationMessageBuilder;
 
-import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Supplier;
 
 public class DefaultLocalComponentMetadata implements LocalComponentMetadata, BuildableLocalComponentMetadata {
     private final Map<String, DefaultLocalConfigurationMetadata> allConfigurations = Maps.newLinkedHashMap();
@@ -65,6 +69,8 @@ public class DefaultLocalComponentMetadata implements LocalComponentMetadata, Bu
     private final ModuleVersionIdentifier moduleVersionId;
     private final String status;
     private final AttributesSchemaInternal attributesSchema;
+    private final ModuleSources moduleSources = ImmutableModuleSources.of();
+
     private Optional<ImmutableList<? extends ConfigurationMetadata>> consumableConfigurations;
 
     public DefaultLocalComponentMetadata(ModuleVersionIdentifier moduleVersionId, ComponentIdentifier componentId, String status, AttributesSchemaInternal attributesSchema) {
@@ -73,6 +79,7 @@ public class DefaultLocalComponentMetadata implements LocalComponentMetadata, Bu
         this.status = status;
         this.attributesSchema = attributesSchema;
     }
+
     @Override
     public ComponentIdentifier getId() {
         return componentId;
@@ -89,12 +96,12 @@ public class DefaultLocalComponentMetadata implements LocalComponentMetadata, Bu
     public DefaultLocalComponentMetadata copy(ComponentIdentifier componentIdentifier, Transformer<LocalComponentArtifactMetadata, LocalComponentArtifactMetadata> artifacts) {
         DefaultLocalComponentMetadata copy = new DefaultLocalComponentMetadata(moduleVersionId, componentIdentifier, status, attributesSchema);
         for (DefaultLocalConfigurationMetadata configuration : allConfigurations.values()) {
-            copy.addConfiguration(configuration.getName(), configuration.description, configuration.extendsFrom, configuration.hierarchy, configuration.visible, configuration.transitive, configuration.attributes, configuration.canBeConsumed, configuration.canBeResolved, configuration.capabilities);
+            copy.addConfiguration(configuration.getName(), configuration.description, configuration.extendsFrom, configuration.hierarchy, configuration.visible, configuration.transitive, configuration.attributes, configuration.canBeConsumed, configuration.consumptionDeprecation, configuration.canBeResolved, configuration.capabilities, Collections::emptyList);
         }
 
         // Artifacts
         // Keep track of transformed artifacts as a given artifact may appear in multiple variants
-        Map<LocalComponentArtifactMetadata, LocalComponentArtifactMetadata> transformedArtifacts = new HashMap<LocalComponentArtifactMetadata, LocalComponentArtifactMetadata>();
+        Map<LocalComponentArtifactMetadata, LocalComponentArtifactMetadata> transformedArtifacts = new HashMap<>();
         for (Map.Entry<String, LocalComponentArtifactMetadata> entry : allArtifacts.entries()) {
             LocalComponentArtifactMetadata oldArtifact = entry.getValue();
             LocalComponentArtifactMetadata newArtifact = copyArtifact(oldArtifact, artifacts, transformedArtifacts);
@@ -104,11 +111,11 @@ public class DefaultLocalComponentMetadata implements LocalComponentMetadata, Bu
         // Variants
         for (Map.Entry<String, DefaultVariantMetadata> entry : allVariants.entries()) {
             DefaultVariantMetadata oldVariant = entry.getValue();
-            List<LocalComponentArtifactMetadata> newArtifacts = new ArrayList<LocalComponentArtifactMetadata>(oldVariant.getArtifacts().size());
+            ImmutableList.Builder<LocalComponentArtifactMetadata> newArtifacts = new ImmutableList.Builder<>();
             for (ComponentArtifactMetadata oldArtifact : oldVariant.getArtifacts()) {
                 newArtifacts.add(copyArtifact((LocalComponentArtifactMetadata) oldArtifact, artifacts, transformedArtifacts));
             }
-            copy.allVariants.put(entry.getKey(), new DefaultVariantMetadata(oldVariant.asDescribable(), oldVariant.getAttributes(), newArtifacts, oldVariant.getCapabilities()));
+            copy.allVariants.put(entry.getKey(), new DefaultVariantMetadata(oldVariant.getName(), oldVariant.getIdentifier(), oldVariant.asDescribable(), oldVariant.getAttributes(), newArtifacts.build(), oldVariant.getCapabilities()));
         }
 
         for (DefaultLocalConfigurationMetadata configuration : allConfigurations.values()) {
@@ -136,7 +143,7 @@ public class DefaultLocalComponentMetadata implements LocalComponentMetadata, Bu
     }
 
     @Override
-    public void addArtifacts(String configuration, Iterable<? extends PublishArtifact> artifacts) {
+    public void addArtifacts(String configuration, Collection<? extends PublishArtifact> artifacts) {
         for (PublishArtifact artifact : artifacts) {
             LocalComponentArtifactMetadata artifactMetadata = new PublishArtifactLocalArtifactMetadata(componentId, artifact);
             allArtifacts.put(configuration, artifactMetadata);
@@ -144,24 +151,24 @@ public class DefaultLocalComponentMetadata implements LocalComponentMetadata, Bu
     }
 
     @Override
-    public void addVariant(String configuration, OutgoingVariant variant) {
-        List<LocalComponentArtifactMetadata> artifacts;
-        if (variant.getArtifacts().isEmpty()) {
+    public void addVariant(String configuration, String name, VariantResolveMetadata.Identifier identifier, DisplayName displayName, ImmutableAttributes attributes, Collection<? extends PublishArtifact> publishArtifacts) {
+        ImmutableList<LocalComponentArtifactMetadata> artifacts;
+        if (publishArtifacts.isEmpty()) {
             artifacts = ImmutableList.of();
         } else {
             ImmutableList.Builder<LocalComponentArtifactMetadata> builder = ImmutableList.builder();
-            for (PublishArtifact artifact : variant.getArtifacts()) {
+            for (PublishArtifact artifact : publishArtifacts) {
                 builder.add(new PublishArtifactLocalArtifactMetadata(componentId, artifact));
             }
             artifacts = builder.build();
         }
-        allVariants.put(configuration, new DefaultVariantMetadata(variant.asDescribable(), variant.getAttributes().asImmutable(), artifacts, null));
+        allVariants.put(configuration, new DefaultVariantMetadata(name, identifier, displayName, attributes, artifacts, null));
     }
 
     @Override
-    public BuildableLocalConfigurationMetadata addConfiguration(String name, String description, Set<String> extendsFrom, ImmutableSet<String> hierarchy, boolean visible, boolean transitive, ImmutableAttributes attributes, boolean canBeConsumed, boolean canBeResolved, ImmutableCapabilities capabilities) {
+    public BuildableLocalConfigurationMetadata addConfiguration(String name, String description, Set<String> extendsFrom, ImmutableSet<String> hierarchy, boolean visible, boolean transitive, ImmutableAttributes attributes, boolean canBeConsumed, DeprecationMessageBuilder.WithDocumentation consumptionDeprecation, boolean canBeResolved, ImmutableCapabilities capabilities, Supplier<List<DependencyConstraint>> consistentResolutionConstraints) {
         assert hierarchy.contains(name);
-        DefaultLocalConfigurationMetadata conf = new DefaultLocalConfigurationMetadata(name, description, visible, transitive, extendsFrom, hierarchy, attributes, canBeConsumed, canBeResolved, capabilities);
+        DefaultLocalConfigurationMetadata conf = new DefaultLocalConfigurationMetadata(name, description, visible, transitive, extendsFrom, hierarchy, attributes, canBeConsumed, consumptionDeprecation, canBeResolved, capabilities);
         addToConfigurations(name, conf);
         return conf;
     }
@@ -183,12 +190,12 @@ public class DefaultLocalComponentMetadata implements LocalComponentMetadata, Bu
     }
 
     @Override
-    public ModuleSource getSource() {
-        return null;
+    public ModuleSources getSources() {
+        return moduleSources;
     }
 
     @Override
-    public ComponentResolveMetadata withSource(ModuleSource source) {
+    public ComponentResolveMetadata withSources(ModuleSources source) {
         throw new UnsupportedOperationException();
     }
 
@@ -213,7 +220,7 @@ public class DefaultLocalComponentMetadata implements LocalComponentMetadata, Bu
     }
 
     @Override
-    public ImmutableList<? extends ComponentIdentifier> getPlatformOwners() {
+    public ImmutableList<? extends VirtualComponentIdentifier> getPlatformOwners() {
         return ImmutableList.of();
     }
 
@@ -228,7 +235,7 @@ public class DefaultLocalComponentMetadata implements LocalComponentMetadata, Bu
     @Override
     public synchronized Optional<ImmutableList<? extends ConfigurationMetadata>> getVariantsForGraphTraversal() {
         if (consumableConfigurations == null) {
-            ImmutableList.Builder<ConfigurationMetadata> builder = new ImmutableList.Builder<ConfigurationMetadata>();
+            ImmutableList.Builder<ConfigurationMetadata> builder = new ImmutableList.Builder<>();
             boolean hasAtLeastOneConsumableConfiguration = false;
             for (DefaultLocalConfigurationMetadata configuration : allConfigurations.values()) {
                 if (configuration.isCanBeConsumed() && !configuration.getAttributes().isEmpty()) {
@@ -237,7 +244,7 @@ public class DefaultLocalComponentMetadata implements LocalComponentMetadata, Bu
                 }
             }
             if (hasAtLeastOneConsumableConfiguration) {
-                consumableConfigurations = Optional.<ImmutableList<? extends ConfigurationMetadata>>of(builder.build());
+                consumableConfigurations = Optional.of(builder.build());
             } else {
                 consumableConfigurations = Optional.absent();
             }
@@ -256,7 +263,7 @@ public class DefaultLocalComponentMetadata implements LocalComponentMetadata, Bu
     }
 
     @Override
-    public AttributeContainer getAttributes() {
+    public ImmutableAttributes getAttributes() {
         // a local component cannot have attributes (for now). However, variants of the component
         // itself may.
         return ImmutableAttributes.EMPTY;
@@ -271,21 +278,22 @@ public class DefaultLocalComponentMetadata implements LocalComponentMetadata, Bu
         private final Set<String> extendsFrom;
         private final ImmutableAttributes attributes;
         private final boolean canBeConsumed;
+        private final DeprecationMessageBuilder.WithDocumentation consumptionDeprecation;
         private final boolean canBeResolved;
         private final ImmutableCapabilities capabilities;
 
         private ConfigurationInternal backingConfiguration;
         private LocalConfigurationMetadataBuilder configurationMetadataBuilder;
 
-        private List<LocalOriginDependencyMetadata> definedDependencies = Lists.newArrayList();
-        private List<ExcludeMetadata> definedExcludes = Lists.newArrayList();
-        private List<LocalFileDependencyMetadata> definedFiles= Lists.newArrayList();
+        private final List<LocalOriginDependencyMetadata> definedDependencies = Lists.newArrayList();
+        private final List<ExcludeMetadata> definedExcludes = Lists.newArrayList();
+        private final List<LocalFileDependencyMetadata> definedFiles = Lists.newArrayList();
 
         private ImmutableList<LocalOriginDependencyMetadata> configurationDependencies;
         private ImmutableSet<LocalFileDependencyMetadata> configurationFileDependencies;
         private ImmutableList<ExcludeMetadata> configurationExcludes;
 
-        private List<LocalComponentArtifactMetadata> configurationArtifacts;
+        private ImmutableList<LocalComponentArtifactMetadata> configurationArtifacts;
 
         protected DefaultLocalConfigurationMetadata(String name,
                                                     String description,
@@ -295,6 +303,7 @@ public class DefaultLocalComponentMetadata implements LocalComponentMetadata, Bu
                                                     ImmutableSet<String> hierarchy,
                                                     ImmutableAttributes attributes,
                                                     boolean canBeConsumed,
+                                                    DeprecationMessageBuilder.WithDocumentation consumptionDeprecation,
                                                     boolean canBeResolved,
                                                     ImmutableCapabilities capabilities) {
             this.name = name;
@@ -305,6 +314,7 @@ public class DefaultLocalComponentMetadata implements LocalComponentMetadata, Bu
             this.extendsFrom = extendsFrom;
             this.attributes = attributes;
             this.canBeConsumed = canBeConsumed;
+            this.consumptionDeprecation = consumptionDeprecation;
             this.canBeResolved = canBeResolved;
             this.capabilities = capabilities;
         }
@@ -314,6 +324,7 @@ public class DefaultLocalComponentMetadata implements LocalComponentMetadata, Bu
             return componentId;
         }
 
+        @Override
         public void addDependency(LocalOriginDependencyMetadata dependency) {
             definedDependencies.add(dependency);
         }
@@ -393,6 +404,11 @@ public class DefaultLocalComponentMetadata implements LocalComponentMetadata, Bu
         }
 
         @Override
+        public DeprecationMessageBuilder.WithDocumentation getConsumptionDeprecation() {
+            return consumptionDeprecation;
+        }
+
+        @Override
         public boolean isCanBeResolved() {
             return canBeResolved;
         }
@@ -406,9 +422,8 @@ public class DefaultLocalComponentMetadata implements LocalComponentMetadata, Bu
                         configuration.addDefinedDependencies(result);
                     }
                 }
-                maybeAddGeneratedDependencies(result);
-                AttributeValue<String> attributeValue = this.getAttributes().findEntry(PlatformSupport.COMPONENT_CATEGORY);
-                if (attributeValue.isPresent() && attributeValue.get().equals(PlatformSupport.ENFORCED_PLATFORM)) {
+                AttributeValue<Category> attributeValue = this.getAttributes().findEntry(Category.CATEGORY_ATTRIBUTE);
+                if (attributeValue.isPresent() && attributeValue.get().getName().equals(Category.ENFORCED_PLATFORM)) {
                     // need to wrap all dependencies to force them
                     ImmutableList<LocalOriginDependencyMetadata> rawDependencies = result.build();
                     result = ImmutableList.builder();
@@ -421,8 +436,8 @@ public class DefaultLocalComponentMetadata implements LocalComponentMetadata, Bu
             return configurationDependencies;
         }
 
-        void maybeAddGeneratedDependencies(ImmutableList.Builder<LocalOriginDependencyMetadata> result) {
-            // No-op
+        List<LocalOriginDependencyMetadata> getSyntheticDependencies() {
+            return Collections.emptyList();
         }
 
         void addDefinedDependencies(ImmutableList.Builder<LocalOriginDependencyMetadata> result) {
@@ -469,7 +484,7 @@ public class DefaultLocalComponentMetadata implements LocalComponentMetadata, Bu
         }
 
         @Override
-        public List<? extends LocalComponentArtifactMetadata> getArtifacts() {
+        public ImmutableList<? extends LocalComponentArtifactMetadata> getArtifacts() {
             if (configurationArtifacts == null) {
                 if (allArtifacts.isEmpty()) {
                     configurationArtifacts = ImmutableList.of();
@@ -498,6 +513,16 @@ public class DefaultLocalComponentMetadata implements LocalComponentMetadata, Bu
         @Override
         public CapabilitiesMetadata getCapabilities() {
             return capabilities;
+        }
+
+        @Override
+        public boolean requiresMavenArtifactDiscovery() {
+            return false;
+        }
+
+        @Override
+        public boolean isExternalVariant() {
+            return false;
         }
 
         private boolean include(DefaultLocalConfigurationMetadata configuration) {

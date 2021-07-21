@@ -20,7 +20,13 @@ import org.gradle.tooling.events.test.TestOperationDescriptor;
 
 /**
  *
- * A {@code TestLauncher} allows you to execute tests in a Gradle build.
+ * <p>A {@code TestLauncher} allows you to execute tests in a Gradle build.</p>
+ *
+ * <p>If the target Gradle version is &gt;=6.8 then you can use {@code TestLauncher} to execute tests from included builds. Test operation descriptors from included builds work out-of-the-box. You can
+ * target tasks from included builds by specifying the task identity path (i.e. {@code ':included-build-name:subproject-name:taskName'}).</p>
+ *
+ * <p>However, you cannot use the methods with included builds that don't specify the target test tasks (e.g. {@code withJvmTestClasses()} and {@code withJvmTestMethods()}). Those methods configure
+ * all test tasks in the root build only.</p>
  *
  * @since 2.6
  */
@@ -45,7 +51,9 @@ public interface TestLauncher extends ConfigurableLauncher<TestLauncher> {
     TestLauncher withTests(Iterable<? extends TestOperationDescriptor> descriptors);
 
     /**
-     * Adds tests to be executed declared by class name.
+     * <p>Adds tests to be executed declared by class name.</p>
+     *
+     * <p>This method ignores tests defined in included builds.</p>
      *
      * @param testClasses The class names of the tests to be executed.
      * @return this
@@ -53,8 +61,11 @@ public interface TestLauncher extends ConfigurableLauncher<TestLauncher> {
      */
     TestLauncher withJvmTestClasses(String... testClasses);
 
+
     /**
-     * Adds tests to be executed declared by class name.
+     * <p>Adds tests to be executed declared by class name.</p>
+     *
+     * <p>This method ignores tests defined in included builds.</p>
      *
      * @param testClasses The class names of the tests to be executed.
      * @return this
@@ -63,7 +74,9 @@ public interface TestLauncher extends ConfigurableLauncher<TestLauncher> {
     TestLauncher withJvmTestClasses(Iterable<String> testClasses);
 
     /**
-     * Adds tests to be executed declared by class and method name.
+     * <p>Adds tests to be executed declared by class and method name.</p>
+     *
+     * <p>This method ignores tests defined in included builds.</p>
      *
      * @param testClass The name of the class containing the methods to execute.
      * @param methods The names of the test methods to be executed.
@@ -73,7 +86,9 @@ public interface TestLauncher extends ConfigurableLauncher<TestLauncher> {
     TestLauncher withJvmTestMethods(String testClass, String... methods);
 
     /**
-     * Adds tests to be executed declared by class and methods name.
+     * <p>Adds tests to be executed declared by class and methods name.</p>
+     *
+     * <p>This method ignores tests defined in included builds.</p>
      *
      * @param testClass The name of the class containing the methods to execute.
      * @param methods The names of the test methods to be executed.
@@ -81,6 +96,49 @@ public interface TestLauncher extends ConfigurableLauncher<TestLauncher> {
      * @since 2.7
      */
     TestLauncher withJvmTestMethods(String testClass, Iterable<String> methods);
+
+    /**
+     * Adds tests to be executed declared by the container task and the class name.
+     *
+     * <p>Note: These tests are ignored for target Gradle version earlier than 6.1</p>
+     *
+     * @param task The path of the target task.
+     * @param testClasses The class names of the tests to be executed.
+     * @return this
+     * @since 6.1
+     */
+    TestLauncher withTaskAndTestClasses(String task, Iterable<String> testClasses);
+
+    /**
+     * Adds tests to be executed declared by the container task, class and method name.
+     *
+     * <p>Note: These tests are ignored for target Gradle version earlier than 6.1</p>
+     * @param task The path of the target task.
+     * @param testClass The name of the class containing the methods to execute.
+     * @param methods The names of the test methods to be executed.
+     * @return this
+     * @since 6.1
+     */
+    TestLauncher withTaskAndTestMethods(String task, String testClass, Iterable<String> methods);
+
+    /**
+     * Configures test JVM to run in debug mode.
+     * <p>
+     * When called, the forked test JVM is launched with the following argument:
+     * <pre>-agentlib:jdwp=transport=dt_socket,server=n,suspend=n,address=localhost:&lt;port&gt;</pre>
+     * This means the test JVM expects a debugger at the specified port that uses a
+     * <a href="https://docs.oracle.com/javase/6/docs/technotes/guides/jpda/conninv.html#Connectors">socket listening connector</a>.
+     * If the debugger is not present then the test execution will fail.
+     * <p>
+     * Invoking this method adjusts the test task to launch only one JVM. More specifically, the parallel execution
+     * gets disabled and the {@code forkEvery} property is set to 0.
+     *
+     * @param port the target port where the test JVM expects the debugger
+     * @return this
+     *
+     * @since 5.6
+     */
+    TestLauncher debugTestsOn(int port);
 
     /**
      * Executes the tests, blocking until complete.

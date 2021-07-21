@@ -27,37 +27,41 @@ import org.gradle.api.artifacts.ComponentMetadataRule
 import org.gradle.api.artifacts.ModuleVersionIdentifier
 import org.gradle.api.internal.artifacts.DefaultModuleVersionIdentifier
 import org.gradle.api.internal.artifacts.configurations.dynamicversion.CachePolicy
+import org.gradle.api.internal.artifacts.configurations.dynamicversion.Expiry
+import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.ModuleDescriptorHashModuleSource
 import org.gradle.cache.CacheBuilder
 import org.gradle.cache.CacheDecorator
 import org.gradle.cache.CacheRepository
 import org.gradle.cache.PersistentCache
 import org.gradle.cache.PersistentIndexedCache
-import org.gradle.cache.internal.InMemoryCacheDecoratorFactory
+import org.gradle.cache.internal.DefaultInMemoryCacheDecoratorFactory
 import org.gradle.internal.action.DefaultConfigurableRule
 import org.gradle.internal.action.DefaultConfigurableRules
 import org.gradle.internal.action.InstantiatingAction
 import org.gradle.internal.component.external.model.ModuleComponentResolveMetadata
+import org.gradle.internal.component.external.model.VariantDerivationStrategy
+import org.gradle.internal.component.model.MutableModuleSources
 import org.gradle.internal.hash.HashCode
-import org.gradle.internal.hash.HashValue
 import org.gradle.internal.hash.Hashing
 import org.gradle.internal.serialize.Serializer
 import org.gradle.internal.service.DefaultServiceRegistry
 import org.gradle.internal.snapshot.ValueSnapshot
 import org.gradle.internal.snapshot.ValueSnapshotter
 import org.gradle.internal.snapshot.impl.StringValueSnapshot
-import org.gradle.util.BuildCommencedTimeProvider
+import org.gradle.util.internal.BuildCommencedTimeProvider
 import org.gradle.util.TestUtil
 import spock.lang.Specification
 import spock.lang.Subject
 import spock.lang.Unroll
 
 import javax.inject.Inject
+import java.time.Duration
 
 class ComponentMetadataRuleExecutorTest extends Specification {
     @Subject
     ComponentMetadataRuleExecutor executor
     CacheRepository cacheRepository
-    InMemoryCacheDecoratorFactory cacheDecoratorFactory
+    DefaultInMemoryCacheDecoratorFactory cacheDecoratorFactory
     ValueSnapshotter valueSnapshotter
     long time = 0
     BuildCommencedTimeProvider timeProvider = Stub(BuildCommencedTimeProvider) {
@@ -100,7 +104,7 @@ class ComponentMetadataRuleExecutorTest extends Specification {
     @Unroll("Cache expiry check refresh = #mustRefresh - #scenario - #ruleClass")
     def "expires entry when cache policy tells us to"() {
         def id = DefaultModuleVersionIdentifier.newId('org', 'foo', '1.0')
-        def hashValue = Mock(HashValue)
+        def hashValue = HashCode.fromInt(42)
         def key = Mock(ModuleComponentResolveMetadata)
         def inputsSnapshot = new StringValueSnapshot("1")
         def hasher = Hashing.newHasher()
@@ -119,29 +123,35 @@ class ComponentMetadataRuleExecutorTest extends Specification {
             ruleServices['SomeService'] = someService
         }
         def reexecute = mustRefresh || expired
+        def moduleSources = new MutableModuleSources()
+        moduleSources.add(new ModuleDescriptorHashModuleSource(hashValue, false))
 
         when:
         withRule(ruleClass, ruleServices)
         execute(key)
 
         then:
-        1 * key.originalContentHash >> hashValue
-        1 * hashValue.asHexString() >> "42"
+        1 * key.getSources() >> moduleSources
+        1 * key.getVariantDerivationStrategy() >> Stub(VariantDerivationStrategy)
         1 * valueSnapshotter.snapshot(_) >> inputsSnapshot
-        1 * store.get(keyHash) >> cachedEntry
+        1 * store.getIfPresent(keyHash) >> cachedEntry
         if (expired) {
             // should check that the recorded service call returns the same value
             1 * record.getInput() >> '124'
             1 * record.getOutput() >> HashCode.fromInt(10000)
             1 * cachedResult.isChanging() >> changing
             1 * cachedResult.getModuleVersionId() >> id
-            1 * cachePolicy.mustRefreshModule({ it.id == id }, 0, changing) >> false
+            1 * cachePolicy.moduleExpiry({ it.id == id }, Duration.ZERO, changing) >> Stub(Expiry) {
+                isMustCheck() >> false
+            }
             // we make it return false, this should invalidate the cache
             1 * someService.isUpToDate('124', HashCode.fromInt(10000)) >> false
         } else {
             1 * cachedResult.isChanging() >> changing
             1 * cachedResult.getModuleVersionId() >> id
-            1 * cachePolicy.mustRefreshModule({ it.id == id }, 0, changing) >> mustRefresh
+            1 * cachePolicy.moduleExpiry({ it.id == id }, Duration.ZERO, changing) >> Stub(Expiry) {
+                isMustCheck() >> mustRefresh
+            }
         }
         if (reexecute) {
             def details = Mock(ComponentMetadataContext)

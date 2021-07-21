@@ -44,7 +44,7 @@ public class PersistentVcsMetadataCache implements Stoppable {
         cache = cacheRepository
             .cache(directoryLayout.getMetadataDir())
             .withDisplayName("VCS metadata")
-            .withLockOptions(mode(FileLockManager.LockMode.None)) // Don't need to lock anything until we use the caches
+            .withLockOptions(mode(FileLockManager.LockMode.OnDemand)) // Don't need to lock anything until we use the caches
             .open();
         workingDirCache = cache.createCache("workingDirs", String.class, VALUE_SERIALIZER);
     }
@@ -60,18 +60,13 @@ public class PersistentVcsMetadataCache implements Stoppable {
             @Nullable
             @Override
             public VersionRef create() {
-                return workingDirCache.get(constraintCacheKey(repository, constraint));
+                return workingDirCache.getIfPresent(constraintCacheKey(repository, constraint));
             }
         });
     }
 
     public void putVersionForSelector(final VersionControlRepositoryConnection repository, final VersionConstraint constraint, final VersionRef selectedVersion) {
-        cache.useCache(new Runnable() {
-            @Override
-            public void run() {
-                workingDirCache.put(constraintCacheKey(repository, constraint), selectedVersion);
-            }
-        });
+        cache.useCache(() -> workingDirCache.put(constraintCacheKey(repository, constraint), selectedVersion));
     }
 
     private String constraintCacheKey(VersionControlRepositoryConnection repository, VersionConstraint constraint) {

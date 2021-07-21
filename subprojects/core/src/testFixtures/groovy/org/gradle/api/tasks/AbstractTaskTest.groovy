@@ -18,12 +18,13 @@ package org.gradle.api.tasks
 
 import com.google.common.collect.Lists
 import org.gradle.api.Action
+import org.gradle.api.DefaultTask
 import org.gradle.api.InvalidUserDataException
 import org.gradle.api.Project
 import org.gradle.api.Task
-import org.gradle.api.internal.AbstractTask
 import org.gradle.api.internal.project.ProjectInternal
 import org.gradle.api.internal.project.taskfactory.TaskInstantiator
+import org.gradle.api.internal.tasks.InputChangesAwareTaskAction
 import org.gradle.api.model.ObjectFactory
 import org.gradle.api.specs.Spec
 import org.gradle.internal.Actions
@@ -40,9 +41,9 @@ abstract class AbstractTaskTest extends AbstractProjectBuilderSpec {
     protected DefaultServiceRegistry serviceRegistry = new DefaultServiceRegistry()
     protected ObjectFactory objectFactory = TestUtil.objectFactory()
 
-    abstract AbstractTask getTask()
+    abstract DefaultTask getTask()
 
-    def <T extends AbstractTask> T createTask(Class<T> type) {
+    def <T extends DefaultTask> T createTask(Class<T> type) {
         return createTask(type, project, TEST_TASK_NAME)
     }
 
@@ -50,7 +51,7 @@ abstract class AbstractTaskTest extends AbstractProjectBuilderSpec {
         return createTask(getTask().getClass(), project, name)
     }
 
-    def <T extends AbstractTask> T createTask(Class<T> type, ProjectInternal project, String name) {
+    def <T extends DefaultTask> T createTask(Class<T> type, ProjectInternal project, String name) {
         Task task = project.getServices().get(TaskInstantiator.class).create(name, type)
         assertTrue(type.isAssignableFrom(task.getClass()))
         return type.cast(task)
@@ -114,6 +115,25 @@ abstract class AbstractTaskTest extends AbstractProjectBuilderSpec {
 
         then:
         getTask().getActions().size() == 1
+    }
+
+    def "can replace an action"() {
+        given:
+        getTask().setActions([])
+
+        when:
+        getTask().getActions().add(Actions.doNothing())
+        getTask().getActions().set(0, { task -> throw new RuntimeException()} as Action)
+
+        then:
+        getTask().getActions().size() == 1
+        getTask().getActions()[0] instanceof InputChangesAwareTaskAction
+
+        when:
+        getTask().getActions()[0].execute(getTask())
+
+        then:
+        thrown(RuntimeException)
     }
 
     def "addAction with null throws"() {

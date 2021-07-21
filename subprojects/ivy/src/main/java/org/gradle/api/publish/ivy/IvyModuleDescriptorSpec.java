@@ -17,7 +17,6 @@
 package org.gradle.api.publish.ivy;
 
 import org.gradle.api.Action;
-import org.gradle.api.Incubating;
 import org.gradle.api.XmlProvider;
 import org.gradle.internal.HasInternalProtocol;
 
@@ -41,7 +40,9 @@ public interface IvyModuleDescriptorSpec {
      * Allow configuration of the descriptor, after it has been generated according to the input data.
      *
      * <pre class='autoTested'>
-     * apply plugin: "ivy-publish"
+     * plugins {
+     *     id 'ivy-publish'
+     * }
      *
      * publishing {
      *   publications {
@@ -109,7 +110,6 @@ public interface IvyModuleDescriptorSpec {
      *
      * @since 4.8
      */
-    @Incubating
     void license(Action<? super IvyModuleDescriptorLicense> action);
 
     /**
@@ -117,7 +117,6 @@ public interface IvyModuleDescriptorSpec {
      *
      * @since 4.8
      */
-    @Incubating
     void author(Action<? super IvyModuleDescriptorAuthor> action);
 
     /**
@@ -125,7 +124,6 @@ public interface IvyModuleDescriptorSpec {
      *
      * @since 4.8
      */
-    @Incubating
     void description(Action<? super IvyModuleDescriptorDescription> action);
 
 }

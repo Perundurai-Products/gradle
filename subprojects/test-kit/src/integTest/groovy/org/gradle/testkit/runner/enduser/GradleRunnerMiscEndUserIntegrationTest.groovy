@@ -17,29 +17,38 @@
 package org.gradle.testkit.runner.enduser
 
 import groovy.io.FileType
+import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
 import org.gradle.testkit.runner.fixtures.NoDebug
 import org.gradle.testkit.runner.internal.DefaultGradleRunner
-import org.gradle.util.GFileUtils
+import org.gradle.util.internal.GFileUtils
+import org.intellij.lang.annotations.Language
+import spock.lang.IgnoreIf
 
 /**
  * Miscellaneous usage scenarios that don't have more specific homes.
  */
-class GradleRunnerMiscEndUserIntegrationTest extends BaseTestKitEndUserIntegrationTest {
+@IgnoreIf({ GradleContextualExecuter.embedded })
+// These tests run builds that themselves run a build in a test worker with 'gradleTestKit()' dependency, which needs to pick up Gradle modules from a real distribution
+class GradleRunnerMiscEndUserIntegrationTest extends BaseTestKitEndUserIntegrationTest implements TestKitDependencyBlock {
 
     def setup() {
         buildFile << """
             apply plugin: 'groovy'
 
             dependencies {
-                compile localGroovy()
-                testCompile('org.spockframework:spock-core:1.0-groovy-2.4') {
-                    exclude module: 'groovy-all'
+                implementation localGroovy()
+                testImplementation('org.spockframework:spock-core:2.0-groovy-3.0') {
+                    exclude group: 'org.codehaus.groovy'
                 }
+                testImplementation('org.junit.jupiter:junit-jupiter-api')
             }
 
-            ${jcenterRepository()}
+            ${mavenCentralRepository()}
 
-            test.testLogging.exceptionFormat = 'full'
+            test {
+                testLogging.exceptionFormat = 'full'
+                useJUnitPlatform()
+            }
         """
     }
 
@@ -54,6 +63,7 @@ class GradleRunnerMiscEndUserIntegrationTest extends BaseTestKitEndUserIntegrati
                 || f.name.contains("commons-io")
                 || f.name.contains("guava")
                 || f.name.contains("gradle-base-services")
+                || f.name.contains("gradle-file-temp")
                 || f.name.contains("gradle-tooling-api")
                 || f.name.contains("gradle-core")
             ) {
@@ -64,11 +74,11 @@ class GradleRunnerMiscEndUserIntegrationTest extends BaseTestKitEndUserIntegrati
         def testKitJar = jarsDir.listFiles().find { it.name.contains "test-kit" }
         buildFile << """
             dependencies {
-                testCompile fileTree(dir: 'jars', include: '*.jar')
+                testImplementation fileTree(dir: 'jars', include: '*.jar')
             }
         """
 
-        file("src/test/groovy/Test.groovy") << """
+        groovyTestSourceFile("""
             import org.gradle.testkit.runner.GradleRunner
             import spock.lang.Specification
 
@@ -78,7 +88,7 @@ class GradleRunnerMiscEndUserIntegrationTest extends BaseTestKitEndUserIntegrati
                     GradleRunner.create().withProjectDir(new File("foo")).build()
                 }
             }
-        """
+        """)
 
         then:
         fails 'build'
@@ -127,7 +137,7 @@ class GradleRunnerMiscEndUserIntegrationTest extends BaseTestKitEndUserIntegrati
             }
         """
 
-        file("src/test/groovy/Test.groovy") << """
+        groovyTestSourceFile("""
             import org.gradle.testkit.runner.GradleRunner
             import spock.lang.Specification
 
@@ -137,31 +147,33 @@ class GradleRunnerMiscEndUserIntegrationTest extends BaseTestKitEndUserIntegrati
                     GradleRunner.create().debug == $debug
                 }
             }
-        """
+        """)
 
         then:
         succeeds 'test'
     }
 
     static String successfulSpockTest(String className) {
-        """
+        @Language("groovy")
+        def spockTest = """
             import org.gradle.testkit.runner.GradleRunner
+            import java.nio.file.Files
+            import java.nio.file.Path
             import static org.gradle.testkit.runner.TaskOutcome.*
-            import org.junit.Rule
-            import org.junit.rules.TemporaryFolder
             import spock.lang.Specification
 
             class $className extends Specification {
-                @Rule TemporaryFolder testProjectDir = new TemporaryFolder()
+                File testProjectDir = Files.createTempDirectory("GradleRunnerMiscEndUserIntegrationTest").toFile()
                 File buildFile
                 File settingsFile
 
                 def setup() {
-                    settingsFile = testProjectDir.newFile('settings.gradle')
-                    buildFile = testProjectDir.newFile('build.gradle')
+                    testProjectDir.deleteOnExit()
                 }
 
                 def "execute helloWorld task"() {
+                    settingsFile = new File(testProjectDir, 'settings.gradle')
+                    buildFile = new File(testProjectDir, 'build.gradle')
                     given:
                     settingsFile << "rootProject.name = 'hello-world'"
                     buildFile << '''
@@ -174,7 +186,7 @@ class GradleRunnerMiscEndUserIntegrationTest extends BaseTestKitEndUserIntegrati
 
                     when:
                     def result = GradleRunner.create()
-                        .withProjectDir(testProjectDir.root)
+                        .withProjectDir(testProjectDir)
                         .withArguments('helloWorld')
                         .withDebug($debug)
                         .build()
@@ -184,14 +196,7 @@ class GradleRunnerMiscEndUserIntegrationTest extends BaseTestKitEndUserIntegrati
                 }
             }
         """
-    }
-
-    static String gradleTestKitDependency() {
-        """
-            dependencies {
-                testCompile gradleTestKit()
-            }
-        """
+        spockTest
     }
 
 }

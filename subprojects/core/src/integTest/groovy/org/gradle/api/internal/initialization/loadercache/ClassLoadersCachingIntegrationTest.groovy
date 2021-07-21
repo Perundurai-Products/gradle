@@ -16,7 +16,7 @@
 
 package org.gradle.api.internal.initialization.loadercache
 
-
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.integtests.fixtures.longlived.PersistentBuildProcessIntegrationTest
 
 class ClassLoadersCachingIntegrationTest extends PersistentBuildProcessIntegrationTest {
@@ -45,6 +45,7 @@ class ClassLoadersCachingIntegrationTest extends PersistentBuildProcessIntegrati
         output.contains("$projectPath cached: false")
     }
 
+    @ToBeFixedForConfigurationCache(because = "test relies on static state")
     def "classloader is cached"() {
         given:
         addIsCachedCheck()
@@ -70,6 +71,7 @@ class ClassLoadersCachingIntegrationTest extends PersistentBuildProcessIntegrati
         isNotCached()
     }
 
+    @ToBeFixedForConfigurationCache(because = "test relies on static state")
     def "refreshes when buildSrc changes"() {
         addIsCachedCheck()
         file("buildSrc/src/main/groovy/Foo.groovy") << "class Foo {}"
@@ -116,6 +118,7 @@ class ClassLoadersCachingIntegrationTest extends PersistentBuildProcessIntegrati
         isCached()
     }
 
+    @ToBeFixedForConfigurationCache(because = "test relies on static state")
     def "caches subproject classloader"() {
         settingsFile << "include 'foo'"
         addIsCachedCheck()
@@ -144,6 +147,7 @@ class ClassLoadersCachingIntegrationTest extends PersistentBuildProcessIntegrati
         isCached(":foo")
     }
 
+    @ToBeFixedForConfigurationCache(because = "test relies on static state")
     def "refreshes when buildscript classpath gets new dependency"() {
         addIsCachedCheck()
         createJarWithProperties("foo.jar")
@@ -163,6 +167,7 @@ class ClassLoadersCachingIntegrationTest extends PersistentBuildProcessIntegrati
         isCached()
     }
 
+    @ToBeFixedForConfigurationCache(because = "test relies on static state")
     def "refreshes when root project buildscript classpath changes"() {
         settingsFile << "include 'foo'"
         addIsCachedCheck()
@@ -198,6 +203,7 @@ class ClassLoadersCachingIntegrationTest extends PersistentBuildProcessIntegrati
         isCached(":foo")
     }
 
+    @ToBeFixedForConfigurationCache(because = "test relies on static state")
     def "refreshes when jar is removed from buildscript classpath"() {
         addIsCachedCheck()
         createJarWithProperties("foo.jar")
@@ -220,6 +226,7 @@ class ClassLoadersCachingIntegrationTest extends PersistentBuildProcessIntegrati
         isCached()
     }
 
+    @ToBeFixedForConfigurationCache(because = "test relies on static state")
     def "refreshes when dir is removed from buildscript classpath"() {
         addIsCachedCheck()
         createJarWithProperties("lib/foo.jar")
@@ -242,6 +249,7 @@ class ClassLoadersCachingIntegrationTest extends PersistentBuildProcessIntegrati
         isCached()
     }
 
+    @ToBeFixedForConfigurationCache(because = "test relies on static state")
     def "refreshes when buildscript when jar dependency replaced with dir"() {
         addIsCachedCheck()
         createJarWithProperties("foo.jar")
@@ -261,6 +269,7 @@ class ClassLoadersCachingIntegrationTest extends PersistentBuildProcessIntegrati
         notCached
     }
 
+    @ToBeFixedForConfigurationCache(because = "test relies on static state")
     def "refreshes when buildscript when dir dependency replaced with jar"() {
         addIsCachedCheck()
         assert file("foo.jar").mkdirs()
@@ -300,6 +309,7 @@ class ClassLoadersCachingIntegrationTest extends PersistentBuildProcessIntegrati
         output.contains "init y"
     }
 
+    @ToBeFixedForConfigurationCache(because = "test relies on static state")
     def "reuse classloader when settings script changed"() {
         addIsCachedCheck()
 
@@ -328,9 +338,13 @@ class ClassLoadersCachingIntegrationTest extends PersistentBuildProcessIntegrati
         !output.contains("settings y")
     }
 
+    @ToBeFixedForConfigurationCache(because = "test relies on static state")
     def "changing non root buildsript classpath does affect child projects"() {
         when:
         settingsFile << "include 'a', 'a:a'"
+        createJarWithProperties("thing.jar")
+        createJarWithProperties("a/thing.jar")
+        createJarWithProperties("a/a/thing.jar")
         addIsCachedCheck()
         addIsCachedCheck("a")
         addIsCachedCheck("a/a")
@@ -402,7 +416,32 @@ class ClassLoadersCachingIntegrationTest extends PersistentBuildProcessIntegrati
 
         then:
         isCached("a")
-        isNotCached("a:a") // cached in cross-build cache
-
+        isNotCached("a:a")
     }
+
+    @ToBeFixedForConfigurationCache(because = "test relies on static state")
+    def "reuses classloader when included build settings has no classpath but root build does"() {
+        given:
+        createJarWithProperties("thing.jar", [source: 1])
+        settingsFile << """
+            buildscript {
+                dependencies { classpath files("thing.jar") }
+            }
+            includeBuild "include"
+        """
+
+        and:
+        file("include/settings.gradle") << """
+            // no export path changes
+        """
+        addIsCachedCheck()
+
+        when:
+        run()
+        run()
+
+        then:
+        isCached()
+    }
+
 }

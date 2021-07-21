@@ -94,7 +94,7 @@ abstract class JUnitMultiVersionIntegrationSpec extends MultiVersionIntegrationS
         if (isJupiter()) {
             return "org.junit.jupiter:junit-jupiter-api:${dependencyVersion}','org.junit.jupiter:junit-jupiter-engine:${dependencyVersion}"
         } else if (isVintage()) {
-            return "org.junit.vintage:junit-vintage-engine:${dependencyVersion}','junit:junit:4.12"
+            return "org.junit.vintage:junit-vintage-engine:${dependencyVersion}','junit:junit:4.13"
         } else {
             return "junit:junit:${version}"
         }
@@ -114,6 +114,10 @@ abstract class JUnitMultiVersionIntegrationSpec extends MultiVersionIntegrationS
 
     static boolean isJUnitPlatform() {
         isJupiter() || isVintage()
+    }
+
+    static boolean isJUnit4() {
+        return version.toString() == JUnitCoverage.NEWEST
     }
 
     static boolean isVintage() {

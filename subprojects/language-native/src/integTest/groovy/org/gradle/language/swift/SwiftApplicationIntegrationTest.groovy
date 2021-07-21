@@ -16,9 +16,9 @@
 
 package org.gradle.language.swift
 
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.nativeplatform.fixtures.RequiresInstalledToolChain
 import org.gradle.nativeplatform.fixtures.ToolChainRequirement
-import org.gradle.nativeplatform.fixtures.app.SourceElement
 import org.gradle.nativeplatform.fixtures.app.SwiftApp
 import org.gradle.nativeplatform.fixtures.app.SwiftAppWithLibraries
 import org.gradle.nativeplatform.fixtures.app.SwiftAppWithLibrary
@@ -34,7 +34,7 @@ class SwiftApplicationIntegrationTest extends AbstractSwiftIntegrationTest imple
     }
 
     @Override
-    protected SourceElement getComponentUnderTest() {
+    protected SwiftApp getComponentUnderTest() {
         return new SwiftApp()
     }
 
@@ -51,10 +51,18 @@ class SwiftApplicationIntegrationTest extends AbstractSwiftIntegrationTest imple
     }
 
     @Override
+    void assertComponentUnderTestWasBuilt() {
+        executable("build/exe/main/debug/${componentUnderTest.moduleName}").assertExists()
+        file("build/modules/main/debug/${componentUnderTest.moduleName}.swiftmodule").assertIsFile()
+        installation("build/install/main/debug").exec().out == componentUnderTest.expectedOutput
+    }
+
+    @Override
     protected String getComponentUnderTestDsl() {
         return "application"
     }
 
+    @ToBeFixedForConfigurationCache
     def "relinks when an upstream dependency changes in ABI compatible way"() {
         settingsFile << "include 'app', 'greeter'"
         def app = new SwiftAppWithLibrary()
@@ -89,6 +97,7 @@ class SwiftApplicationIntegrationTest extends AbstractSwiftIntegrationTest imple
         installation("app/build/install/main/debug").exec().out == app.expectedOutput.replace("Hello", "Goodbye")
     }
 
+    @ToBeFixedForConfigurationCache
     def "recompiles when an upstream dependency changes in non-ABI compatible way"() {
         settingsFile << "include 'app', 'greeter'"
         def app = new SwiftAppWithLibrary()
@@ -126,26 +135,6 @@ class SwiftApplicationIntegrationTest extends AbstractSwiftIntegrationTest imple
         result.assertTasksExecuted(":greeter:compileDebugSwift", ":greeter:linkDebug", ":app:compileDebugSwift", ":app:linkDebug", ":app:installDebug", ":app:assemble")
         result.assertTasksNotSkipped(":greeter:linkDebug", ":app:compileDebugSwift", ":app:linkDebug", ":app:installDebug", ":app:assemble")
         installation("app/build/install/main/debug").exec().out == app.expectedOutput
-    }
-
-    def "sources are compiled and linked with Swift tools"() {
-        given:
-        def app = new SwiftApp()
-        settingsFile << "rootProject.name = '${app.projectName}'"
-        app.writeToProject(testDirectory)
-
-        and:
-        buildFile << """
-            apply plugin: 'swift-application'
-         """
-
-        expect:
-        succeeds "assemble"
-        result.assertTasksExecuted(":compileDebugSwift", ":linkDebug", ":installDebug", ":assemble")
-
-        executable("build/exe/main/debug/App").assertExists()
-        file("build/modules/main/debug/App.swiftmodule").assertIsFile()
-        installation("build/install/main/debug").exec().out == app.expectedOutput
     }
 
     def "can build debug and release variant of the executable"() {
@@ -215,7 +204,7 @@ class SwiftApplicationIntegrationTest extends AbstractSwiftIntegrationTest imple
             apply plugin: 'swift-application'
 
             task compileDebug {
-                dependsOn application.binaries.get { it.debuggable && !it.optimized }.map { it.objects } 
+                dependsOn application.binaries.get { it.debuggable && !it.optimized }.map { it.objects }
             }
          """
 
@@ -475,17 +464,17 @@ class SwiftApplicationIntegrationTest extends AbstractSwiftIntegrationTest imple
         buildFile << """
             project(':app') {
                 apply plugin: 'swift-application'
-                dependencies {
-                    implementation project(':greeter')
-                }
                 application {
-                    targetMachines = [machines.macOS, machines.linux]
+                    targetMachines = [machines.${currentHostOperatingSystemFamilyDsl}]
+                    dependencies {
+                        implementation project(':greeter')
+                    }
                 }
             }
             project(':greeter') {
                 apply plugin: 'swift-library'
                 library {
-                    targetMachines = [machines.host().architecture('foo')]
+                    targetMachines = [machines.os('os-family')]
                 }
             }
         """
@@ -497,7 +486,7 @@ class SwiftApplicationIntegrationTest extends AbstractSwiftIntegrationTest imple
 
         and:
         failure.assertHasCause("Could not resolve project :greeter.")
-        failure.assertHasErrorOutput("Required org.gradle.native.architecture '${currentArchitecture}' and found incompatible value 'foo'.")
+        failure.assertHasCause("No matching configuration of project :greeter was found. The consumer was configured to find attribute 'org.gradle.usage' with value 'native-runtime', attribute 'org.gradle.native.debuggable' with value 'true', attribute 'org.gradle.native.optimized' with value 'false', attribute 'org.gradle.native.operatingSystem' with value '${currentOsFamilyName}', attribute 'org.gradle.native.architecture' with value '${currentArchitecture}' but:")
     }
 
     def "can compile and link against a static library"() {

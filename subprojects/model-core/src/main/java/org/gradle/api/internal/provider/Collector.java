@@ -16,18 +16,16 @@
 
 package org.gradle.api.internal.provider;
 
-import org.gradle.api.internal.tasks.TaskDependencyResolveContext;
+import com.google.common.collect.ImmutableCollection;
+import org.gradle.api.Action;
 
-import java.util.Collection;
-
-public interface Collector<T> {
-    boolean present();
-
-    void collectInto(ValueCollector<T> collector, Collection<T> dest);
-
-    boolean maybeCollectInto(ValueCollector<T> collector, Collection<T> dest);
+/**
+ * A supplier of zero or more values of type {@link T}.
+ */
+public interface Collector<T> extends ValueSupplier {
+    Value<Void> collectEntries(ValueConsumer consumer, ValueCollector<T> collector, ImmutableCollection.Builder<T> dest);
 
     int size();
 
-    boolean maybeVisitBuildDependencies(TaskDependencyResolveContext context);
+    void calculateExecutionTimeValue(Action<? super ExecutionTimeValue<? extends Iterable<? extends T>>> visitor);
 }

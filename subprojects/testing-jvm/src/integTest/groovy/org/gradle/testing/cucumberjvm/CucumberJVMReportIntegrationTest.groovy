@@ -19,9 +19,7 @@ package org.gradle.testing.cucumberjvm
 import org.gradle.integtests.fixtures.AbstractSampleIntegrationTest
 import org.gradle.integtests.fixtures.DefaultTestExecutionResult
 import org.gradle.integtests.fixtures.TestResources
-import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
 import org.junit.Rule
-import spock.lang.IgnoreIf
 import spock.lang.Issue
 
 class CucumberJVMReportIntegrationTest extends AbstractSampleIntegrationTest {
@@ -30,17 +28,14 @@ class CucumberJVMReportIntegrationTest extends AbstractSampleIntegrationTest {
     public final TestResources resources = new TestResources(temporaryFolder)
 
     @Issue("https://issues.gradle.org/browse/GRADLE-2739")
-    @IgnoreIf({GradleContextualExecuter.parallel})
     def testReportingSupportsCucumberStepsWithSlashes() {
         when:
         run "test"
         then:
-        ":test" in nonSkippedTasks
+        executedAndNotSkipped(":test")
         and:
         DefaultTestExecutionResult result = new DefaultTestExecutionResult(testDirectory)
-        result.assertTestClassesExecuted("RunCukesTest", "Scenario: Say hello /two/three")
-        result.testClass("Scenario: Say hello /two/three").assertTestPassed("Given I have a hello app with Howdy and /four")
-        result.testClass("Scenario: Say hello /two/three").assertTestPassed("Then it should answer with Howdy World")
-        result.testClass("Scenario: Say hello /two/three").assertTestPassed("When I ask it to say hi and /five/six/seven")
+        result.assertTestClassesExecuted("RunCukesTest", "Hello World /one")
+        result.testClass("Hello World /one").assertTestPassed("Say hello /two/three")
     }
 }

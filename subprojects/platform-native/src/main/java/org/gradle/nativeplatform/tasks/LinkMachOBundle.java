@@ -16,17 +16,17 @@
 
 package org.gradle.nativeplatform.tasks;
 
-import org.gradle.api.Incubating;
 import org.gradle.nativeplatform.internal.BundleLinkerSpec;
 import org.gradle.nativeplatform.internal.DefaultLinkerSpec;
 import org.gradle.nativeplatform.internal.LinkerSpec;
+import org.gradle.work.DisableCachingByDefault;
 
 /**
  * Links a binary bundle from object files and imported libraries.
  *
  * @since 4.3
  */
-@Incubating
+@DisableCachingByDefault(because = "Not made cacheable, yet")
 public class LinkMachOBundle extends AbstractLinkTask {
     @Override
     protected LinkerSpec createLinkerSpec() {

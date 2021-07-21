@@ -16,9 +16,12 @@
 
 package org.gradle.api.publish.ivy
 
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
+import spock.lang.Unroll
+
 class IvyGradleModuleMetadataPublishIntegrationTest extends AbstractIvyPublishIntegTest {
     def setup() {
-        buildFile << """
+        buildFile """
 // TODO - use public APIs when available
 class TestComponent implements org.gradle.api.internal.component.SoftwareComponentInternal, ComponentWithVariants {
     String name
@@ -34,7 +37,7 @@ class TestUsage implements org.gradle.api.internal.component.UsageContext {
     Set artifacts = []
     Set capabilities = []
     Set globalExcludes = []
-    AttributeContainer attributes
+    AttributeContainer attributes = org.gradle.api.internal.attributes.ImmutableAttributes.EMPTY
 }
 
 class TestVariant implements org.gradle.api.internal.component.SoftwareComponentInternal {
@@ -51,10 +54,15 @@ class TestCapability implements Capability {
     allprojects {
         configurations { implementation }
     }
+
+    def testAttributes = project.services.get(org.gradle.api.internal.attributes.ImmutableAttributesFactory)
+         .mutable()
+         .attribute(Attribute.of('foo', String), 'value')
 """
     }
 
-    def "generates metadata for component with no variants"() {
+    @ToBeFixedForConfigurationCache
+    def "fails to generate metadata for component with no variants"() {
         given:
         settingsFile << "rootProject.name = 'root'"
         buildFile << """
@@ -78,16 +86,255 @@ class TestCapability implements Capability {
         """
 
         when:
+        fails 'publish'
+
+        then:
+        failure.assertHasCause """Invalid publication 'ivy':
+  - This publication must publish at least one variant"""
+    }
+
+    @ToBeFixedForConfigurationCache
+    def "fails to generate Gradle metadata if 2 variants have the same attributes"() {
+        given:
+        settingsFile.text = """
+            rootProject.name = 'root'
+        """
+        buildFile << """
+            apply plugin: 'ivy-publish'
+
+            group = 'group'
+            version = '1.0'
+
+            def comp = new TestComponent()
+            comp.usages.add(new TestUsage(
+                    name: 'api',
+                    usage: objects.named(Usage, 'api'),
+                    dependencies: configurations.implementation.allDependencies,
+                    attributes: testAttributes))
+
+            comp.usages.add(new TestUsage(
+                    name: 'impl',
+                    usage: objects.named(Usage, 'api'),
+                    dependencies: configurations.implementation.allDependencies,
+                    attributes: testAttributes))
+
+            publishing {
+                repositories {
+                    ivy { url "${ivyRepo.uri}" }
+                }
+                publications {
+                    ivy(IvyPublication) {
+                        from comp
+                    }
+                }
+            }
+
+        """
+
+        settingsFile << "rootProject.name = 'publishTest' "
+
+        when:
+        fails 'publish'
+
+        then:
+        failure.assertHasCause """Invalid publication 'ivy':
+  - Variants 'api' and 'impl' have the same attributes and capabilities. Please make sure either attributes or capabilities are different."""
+    }
+
+    @ToBeFixedForConfigurationCache
+    def "generates Gradle metadata if 2 variants have the same attributes but different capabilities"() {
+        given:
+        settingsFile.text = """
+            rootProject.name = 'root'
+        """
+        buildFile << """
+            apply plugin: 'ivy-publish'
+
+            group = 'group'
+            version = '1.0'
+
+            def comp = new TestComponent()
+            comp.usages.add(new TestUsage(
+                    name: 'api',
+                    usage: objects.named(Usage, 'api'),
+                    dependencies: configurations.implementation.allDependencies,
+                    attributes: testAttributes))
+
+            comp.usages.add(new TestUsage(
+                    name: 'impl',
+                    usage: objects.named(Usage, 'api'),
+                    dependencies: configurations.implementation.allDependencies,
+                    attributes: testAttributes,
+                    capabilities: [new TestCapability(group:'org.test', name: 'test', version: '1')]))
+
+            publishing {
+                repositories {
+                    ivy { url "${ivyRepo.uri}" }
+                }
+                publications {
+                    ivy(IvyPublication) {
+                        from comp
+                    }
+                }
+            }
+
+        """
+
+        settingsFile << "rootProject.name = 'publishTest' "
+
+        when:
         succeeds 'publish'
 
         then:
-        def module = ivyRepo.module('group', 'root', '1.0')
+        succeeds 'publish'
+
+        then:
+        def module = ivyRepo.module('group', 'publishTest', '1.0')
         module.assertPublished()
-        module.parsedModuleMetadata.variants.empty
-        module.parsedModuleMetadata.attributes.size() == 1
-        module.parsedModuleMetadata.attributes['org.gradle.status'] == 'integration'
+        module.parsedModuleMetadata.variants.size() == 2
     }
 
+    @ToBeFixedForConfigurationCache
+    def "fails to generate Gradle metadata if 2 variants have the same name"() {
+        given:
+        settingsFile.text = """
+            rootProject.name = 'root'
+        """
+        buildFile << """
+            apply plugin: 'ivy-publish'
+
+            group = 'group'
+            version = '1.0'
+
+            def comp = new TestComponent()
+            comp.usages.add(new TestUsage(
+                    name: 'api',
+                    usage: objects.named(Usage, 'api'),
+                    dependencies: configurations.implementation.allDependencies,
+                    attributes: testAttributes))
+
+            comp.usages.add(new TestUsage(
+                    name: 'api',
+                    usage: objects.named(Usage, 'impl'),
+                    dependencies: configurations.implementation.allDependencies,
+                    attributes: testAttributes))
+
+            publishing {
+                repositories {
+                    ivy { url "${ivyRepo.uri}" }
+                }
+                publications {
+                    ivy(IvyPublication) {
+                        from comp
+                    }
+                }
+            }
+
+        """
+
+        settingsFile << "rootProject.name = 'publishTest' "
+
+        when:
+        fails 'publish'
+
+        then:
+        failure.assertHasCause """Invalid publication 'ivy':
+  - It is invalid to have multiple variants with the same name ('api')"""
+    }
+
+    @ToBeFixedForConfigurationCache
+    def "fails to generate Gradle metadata if a variant doesn't have attributes"() {
+        given:
+        settingsFile.text = """
+            rootProject.name = 'root'
+        """
+        buildFile << """
+            apply plugin: 'ivy-publish'
+
+            group = 'group'
+            version = '1.0'
+
+            def comp = new TestComponent()
+            comp.usages.add(new TestUsage(
+                    name: 'api',
+                    dependencies: configurations.implementation.allDependencies))
+
+            comp.usages.add(new TestUsage(
+                    name: 'impl',
+                    usage: objects.named(Usage, 'impl'),
+                    dependencies: configurations.implementation.allDependencies,
+                    attributes: testAttributes))
+
+            publishing {
+                repositories {
+                    ivy { url "${ivyRepo.uri}" }
+                }
+                publications {
+                    ivy(IvyPublication) {
+                        from comp
+                    }
+                }
+            }
+
+        """
+
+        settingsFile << "rootProject.name = 'publishTest' "
+
+        when:
+        fails 'publish'
+
+        then:
+        failure.assertHasCause """Invalid publication 'ivy':
+  - Variant 'api' must declare at least one attribute."""
+    }
+
+    @ToBeFixedForConfigurationCache
+    def "fails to generate Gradle metadata if no dependency have a version"() {
+        given:
+        settingsFile.text = """
+            rootProject.name = 'root'
+        """
+        buildFile << """
+            apply plugin: 'ivy-publish'
+
+            group = 'group'
+            version = '1.0'
+
+            dependencies {
+                implementation("org.test:test")
+            }
+
+            def comp = new TestComponent()
+            comp.usages.add(new TestUsage(
+                    name: 'impl',
+                    usage: objects.named(Usage, 'impl'),
+                    dependencies: configurations.implementation.allDependencies,
+                    attributes: testAttributes))
+
+            publishing {
+                repositories {
+                    ivy { url "${ivyRepo.uri}" }
+                }
+                publications {
+                    ivy(IvyPublication) {
+                        from comp
+                    }
+                }
+            }
+
+        """
+
+        settingsFile << "rootProject.name = 'publishTest' "
+
+        when:
+        fails 'publish'
+
+        then:
+        failure.assertHasCause """Invalid publication 'ivy':
+  - Publication only contains dependencies and/or constraints without a version. You need to"""
+    }
+
+    @ToBeFixedForConfigurationCache
     def "publishes ivy status"() {
         given:
         settingsFile << "rootProject.name = 'root'"
@@ -98,6 +345,11 @@ class TestCapability implements Capability {
             version = '1.0'
 
             def comp = new TestComponent()
+            comp.usages.add(new TestUsage(
+                    name: 'api',
+                    usage: objects.named(Usage, 'api'),
+                    dependencies: configurations.implementation.allDependencies,
+                    attributes: testAttributes))
 
             publishing {
                 repositories {
@@ -120,11 +372,12 @@ class TestCapability implements Capability {
         then:
         def module = ivyRepo.module('group', 'root', '1.0')
         module.assertPublished()
-        module.parsedModuleMetadata.variants.empty
+        module.parsedModuleMetadata.variants.size() == 1
         module.parsedModuleMetadata.attributes.size() == 1
         module.parsedModuleMetadata.attributes['org.gradle.status'] == 'milestone'
     }
 
+    @ToBeFixedForConfigurationCache
     def "maps project dependencies"() {
         given:
         settingsFile << """rootProject.name = 'root'
@@ -133,7 +386,7 @@ class TestCapability implements Capability {
         buildFile << """
             allprojects {
                 apply plugin: 'ivy-publish'
-    
+
                 group = 'group'
                 version = '1.0'
 
@@ -147,9 +400,9 @@ class TestCapability implements Capability {
             def comp = new TestComponent()
             comp.usages.add(new TestUsage(
                     name: 'api',
-                    usage: objects.named(Usage, 'api'), 
-                    dependencies: configurations.implementation.allDependencies, 
-                    attributes: configurations.implementation.attributes))
+                    usage: objects.named(Usage, 'api'),
+                    dependencies: configurations.implementation.allDependencies,
+                    attributes: testAttributes))
 
             dependencies {
                 implementation project(':a')
@@ -163,12 +416,12 @@ class TestCapability implements Capability {
                     }
                 }
             }
-            
+
             project(':a') {
                 publishing {
                     publications {
                         ivy(IvyPublication) {
-                            organisation = 'group.a' 
+                            organisation = 'group.a'
                             module = 'lib_a'
                             revision = '4.5'
                         }
@@ -179,7 +432,7 @@ class TestCapability implements Capability {
                 publishing {
                     publications {
                         ivy(IvyPublication) {
-                            organisation = 'group.b' 
+                            organisation = 'group.b'
                             module = 'utils'
                             revision = '0.01'
                         }
@@ -200,6 +453,7 @@ class TestCapability implements Capability {
         api.dependencies[1].coords == 'group.b:utils:0.01'
     }
 
+    @ToBeFixedForConfigurationCache
     def "publishes component with strict and prefer dependencies"() {
         settingsFile << "rootProject.name = 'root'"
         buildFile << """
@@ -211,9 +465,9 @@ class TestCapability implements Capability {
             def comp = new TestComponent()
             comp.usages.add(new TestUsage(
                     name: 'api',
-                    usage: objects.named(Usage, 'api'), 
-                    dependencies: configurations.implementation.allDependencies, 
-                    attributes: configurations.implementation.attributes))
+                    usage: objects.named(Usage, 'api'),
+                    dependencies: configurations.implementation.allDependencies,
+                    attributes: testAttributes))
 
             dependencies {
                 implementation("org:foo") {
@@ -273,6 +527,7 @@ class TestCapability implements Capability {
         variant.dependencies[2].rejectsVersion == []
     }
 
+    @ToBeFixedForConfigurationCache
     def "publishes component with dependency constraints"() {
         settingsFile << "rootProject.name = 'root'"
         buildFile << """
@@ -284,10 +539,10 @@ class TestCapability implements Capability {
             def comp = new TestComponent()
             comp.usages.add(new TestUsage(
                     name: 'api',
-                    usage: objects.named(Usage, 'api'), 
+                    usage: objects.named(Usage, 'api'),
                     dependencies: configurations.implementation.allDependencies.withType(ModuleDependency),
                     dependencyConstraints: configurations.implementation.allDependencyConstraints,
-                    attributes: configurations.implementation.attributes))
+                    attributes: testAttributes))
 
             dependencies {
                 constraints {
@@ -324,6 +579,7 @@ class TestCapability implements Capability {
         variant.dependencyConstraints[0].rejectsVersion == []
     }
 
+    @ToBeFixedForConfigurationCache
     def "publishes component with version rejects"() {
         settingsFile << "rootProject.name = 'root'"
         buildFile << """
@@ -335,9 +591,9 @@ class TestCapability implements Capability {
             def comp = new TestComponent()
             comp.usages.add(new TestUsage(
                     name: 'api',
-                    usage: objects.named(Usage, 'api'), 
-                    dependencies: configurations.implementation.allDependencies, 
-                    attributes: configurations.implementation.attributes))
+                    usage: objects.named(Usage, 'api'),
+                    dependencies: configurations.implementation.allDependencies,
+                    attributes: testAttributes))
 
             dependencies {
                 implementation("org:foo") {
@@ -383,6 +639,7 @@ class TestCapability implements Capability {
         variant.dependencies[1].rejectsVersion == []
     }
 
+    @ToBeFixedForConfigurationCache
     def "publishes dependency reasons"() {
         settingsFile << "rootProject.name = 'root'"
         buildFile << """
@@ -394,16 +651,16 @@ class TestCapability implements Capability {
             def comp = new TestComponent()
             comp.usages.add(new TestUsage(
                     name: 'api',
-                    usage: objects.named(Usage, 'api'), 
+                    usage: objects.named(Usage, 'api'),
                     dependencies: configurations.implementation.allDependencies.withType(ModuleDependency),
                     dependencyConstraints: configurations.implementation.allDependencyConstraints,
-                    attributes: configurations.implementation.attributes))
+                    attributes: testAttributes))
 
             dependencies {
                 implementation("org:foo:1.0") {
-                   because 'version 1.0 is tested'                
+                   because 'version 1.0 is tested'
                 }
-                constraints {                
+                constraints {
                     implementation("org:bar:2.0") {
                         because 'because 2.0 is cool'
                     }
@@ -439,6 +696,7 @@ class TestCapability implements Capability {
         }
     }
 
+    @ToBeFixedForConfigurationCache
     def "publishes capabilities"() {
         settingsFile << "rootProject.name = 'root'"
         buildFile << """
@@ -450,8 +708,8 @@ class TestCapability implements Capability {
             def comp = new TestComponent()
             comp.usages.add(new TestUsage(
                     name: 'api',
-                    usage: objects.named(Usage, 'api'), 
-                    attributes: configurations.implementation.attributes,
+                    usage: objects.named(Usage, 'api'),
+                    attributes: testAttributes,
                     capabilities: [new TestCapability(group:'org.test', name: 'test', version: '1')]))
 
             publishing {
@@ -479,6 +737,7 @@ class TestCapability implements Capability {
         }
     }
 
+    @ToBeFixedForConfigurationCache
     def "publishes dependency/constraint attributes"() {
         settingsFile << "rootProject.name = 'root'"
         buildFile << """
@@ -490,13 +749,13 @@ class TestCapability implements Capability {
             def comp = new TestComponent()
             def attr1 = Attribute.of('custom', String)
             def attr2 = Attribute.of('nice', Boolean)
-            
+
             comp.usages.add(new TestUsage(
                     name: 'api',
-                    usage: objects.named(Usage, 'api'), 
+                    usage: objects.named(Usage, 'api'),
                     dependencies: configurations.implementation.allDependencies.withType(ModuleDependency),
                     dependencyConstraints: configurations.implementation.allDependencyConstraints,
-                    attributes: configurations.implementation.attributes))
+                    attributes: testAttributes))
 
             dependencies {
                 implementation("org:foo:1.0") {
@@ -504,7 +763,7 @@ class TestCapability implements Capability {
                       attribute(attr1, 'foo')
                    }
                 }
-                constraints {                
+                constraints {
                     implementation("org:bar:2.0") {
                         attributes {
                            attribute(attr2, true)
@@ -542,4 +801,174 @@ class TestCapability implements Capability {
         }
     }
 
+    @ToBeFixedForConfigurationCache
+    def "publishes component with strict version constraints"() {
+        settingsFile << "rootProject.name = 'root'"
+        buildFile << """
+            apply plugin: 'ivy-publish'
+
+            group = 'group'
+            version = '1.0'
+
+            def comp = new TestComponent()
+            comp.usages.add(new TestUsage(
+                    name: 'api',
+                    usage: objects.named(Usage, 'api'),
+                    dependencies: configurations.implementation.allDependencies,
+                    dependencyConstraints: configurations.implementation.allDependencyConstraints,
+                    attributes: testAttributes))
+
+            dependencies {
+                implementation("org:platform:1.0") {
+                    endorseStrictVersions()
+                }
+                implementation("org:foo") {
+                    version {
+                        strictly '1.0'
+                    }
+                }
+                constraints {
+                    implementation("org:bar") {
+                        version {
+                            strictly '1.1'
+                        }
+                    }
+                }
+            }
+
+            publishing {
+                repositories {
+                    ivy { url "${ivyRepo.uri}" }
+                }
+                publications {
+                    ivy(IvyPublication) {
+                        from comp
+                    }
+                }
+            }
+        """
+
+        when:
+        succeeds 'publish'
+
+        then:
+        def module = ivyRepo.module('group', 'root', '1.0')
+        module.assertPublished()
+        module.parsedModuleMetadata.variants.size() == 1
+        def variant = module.parsedModuleMetadata.variants[0]
+        variant.dependencies.size() == 2
+        variant.dependencyConstraints.size() == 1
+
+        variant.dependencies[0].endorseStrictVersions
+        variant.dependencies[0].group == 'org'
+        variant.dependencies[0].module == 'platform'
+        variant.dependencies[0].version == '1.0'
+        variant.dependencies[0].prefers == null
+        variant.dependencies[0].strictly == null
+        variant.dependencies[0].rejectsVersion == []
+
+        !variant.dependencies[1].endorseStrictVersions
+        variant.dependencies[1].group == 'org'
+        variant.dependencies[1].module == 'foo'
+        variant.dependencies[1].version == '1.0'
+        variant.dependencies[1].prefers == null
+        variant.dependencies[1].strictly == '1.0'
+        variant.dependencies[1].rejectsVersion == []
+
+        variant.dependencyConstraints[0].group == 'org'
+        variant.dependencyConstraints[0].module == 'bar'
+        variant.dependencyConstraints[0].version == '1.1'
+        variant.dependencyConstraints[0].prefers == null
+        variant.dependencyConstraints[0].strictly == '1.1'
+        variant.dependencyConstraints[0].rejectsVersion == []
+    }
+
+    @Unroll
+    @ToBeFixedForConfigurationCache
+    def "publishes Gradle metadata redirection marker when Gradle metadata task is enabled (enabled=#enabled)"() {
+        given:
+        settingsFile.text = """
+            rootProject.name = 'root'
+        """
+
+        buildFile << """
+            apply plugin: 'ivy-publish'
+
+            group = 'group'
+            version = '1.0'
+
+            def comp = new TestComponent()
+            comp.usages.add(new TestUsage(
+                    name: 'api',
+                    usage: objects.named(Usage, 'api'),
+                    dependencies: configurations.implementation.allDependencies,
+                    attributes: testAttributes))
+
+            publishing {
+                repositories {
+                    ivy { url "${ivyRepo.uri}" }
+                }
+                publications {
+                    ivy(IvyPublication) {
+                        from comp
+                    }
+                }
+            }
+
+            generateMetadataFileForIvyPublication.enabled = $enabled
+        """
+
+        settingsFile << "rootProject.name = 'publishTest' "
+
+        when:
+        succeeds 'publish'
+
+        then:
+        def module = ivyRepo.module('group', 'publishTest', '1.0')
+        module.hasGradleMetadataRedirectionMarker() == hasMarker
+
+        where:
+        enabled | hasMarker
+        false   | false
+        true    | true
+    }
+
+    @ToBeFixedForConfigurationCache
+    def 'can add the build identifier'() {
+        given:
+        settingsFile << "rootProject.name = 'root'"
+        buildFile << """
+            apply plugin: 'ivy-publish'
+
+            group = 'group'
+            version = '1.0'
+
+            def comp = new TestComponent()
+            comp.usages.add(new TestUsage(
+                    name: 'api',
+                    usage: objects.named(Usage, 'api'),
+                    dependencies: configurations.implementation.allDependencies,
+                    attributes: testAttributes))
+
+            publishing {
+                repositories {
+                    ivy { url "${ivyRepo.uri}" }
+                }
+                publications {
+                    ivy(IvyPublication) {
+                        from comp
+                        withBuildIdentifier()
+                    }
+                }
+            }
+        """
+
+        when:
+        succeeds 'publish'
+
+        then:
+        def module = ivyRepo.module('group', 'root', '1.0')
+        module.assertPublished()
+        module.parsedModuleMetadata.createdBy.buildId != null
+    }
 }

@@ -52,13 +52,10 @@ public class DefaultIvyModuleDescriptorWriter implements IvyModuleDescriptorWrit
     public void write(IvyModulePublishMetadata module, File output) {
         try {
             output.getParentFile().mkdirs();
-            OutputStream outputStream = new FileOutputStream(output);
-            try {
+            try (OutputStream outputStream = new FileOutputStream(output)) {
                 SimpleXmlWriter xmlWriter = new SimpleXmlWriter(outputStream, "  ");
                 writeTo(module, xmlWriter);
                 xmlWriter.flush();
-            } finally {
-                outputStream.close();
             }
         } catch (IOException e) {
             throw new UncheckedIOException(e);
@@ -234,9 +231,9 @@ public class DefaultIvyModuleDescriptorWriter implements IvyModuleDescriptorWrit
     }
 
     /**
-     * Writes the specified <code>Map</code> containing the extra attributes to the given <code>PrintWriter</code>.
+     * Writes the specified <tt>Map</tt> containing the extra attributes to the given <tt>PrintWriter</tt>.
      *
-     * @param extra the extra attributes, can be <code>null</code>
+     * @param extra the extra attributes, can be <tt>null</tt>
      * @param writer the writer to use
      */
     private static void printExtraAttributes(Map<String, ?> extra, SimpleXmlWriter writer) throws IOException {

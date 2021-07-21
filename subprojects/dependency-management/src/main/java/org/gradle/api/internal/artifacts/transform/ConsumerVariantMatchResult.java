@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 the original author or authors.
+ * Copyright 2020 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,54 +13,58 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.gradle.api.internal.artifacts.transform;
 
-import org.gradle.api.internal.attributes.AttributeContainerInternal;
 import org.gradle.api.internal.attributes.ImmutableAttributes;
 
-import java.util.ArrayList;
+import javax.annotation.Nullable;
 import java.util.Collection;
-import java.util.List;
 
-public class ConsumerVariantMatchResult {
-    private int minDepth;
-    private final List<ConsumerVariant> matches = new ArrayList<ConsumerVariant>();
+public interface ConsumerVariantMatchResult {
 
-    public void applyTo(ConsumerVariantMatchResult result) {
-        result.matches.addAll(this.matches);
-    }
+    boolean hasMatches();
 
-    public void matched(ImmutableAttributes output, Transformation transformation, int depth) {
-        // Collect only the shortest paths
-        if (minDepth == 0) {
-            minDepth = depth;
-        } else if (depth < minDepth) {
-            matches.clear();
-            minDepth = depth;
-        } else if (depth > minDepth) {
-            return;
-        }
-        matches.add(new ConsumerVariant(output, transformation, depth));
-    }
+    Collection<ConsumerVariant> getMatches();
 
-    public boolean hasMatches() {
-        return !matches.isEmpty();
-    }
-
-    public Collection<ConsumerVariant> getMatches() {
-        return matches;
-    }
-
-    public static class ConsumerVariant {
-        final AttributeContainerInternal attributes;
+    class ConsumerVariant implements VariantDefinition {
+        final ImmutableAttributes attributes;
         final Transformation transformation;
+        final TransformationStep transformationStep;
+        @Nullable
+        final ConsumerVariant previous;
         final int depth;
 
-        public ConsumerVariant(AttributeContainerInternal attributes, Transformation transformation, int depth) {
+        public ConsumerVariant(ImmutableAttributes attributes, TransformationStep transformationStep, @Nullable ConsumerVariant previous, int depth) {
             this.attributes = attributes;
-            this.transformation = transformation;
+            if (previous == null) {
+                this.transformation = transformationStep;
+            } else {
+                this.transformation = new TransformationChain(previous.transformation, transformationStep);
+            }
+            this.transformationStep = transformationStep;
+            this.previous = previous;
             this.depth = depth;
+        }
+
+        @Override
+        public ImmutableAttributes getTargetAttributes() {
+            return attributes;
+        }
+
+        @Override
+        public Transformation getTransformation() {
+            return transformation;
+        }
+
+        @Override
+        public TransformationStep getTransformationStep() {
+            return transformationStep;
+        }
+
+        @Nullable
+        @Override
+        public VariantDefinition getSourceVariant() {
+            return previous;
         }
     }
 }

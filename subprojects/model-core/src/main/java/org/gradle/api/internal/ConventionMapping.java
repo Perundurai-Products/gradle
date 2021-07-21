@@ -17,6 +17,7 @@ package org.gradle.api.internal;
 
 import groovy.lang.Closure;
 
+import javax.annotation.Nullable;
 import java.util.concurrent.Callable;
 
 /**
@@ -30,7 +31,13 @@ public interface ConventionMapping {
 
     MappedProperty map(String propertyName, Callable<?> value);
 
-    <T> T getConventionValue(T actualValue, String propertyName, boolean isExplicitValue);
+    /**
+     * Mark a property as ineligible for convention mapping.
+     */
+    void ineligible(String propertyName);
+
+    @Nullable
+    <T> T getConventionValue(@Nullable T actualValue, String propertyName, boolean isExplicitValue);
 
     interface MappedProperty {
         void cache();

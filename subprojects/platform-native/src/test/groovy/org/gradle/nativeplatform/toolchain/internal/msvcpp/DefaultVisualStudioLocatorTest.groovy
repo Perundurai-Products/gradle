@@ -27,8 +27,8 @@ import org.gradle.nativeplatform.toolchain.internal.msvcpp.version.VisualStudioM
 import org.gradle.nativeplatform.toolchain.internal.msvcpp.version.VisualStudioMetadataBuilder
 import org.gradle.nativeplatform.toolchain.internal.msvcpp.version.VisualStudioVersionLocator
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
-import org.gradle.util.TextUtil
-import org.gradle.util.VersionNumber
+import org.gradle.util.internal.TextUtil
+import org.gradle.util.internal.VersionNumber
 import org.junit.Rule
 import spock.lang.Specification
 import spock.lang.Unroll
@@ -36,7 +36,7 @@ import spock.lang.Unroll
 import static org.gradle.nativeplatform.toolchain.internal.msvcpp.ArchitectureDescriptorBuilder.*
 
 class DefaultVisualStudioLocatorTest extends Specification {
-    @Rule TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
+    @Rule TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider(getClass())
     final VisualStudioVersionLocator commandLineLocator = Mock(VisualStudioVersionLocator)
     final VisualStudioVersionLocator windowsRegistryLocator = Mock(VisualStudioVersionLocator)
     final VisualStudioVersionLocator systemPathLocator = Mock(VisualStudioVersionLocator)

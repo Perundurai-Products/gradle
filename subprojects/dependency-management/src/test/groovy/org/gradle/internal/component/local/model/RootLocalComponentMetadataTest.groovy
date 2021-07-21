@@ -26,6 +26,7 @@ import org.gradle.internal.component.external.model.DefaultModuleComponentIdenti
 import org.gradle.internal.component.external.model.ImmutableCapabilities
 import org.gradle.internal.component.model.DependencyMetadata
 import org.gradle.internal.locking.DefaultDependencyLockingState
+import spock.lang.Unroll
 
 class RootLocalComponentMetadataTest extends DefaultLocalComponentMetadataTest {
     def dependencyLockingHandler = Mock(DependencyLockingProvider)
@@ -35,7 +36,7 @@ class RootLocalComponentMetadataTest extends DefaultLocalComponentMetadataTest {
     def 'locking constraints are attached to a configuration and not its children'() {
         given:
         def constraint = DefaultModuleComponentIdentifier.newId(mid, '1.1')
-        dependencyLockingHandler.loadLockState("conf") >> new DefaultDependencyLockingState(false, [constraint] as Set)
+        dependencyLockingHandler.loadLockState("conf") >> new DefaultDependencyLockingState(true, [constraint] as Set, {entry -> false })
         dependencyLockingHandler.loadLockState("child") >> DefaultDependencyLockingState.EMPTY_LOCK_CONSTRAINT
         addConfiguration('conf').enableLocking()
         addConfiguration('child', ['conf']).enableLocking()
@@ -45,49 +46,50 @@ class RootLocalComponentMetadataTest extends DefaultLocalComponentMetadataTest {
         def child = metadata.getConfiguration('child')
 
         then:
-        conf.dependencies.size() == 1
-        child.dependencies.size() == 0
+        conf.syntheticDependencies.size() == 1
+        child.syntheticDependencies.size() == 0
     }
 
     def 'locking constraints are not transitive'() {
         given:
         def constraint = DefaultModuleComponentIdentifier.newId(mid, '1.1')
-        dependencyLockingHandler.loadLockState("conf") >> new DefaultDependencyLockingState(false, [constraint] as Set)
+        dependencyLockingHandler.loadLockState("conf") >> new DefaultDependencyLockingState(true, [constraint] as Set, {entry -> false })
         addConfiguration('conf').enableLocking()
 
         when:
         def conf = metadata.getConfiguration('conf')
 
         then:
-        conf.dependencies.size() == 1
-        conf.dependencies.each {
+        conf.syntheticDependencies.size() == 1
+        conf.syntheticDependencies.each {
             assert !it.transitive
         }
     }
 
-    def 'provides useful reason for locking constraints'() {
+    @Unroll
+    def 'provides useful reason for locking constraints (#strict)'() {
         given:
         def constraint = DefaultModuleComponentIdentifier.newId(mid, '1.1')
-        dependencyLockingHandler.loadLockState("conf") >> new DefaultDependencyLockingState(partial, [constraint] as Set)
+        dependencyLockingHandler.loadLockState("conf") >> new DefaultDependencyLockingState(strict, [constraint] as Set, {entry -> false })
         addConfiguration('conf').enableLocking()
 
         when:
         def conf = metadata.getConfiguration('conf')
 
         then:
-        conf.dependencies.size() == 1
-        conf.dependencies.each { DependencyMetadata dep ->
+        conf.syntheticDependencies.size() == 1
+        conf.syntheticDependencies.each { DependencyMetadata dep ->
             assert dep.reason == reason
         }
 
         where:
-        reason                                                 | partial
-        "dependency was locked to version '1.1'"               | false
-        "dependency was locked to version '1.1' (update mode)" | true
+        reason                                                          | strict
+        "dependency was locked to version '1.1'"                        | true
+        "dependency was locked to version '1.1' (update/lenient mode)"  | false
     }
 
     private addConfiguration(String name, Collection<String> extendsFrom = [], ImmutableAttributes attributes = ImmutableAttributes.EMPTY) {
-        metadata.addConfiguration(name, "", extendsFrom as Set, ImmutableSet.copyOf(extendsFrom + [name]), true, true, attributes, true, true, ImmutableCapabilities.EMPTY)
+        metadata.addConfiguration(name, "", extendsFrom as Set, ImmutableSet.copyOf(extendsFrom + [name]), true, true, attributes, true, null, true, ImmutableCapabilities.EMPTY, Collections.&emptyList)
     }
 
 }

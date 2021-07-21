@@ -24,4 +24,22 @@ import org.gradle.api.Named;
  * @since 1.3
  */
 public interface Publication extends Named {
+
+    /**
+     * Disables publication of a unique build identifier in Gradle Module Metadata.
+     * <p>
+     * The build identifier is not published by default.
+     *
+     * @since 6.6
+     */
+    void withoutBuildIdentifier();
+
+    /**
+     * Enables publication of a unique build identifier in Gradle Module Metadata.
+     * <p>
+     * The build identifier is not published by default.
+     *
+     * @since 6.6
+     */
+    void withBuildIdentifier();
 }

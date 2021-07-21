@@ -21,7 +21,7 @@ import org.gradle.cache.PersistentIndexedCache;
 import org.gradle.internal.serialize.AbstractSerializer;
 import org.gradle.internal.serialize.Decoder;
 import org.gradle.internal.serialize.Encoder;
-import org.gradle.util.BuildCommencedTimeProvider;
+import org.gradle.util.internal.BuildCommencedTimeProvider;
 
 import java.util.LinkedHashSet;
 import java.util.Set;
@@ -57,7 +57,7 @@ public class DefaultModuleVersionsCache extends AbstractModuleVersionsCache {
 
     @Override
     protected ModuleVersionsCacheEntry get(ModuleAtRepositoryKey key) {
-        return getCache().get(key);
+        return getCache().getIfPresent(key);
     }
 
     private static class ModuleKeySerializer extends AbstractSerializer<ModuleAtRepositoryKey> {
@@ -67,12 +67,14 @@ public class DefaultModuleVersionsCache extends AbstractModuleVersionsCache {
             this.moduleIdentifierFactory = moduleIdentifierFactory;
         }
 
+        @Override
         public void write(Encoder encoder, ModuleAtRepositoryKey value) throws Exception {
             encoder.writeString(value.repositoryId);
             encoder.writeString(value.moduleId.getGroup());
             encoder.writeString(value.moduleId.getName());
         }
 
+        @Override
         public ModuleAtRepositoryKey read(Decoder decoder) throws Exception {
             String resolverId = decoder.readString();
             String group = decoder.readString();
@@ -83,6 +85,7 @@ public class DefaultModuleVersionsCache extends AbstractModuleVersionsCache {
 
     private static class ModuleVersionsCacheEntrySerializer extends AbstractSerializer<ModuleVersionsCacheEntry> {
 
+        @Override
         public void write(Encoder encoder, ModuleVersionsCacheEntry value) throws Exception {
             Set<String> versions = value.moduleVersionListing;
             encoder.writeInt(versions.size());
@@ -92,9 +95,10 @@ public class DefaultModuleVersionsCache extends AbstractModuleVersionsCache {
             encoder.writeLong(value.createTimestamp);
         }
 
+        @Override
         public ModuleVersionsCacheEntry read(Decoder decoder) throws Exception {
             int size = decoder.readInt();
-            Set<String> versions = new LinkedHashSet<String>();
+            Set<String> versions = new LinkedHashSet<>();
             for (int i = 0; i < size; i++) {
                 versions.add(decoder.readString());
             }

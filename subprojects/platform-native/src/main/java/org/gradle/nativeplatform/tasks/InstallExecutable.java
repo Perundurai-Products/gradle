@@ -16,14 +16,13 @@
 package org.gradle.nativeplatform.tasks;
 
 import org.gradle.api.DefaultTask;
-import org.gradle.api.Incubating;
 import org.gradle.api.file.ConfigurableFileCollection;
 import org.gradle.api.file.Directory;
 import org.gradle.api.file.DirectoryProperty;
 import org.gradle.api.file.FileCollection;
+import org.gradle.api.file.FileSystemOperations;
 import org.gradle.api.file.RegularFile;
 import org.gradle.api.file.RegularFileProperty;
-import org.gradle.api.internal.file.FileOperations;
 import org.gradle.api.model.ObjectFactory;
 import org.gradle.api.provider.Property;
 import org.gradle.api.provider.Provider;
@@ -44,7 +43,8 @@ import org.gradle.internal.work.WorkerLeaseService;
 import org.gradle.nativeplatform.platform.NativePlatform;
 import org.gradle.nativeplatform.toolchain.Gcc;
 import org.gradle.nativeplatform.toolchain.NativeToolChain;
-import org.gradle.util.GFileUtils;
+import org.gradle.util.internal.GFileUtils;
+import org.gradle.work.DisableCachingByDefault;
 
 import javax.annotation.Nullable;
 import javax.inject.Inject;
@@ -54,7 +54,7 @@ import java.util.Collection;
 /**
  * Installs an executable with it's dependent libraries so it can be easily executed.
  */
-@Incubating
+@DisableCachingByDefault(because = "Not worth caching")
 public class InstallExecutable extends DefaultTask {
     private final Property<NativePlatform> targetPlatform;
     private final Property<NativeToolChain> toolChain;
@@ -79,7 +79,7 @@ public class InstallExecutable extends DefaultTask {
         this.executable = objectFactory.fileProperty();
         this.installedExecutable.set(getLibDirectory().map(directory -> directory.file(executable.getAsFile().get().getName())));
         // A further work around for missing ability to skip task when input file is missing (see #getInputFileIfExists below)
-        dependsOn(executable);
+        getInputs().file(executable);
         this.targetPlatform = objectFactory.property(NativePlatform.class);
         this.toolChain = objectFactory.property(NativeToolChain.class);
     }
@@ -182,7 +182,7 @@ public class InstallExecutable extends DefaultTask {
      */
     @Internal("covered by getInstallDirectory")
     public Provider<RegularFile> getRunScriptFile() {
-        return installDirectory.file(executable.map(executableFile -> OperatingSystem.forName(targetPlatform.get().getOperatingSystem().getName()).getScriptName(executableFile.getAsFile().getName())));
+        return installDirectory.file(executable.getLocationOnly().map(executableFile -> OperatingSystem.forName(targetPlatform.get().getOperatingSystem().getName()).getScriptName(executableFile.getAsFile().getName())));
     }
 
     @Inject
@@ -191,12 +191,12 @@ public class InstallExecutable extends DefaultTask {
     }
 
     @Inject
-    protected FileOperations getFileOperations() {
+    protected FileSystemOperations getFileSystemOperations() {
         throw new UnsupportedOperationException();
     }
 
     @TaskAction
-    public void install() {
+    protected void install() {
         NativePlatform nativePlatform = targetPlatform.get();
         File executable = getExecutableFile().get().getAsFile();
         File libDirectory = getLibDirectory().get().getAsFile();
@@ -215,7 +215,7 @@ public class InstallExecutable extends DefaultTask {
     }
 
     private Provider<Directory> getLibDirectory() {
-        return getInstallDirectory().dir("lib");
+        return getInstallDirectory().getLocationOnly().map(dir -> dir.dir("lib"));
     }
 
     private void installWindows(File executable, File runScript) {
@@ -260,7 +260,7 @@ public class InstallExecutable extends DefaultTask {
     }
 
     private void installToDir(final File binaryDir, final File executableFile, final Collection<File> libs) {
-        getFileOperations().sync(copySpec -> {
+        getFileSystemOperations().sync(copySpec -> {
             copySpec.into(binaryDir);
             copySpec.from(executableFile);
             copySpec.from(libs);

@@ -16,6 +16,7 @@
 package org.gradle.integtests.resolve.ivy
 
 import org.gradle.integtests.fixtures.AbstractHttpDependencyResolutionTest
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import spock.lang.Issue
 
 class IvyCustomStatusLatestVersionIntegrationTest extends AbstractHttpDependencyResolutionTest {
@@ -66,6 +67,7 @@ task retrieve(type: Sync) {
         "platin" | "1.0"
     }
 
+    @ToBeFixedForConfigurationCache
     def "uses status provided by component metadata rule for latest.xyz"() {
         given:
         buildFile << """
@@ -79,7 +81,7 @@ configurations { compile }
 class StatusRule implements ComponentMetadataRule {
 
     String releaseVersion
-    
+
     @javax.inject.Inject
     public StatusRule(String releaseVersion) {
         this.releaseVersion = releaseVersion

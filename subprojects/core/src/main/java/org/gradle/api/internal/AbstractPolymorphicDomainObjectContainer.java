@@ -28,7 +28,7 @@ import org.gradle.internal.metaobject.ConfigureDelegate;
 import org.gradle.internal.metaobject.DynamicInvokeResult;
 import org.gradle.internal.metaobject.DynamicObject;
 import org.gradle.internal.reflect.Instantiator;
-import org.gradle.util.ConfigureUtil;
+import org.gradle.util.internal.ConfigureUtil;
 
 import javax.annotation.Nullable;
 import java.util.Map;
@@ -44,11 +44,13 @@ public abstract class AbstractPolymorphicDomainObjectContainer<T>
 
     protected abstract <U extends T> U doCreate(String name, Class<U> type);
 
+    @Override
     public <U extends T> U create(String name, Class<U> type) {
         assertMutable("create(String, Class)");
         return create(name, type, null);
     }
 
+    @Override
     public <U extends T> U maybeCreate(String name, Class<U> type) throws InvalidUserDataException {
         T item = findByName(name);
         if (item != null) {
@@ -57,6 +59,7 @@ public abstract class AbstractPolymorphicDomainObjectContainer<T>
         return create(name, type);
     }
 
+    @Override
     public <U extends T> U create(String name, Class<U> type, Action<? super U> configuration) {
         assertMutable("create(String, Class, Action)");
         assertCanAdd(name);
@@ -108,7 +111,7 @@ public abstract class AbstractPolymorphicDomainObjectContainer<T>
 
     @Override
     protected ConfigureDelegate createConfigureDelegate(Closure configureClosure) {
-        return new PolymorphicDomainObjectContainerConfigureDelegate(configureClosure, this);
+        return new PolymorphicDomainObjectContainerConfigureDelegate<>(configureClosure, this);
     }
 
     private class ContainerElementsDynamicObject extends AbstractDynamicObject {
@@ -159,8 +162,9 @@ public abstract class AbstractPolymorphicDomainObjectContainer<T>
         }
     }
 
+    @Override
     public <U extends T> NamedDomainObjectContainer<U> containerWithType(Class<U> type) {
-        return getInstantiator().newInstance(TypedDomainObjectContainerWrapper.class, type, this);
+        return Cast.uncheckedNonnullCast(getInstantiator().newInstance(TypedDomainObjectContainerWrapper.class, type, this));
     }
 
 }

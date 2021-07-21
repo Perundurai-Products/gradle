@@ -29,13 +29,13 @@ import org.gradle.tooling.BuildLauncher
 import org.gradle.tooling.CancellationToken
 import org.gradle.tooling.ProjectConnection
 import org.hamcrest.Matcher
-import org.hamcrest.Matchers
 import org.junit.Rule
 import spock.lang.Retry
 import spock.lang.Timeout
 
 import static org.gradle.integtests.fixtures.RetryConditions.onBuildTimeout
-import static org.hamcrest.Matchers.containsString
+import static org.hamcrest.CoreMatchers.anyOf
+import static org.hamcrest.CoreMatchers.containsString
 import static spock.lang.Retry.Mode.SETUP_FEATURE_CLEANUP
 
 @Timeout(180)
@@ -51,7 +51,7 @@ abstract class ContinuousBuildToolingApiSpecification extends ToolingApiSpecific
     ExecutionResult result
     ExecutionFailure failure
 
-    int buildTimeout = 20
+    int buildTimeout = 30
 
     @Rule
     GradleBuildCancellation cancellationTokenSource
@@ -149,8 +149,14 @@ abstract class ContinuousBuildToolingApiSpecification extends ToolingApiSpecific
     }
 
     private void waitForBuild() {
+        long t0 = System.currentTimeMillis()
         ExecutionOutput executionOutput = waitUntilOutputContains containsString(WAITING_MESSAGE)
+        println("Wait finishes: ${System.currentTimeMillis() - t0} ms")
         result = OutputScrapingExecutionResult.from(executionOutput.stdout, executionOutput.stderr)
+
+        // Wait for extra 10s to wait for unexpected file change events to finish
+        // https://github.com/gradle/gradle-private/issues/2976
+        Thread.sleep(10 * 1000)
     }
 
     private ExecutionOutput waitUntilOutputContains(Matcher<String> expectedMatcher) {
@@ -191,40 +197,15 @@ abstract class ContinuousBuildToolingApiSpecification extends ToolingApiSpecific
         }
     }
 
-    protected List<String> getExecutedTasks() {
-        assertHasResult()
-        result.executedTasks
-    }
-
-    private assertHasResult() {
-        assert result != null: "result is null, you haven't run succeeds()"
-    }
-
-    protected Set<String> getSkippedTasks() {
-        assertHasResult()
-        result.skippedTasks
-    }
-
-    protected List<String> getNonSkippedTasks() {
-        executedTasks - skippedTasks
-    }
-
-    protected void executedAndNotSkipped(String... tasks) {
-        tasks.each {
-            assert it in executedTasks
-            assert !skippedTasks.contains(it)
-        }
-    }
-
     boolean cancel() {
         cancellationTokenSource.cancel()
-        waitUntilOutputContains Matchers.anyOf(containsString(BUILD_CANCELLED), containsString(BUILD_CANCELLED_AND_STOPPED))
+        waitUntilOutputContains anyOf(containsString(BUILD_CANCELLED), containsString(BUILD_CANCELLED_AND_STOPPED))
         true
     }
 
     void waitBeforeModification(File file) {
         long waitMillis = 100L
-        if(OS_IS_WINDOWS && file.exists()) {
+        if (OS_IS_WINDOWS && file.exists()) {
             // ensure that file modification time changes on windows
             long fileAge = System.currentTimeMillis() - file.lastModified()
             if (fileAge > 0L && fileAge < 900L) {

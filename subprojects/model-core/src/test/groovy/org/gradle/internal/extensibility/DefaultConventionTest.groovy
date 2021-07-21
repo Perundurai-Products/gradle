@@ -26,11 +26,11 @@ import org.junit.Before
 import org.junit.Test
 
 import static org.gradle.api.reflect.TypeOf.typeOf
-import static org.hamcrest.Matchers.equalTo
+import static org.hamcrest.CoreMatchers.equalTo
 import static org.junit.Assert.assertEquals
 import static org.junit.Assert.assertNull
 import static org.junit.Assert.assertSame
-import static org.junit.Assert.assertThat
+import static org.hamcrest.MatcherAssert.assertThat
 import static org.junit.Assert.assertTrue
 import static org.junit.Assert.fail
 
@@ -54,7 +54,7 @@ class DefaultConventionTest {
         assertEquals(convention1.b, convention.extensionsAsDynamicObject.b)
     }
 
-    @Test void conventionObjectsPropertiesHavePrecendenceAccordingToOrderAdded() {
+    @Test void conventionObjectsPropertiesHavePrecedenceAccordingToOrderAdded() {
         assertEquals(convention1.a, convention.extensionsAsDynamicObject.a)
     }
 
@@ -76,7 +76,7 @@ class DefaultConventionTest {
         assertEquals(convention1.meth('somearg'), convention.extensionsAsDynamicObject.meth('somearg'))
     }
 
-    @Test void conventionObjectsMethodsHavePrecendenceAccordingToOrderAdded() {
+    @Test void conventionObjectsMethodsHavePrecedenceAccordingToOrderAdded() {
         assertEquals(convention1.meth(), convention.extensionsAsDynamicObject.meth())
     }
 
@@ -134,7 +134,7 @@ class DefaultConventionTest {
         assertEquals(convention.extensionsAsDynamicObject.properties.get("foo"), ext);
     }
 
-    @Test void extensionsTakePrecendenceOverPluginConventions() {
+    @Test void extensionsTakePrecedenceOverPluginConventions() {
         convention = new DefaultConvention(instantiator)
         convention.plugins.foo = new FooPluginExtension()
         convention.add("foo", new FooExtension())
@@ -154,18 +154,22 @@ class DefaultConventionTest {
 
     @Test void honoursHasPublicTypeForAddedExtension() {
         convention.add("pet", new ExtensionWithPublicType())
-        assert convention.schema["pet"] == typeOf(PublicExtensionType)
+        assert publicTypeOf("pet") == typeOf(PublicExtensionType)
     }
 
     @Test void honoursHasPublicTypeForCreatedExtension() {
         convention.create("pet", ExtensionWithPublicType)
-        assert convention.schema["pet"] == typeOf(PublicExtensionType)
+        assert publicTypeOf("pet") == typeOf(PublicExtensionType)
     }
 
     @Test void createWillExposeGivenTypeAsTheSchemaTypeEvenWhenInstantiatorReturnsDecoratedType() {
-        def convention = new DefaultConvention(TestUtil.instantiatorFactory().decorateLenient())
+        convention = new DefaultConvention(TestUtil.instantiatorFactory().decorateLenient())
         assert convention.create("foo", FooExtension).class != FooExtension
-        assert convention.schema["foo"] == typeOf(FooExtension)
+        assert publicTypeOf("foo") == typeOf(FooExtension)
+    }
+
+    private TypeOf<?> publicTypeOf(String extension) {
+        convention.extensionsSchema.find { it.name == extension }.publicType
     }
 
     interface PublicExtensionType {

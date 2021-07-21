@@ -17,7 +17,7 @@
 package org.gradle.nativeplatform.toolchain.internal.msvcpp.version
 
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
-import org.gradle.util.VersionNumber
+import org.gradle.util.internal.VersionNumber
 import org.junit.Rule
 import spock.lang.Specification
 import spock.lang.Unroll
@@ -27,7 +27,7 @@ import static org.gradle.nativeplatform.toolchain.internal.msvcpp.version.Visual
 
 
 class VisualStudioVersionDeterminerTest extends Specification {
-    @Rule TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
+    @Rule TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider(getClass())
     def commandLineLocator = Mock(VisualStudioVersionLocator)
     def windowsRegistryLocator = Mock(VisualStudioVersionLocator)
     def visualCppMetadataProvider = Mock(VisualCppMetadataProvider)

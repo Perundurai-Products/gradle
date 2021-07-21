@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 the original author or authors.
+ * Copyright 2020 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,12 +13,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.gradle.api.internal.artifacts.ivyservice.ivyresolve.strategy
 
 import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.VersionInfo
 import spock.lang.Specification
 
 class DefaultVersionComparatorTest extends Specification {
+
     def versionParser = new VersionParser()
     def comparator = new DefaultVersionComparator()
 
@@ -34,17 +36,18 @@ class DefaultVersionComparatorTest extends Specification {
         compare(larger, larger) == 0
 
         where:
-        smaller | larger
-        "1.0"   | "2.0"
-        "1.0"   | "1.1"
-        "1.2"   | "1.10"
-        "1.0.1" | "1.1.0"
-        "1.2"   | "1.2.3"
-        "12"    | "12.2.3"
-        "12"    | "13"
-        "1.0-1" | "1.0-2"
-        "1.0-1" | "1.0.2"
-        "1.0-1" | "1+0_2"
+        smaller  | larger
+        "1.0"    | "2.0"
+        "1.0"    | "1.1"
+        "1.2"    | "1.10"
+        "1.0.1"  | "1.1.0"
+        "1.2"    | "1.2.3"
+        "12"     | "12.2.3"
+        "12"     | "13"
+        "1.0-1"  | "1.0-2"
+        "1.0-1"  | "1.0.2"
+        "1.0-1"  | "1+0_2"
+        "2.11.4" | "2.11.4+4"
     }
 
     def "compares versions lexicographically when parts are not digits"() {
@@ -60,8 +63,11 @@ class DefaultVersionComparatorTest extends Specification {
         "1.0.A"     | "1.0.b"
         "1.0-alpha" | "1.0-beta"
         "1.0-ALPHA" | "1.0-BETA"
+        "1.0-ALPHA" | "1.0-alpha"
         "1.0.alpha" | "1.0.b"
         "alpha"     | "beta"
+        "1.0-a"     | "1.0-alpha"
+        "1.0-a"     | "1.0-a1"
     }
 
     def "considers parts that are digits as larger than parts that are not"() {
@@ -72,10 +78,11 @@ class DefaultVersionComparatorTest extends Specification {
         compare(larger, larger) == 0
 
         where:
-        smaller     | larger
-        "1.0-alpha" | "1.0.1"
-        "a.b.c"     | "a.b.123"
-        "a"         | "123"
+        smaller             | larger
+        "1.0-alpha"         | "1.0.1"
+        "a.b.c"             | "a.b.123"
+        "a"                 | "123"
+        "1.0.0-alpha.beta"  | "1.0.0-alpha.1"
     }
 
     def "considers a trailing part that contains no digits as smaller"() {
@@ -114,7 +121,6 @@ class DefaultVersionComparatorTest extends Specification {
         "1.0-dev-1"   | "1.0-rc-1"
         "1.0-rc-1"    | "1.0-final"
         "1.0-dev-1"   | "1.0-final"
-        "1.0-release" | "1.0-final"
         "1.0.0.RC1"   | "1.0.0.RC2"
         "1.0.0.RC2"   | "1.0.0.RELEASE"
     }
@@ -128,15 +134,14 @@ class DefaultVersionComparatorTest extends Specification {
 
         where:
         smaller        | larger
+        "1.1.a"        | "1.1"
         "1.0-dev"      | "1.0-a"
         "1.0-a"        | "1.0-rc"
         "1.0-a"        | "1.0-release"
         "1.0-a"        | "1.0-final"
 
-        "1.0-dev"      | "1.0-SNAPSHOT"
-        "1.0-SNAPSHOT" | "1.0-rc"
-        "1.0-SNAPSHOT" | "1.0-release"
-        "1.0-SNAPSHOT" | "1.0-final"
+        "1.0-dev"      | "1.0-snapshot"
+        "1.0-patch"    | "1.0-release"
     }
 
     def "compares identical versions equal"() {
@@ -176,11 +181,11 @@ class DefaultVersionComparatorTest extends Specification {
         compare(larger, larger) == 0
 
         where:
-        smaller        | larger
-        "1.01"         | "1.2"
-        "1.1"          | "1.02"
-        "01.0"         | "2.0"
-        "1.0"          | "02.0"
+        smaller | larger
+        "1.01"  | "1.2"
+        "1.1"   | "1.02"
+        "01.0"  | "2.0"
+        "1.0"   | "02.0"
     }
 
     def "compares versions where earlier version parts differ only in leading zeros"() {
@@ -191,11 +196,11 @@ class DefaultVersionComparatorTest extends Specification {
         compare(larger, larger) == 0
 
         where:
-        smaller        | larger
-        "01.1"         | "1.2"
-        "1.1"          | "01.2"
-        "1.01.1"       | "1.1.2"
-        "1.1.1"        | "1.01.2"
+        smaller  | larger
+        "01.1"   | "1.2"
+        "1.1"    | "01.2"
+        "1.01.1" | "1.1.2"
+        "1.1.1"  | "1.01.2"
     }
 
     def "compares unrelated versions unequal"() {
@@ -258,5 +263,37 @@ class DefaultVersionComparatorTest extends Specification {
         expect:
         def versionComparator = comparator.asVersionComparator()
         versionComparator.compare(v1, v2) < 0
+    }
+
+    def "extends special qualifier treatment to snapshot, ga and sp"() {
+        expect:
+        compare(smaller, larger) < 0
+        compare(larger, smaller) > 0
+        compare(smaller, smaller) == 0
+        compare(larger, larger) == 0
+
+        where:
+        smaller        | larger
+        "1.0-rc"       | "1.0-snapshot"
+        "1.0-snapshot" | "1.0-release"
+        "1.0-release"  | "1.0-sp1"
+        "1.0-snapshot" | "1.0-final"
+        "1.0-snapshot" | "1.0-ga"
+        "1.0-sp"       | "1.0"
+        "1.0-sp1"      | "1.0"
+    }
+
+    def 'does sort ga, final and release alphabetically'() {
+        expect:
+        compare(smaller, larger) < 0
+        compare(larger, smaller) > 0
+        compare(smaller, smaller) == 0
+        compare(larger, larger) == 0
+
+        where:
+        smaller     | larger
+        "1.0-final" | "1.0-release"
+        "1.0-final" | "1.0-ga"
+        "1.0-ga"    | "1.0-release"
     }
 }

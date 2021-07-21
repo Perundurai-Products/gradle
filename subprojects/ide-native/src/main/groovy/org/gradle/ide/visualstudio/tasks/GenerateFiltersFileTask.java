@@ -25,13 +25,15 @@ import org.gradle.ide.visualstudio.internal.DefaultVisualStudioProject;
 import org.gradle.ide.visualstudio.tasks.internal.RelativeFileNameTransformer;
 import org.gradle.ide.visualstudio.tasks.internal.VisualStudioFiltersFile;
 import org.gradle.plugins.ide.api.XmlGeneratorTask;
+import org.gradle.work.DisableCachingByDefault;
 
 import java.io.File;
 
 /**
- * Task for generating a filters file.
+ * Task for generating a Visual Studio filters file (e.g. {@code foo.vcxproj.filters}).
  */
 @Incubating
+@DisableCachingByDefault(because = "Not made cacheable, yet")
 public class GenerateFiltersFileTask extends XmlGeneratorTask<VisualStudioFiltersFile> {
     private DefaultVisualStudioProject visualStudioProject;
 

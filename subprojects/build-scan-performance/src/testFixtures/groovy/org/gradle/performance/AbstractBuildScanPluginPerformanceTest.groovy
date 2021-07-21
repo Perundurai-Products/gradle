@@ -18,11 +18,12 @@ package org.gradle.performance
 
 import groovy.json.JsonSlurper
 import org.gradle.integtests.fixtures.executer.IntegrationTestBuildContext
-import org.gradle.performance.fixture.BuildExperimentRunner
+import org.gradle.integtests.fixtures.versions.ReleasedVersionDistributions
 import org.gradle.performance.fixture.BuildExperimentSpec
 import org.gradle.performance.fixture.BuildScanPerformanceTestRunner
-import org.gradle.performance.fixture.CrossBuildPerformanceTestRunner
-import org.gradle.performance.fixture.GradleSessionProvider
+import org.gradle.performance.fixture.GradleBuildExperimentRunner
+import org.gradle.performance.fixture.GradleInvocationSpec
+import org.gradle.performance.fixture.PerformanceTestIdProvider
 import org.gradle.performance.measure.Amount
 import org.gradle.performance.measure.MeasuredOperation
 import org.gradle.performance.results.BaselineVersion
@@ -32,37 +33,52 @@ import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.junit.Rule
 import spock.lang.AutoCleanup
 import spock.lang.Shared
-import spock.lang.Specification
 
-class AbstractBuildScanPluginPerformanceTest extends Specification {
+import static org.gradle.performance.fixture.BaselineVersionResolver.toBaselineVersions
+
+class AbstractBuildScanPluginPerformanceTest extends AbstractPerformanceTest {
 
     static String incomingDir = "../../incoming"
+
     @Rule
-    TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
+    TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider(getClass())
+
+    @Rule
+    PerformanceTestIdProvider performanceTestIdProvider = new PerformanceTestIdProvider()
 
     @AutoCleanup
     @Shared
     def resultStore = new BuildScanResultsStore()
 
     protected final IntegrationTestBuildContext buildContext = new IntegrationTestBuildContext()
-    CrossBuildPerformanceTestRunner runner
+    BuildScanPerformanceTestRunner runner
 
     @Shared
     String pluginVersionNumber = resolvePluginVersion()
 
-    void setup() {
+    def setup() {
+        def baselineVersions = toBaselineVersions(new ReleasedVersionDistributions(buildContext), ['last'], null) as List<String>
+        if (baselineVersions.empty || baselineVersions.size() > 1) {
+            throw new IllegalArgumentException("Expected exactly one baseline version but got ${baselineVersions.size()}: $baselineVersions")
+        }
+
+        def distribution = buildContext.distribution(baselineVersions.first())
         def buildStampJsonFile = new File(incomingDir, "buildStamp.json")
         assert buildStampJsonFile.exists()
         def buildStampJsonData = new JsonSlurper().parse(buildStampJsonFile) as Map<String, ?>
         assert buildStampJsonData.commitId
         def pluginCommitId = buildStampJsonData.commitId as String
-        runner = new BuildScanPerformanceTestRunner(new BuildExperimentRunner(new GradleSessionProvider(buildContext)), resultStore, pluginCommitId, buildContext) {
+        runner = new BuildScanPerformanceTestRunner(new GradleBuildExperimentRunner(gradleProfilerReporter, outputDirSelector), resultStore.reportAlso(dataReporter), pluginCommitId, buildContext) {
             @Override
             protected void defaultSpec(BuildExperimentSpec.Builder builder) {
                 super.defaultSpec(builder)
-                builder.workingDirectory = tmpDir.testDirectory
+                builder.workingDirectory = temporaryFolder.testDirectory
+                def invocation = (builder.invocation as GradleInvocationSpec.InvocationBuilder)
+                invocation.buildLog(new File(builder.workingDirectory, "build.log"))
+                invocation.distribution(distribution)
             }
         }
+        performanceTestIdProvider.setTestSpec(runner)
     }
 
     private static resolvePluginVersion() {
@@ -85,7 +101,7 @@ class AbstractBuildScanPluginPerformanceTest extends Specification {
         def rawResults = results.buildResult(name)
         def shift = rawResults.totalTime.median.value * maxPercentageShift / 100
         baselineResults.results.addAll(rawResults.collect {
-            new MeasuredOperation([start: it.start, end: it.end, totalTime: Amount.valueOf(it.totalTime.value + shift, it.totalTime.units), exception: it.exception])
+            new MeasuredOperation([totalTime: Amount.valueOf(it.totalTime.value + shift, it.totalTime.units), exception: it.exception])
         })
         return baselineResults
     }

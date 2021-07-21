@@ -18,6 +18,7 @@ package org.gradle.vcs.fixtures;
 
 import com.google.common.collect.Lists;
 import org.eclipse.jgit.api.AddCommand;
+import org.eclipse.jgit.api.CommitCommand;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.lib.Ref;
@@ -27,7 +28,7 @@ import org.eclipse.jgit.submodule.SubmoduleWalk;
 import org.gradle.api.Named;
 import org.gradle.internal.UncheckedException;
 import org.gradle.test.fixtures.file.TestFile;
-import org.gradle.util.GFileUtils;
+import org.gradle.util.internal.GFileUtils;
 import org.junit.rules.ExternalResource;
 
 import java.io.File;
@@ -146,7 +147,7 @@ public class GitFileRepository extends ExternalResource implements Named, GitRep
             add.addFilepattern(path);
         }
         add.call();
-        return git.commit().setMessage(message).call();
+        return commit(message);
     }
 
     /**
@@ -160,7 +161,9 @@ public class GitFileRepository extends ExternalResource implements Named, GitRep
             add.addFilepattern(relativePath(file));
         }
         add.call();
-        return git.commit().setMessage(message).call();
+        final CommitCommand commit = git.commit();
+        commit.setSign(false);
+        return commit.setMessage(message).call();
     }
 
     @Override

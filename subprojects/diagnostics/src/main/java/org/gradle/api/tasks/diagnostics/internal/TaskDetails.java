@@ -17,8 +17,25 @@ package org.gradle.api.tasks.diagnostics.internal;
 
 import org.gradle.util.Path;
 
+import javax.annotation.Nullable;
+
 public interface TaskDetails {
     Path getPath();
 
+    @Nullable
     String getDescription();
+
+    static TaskDetails of(Path path, @Nullable String description) {
+        return new TaskDetails() {
+            @Override
+            public Path getPath() {
+                return path;
+            }
+
+            @Override
+            public String getDescription() {
+                return description;
+            }
+        };
+    }
 }

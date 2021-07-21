@@ -16,7 +16,6 @@
 
 package org.gradle.nativeplatform;
 
-import org.gradle.api.Incubating;
 import org.gradle.api.tasks.Nested;
 
 /**
@@ -24,7 +23,6 @@ import org.gradle.api.tasks.Nested;
  *
  * @since 5.1
  */
-@Incubating
 public interface TargetMachine {
     /**
      * Returns the target operating system
@@ -37,19 +35,4 @@ public interface TargetMachine {
      */
     @Nested
     MachineArchitecture getArchitecture();
-
-    /**
-     * Returns a {@link TargetMachine} for the operating system of this machine and the x86 32-bit architecture
-     */
-    TargetMachine getX86();
-
-    /**
-     * Returns a {@link TargetMachine} for the operating system of this machine and the x86 64-bit architecture
-     */
-    TargetMachine getX86_64();
-
-    /**
-     * Returns a {@link TargetMachine} for the operating system of this machine and the specified architecture.
-     */
-    TargetMachine architecture(String architecture);
 }

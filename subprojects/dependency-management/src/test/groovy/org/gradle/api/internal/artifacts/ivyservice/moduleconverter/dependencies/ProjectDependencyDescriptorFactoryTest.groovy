@@ -24,7 +24,6 @@ import org.gradle.api.internal.artifacts.dependencies.DefaultProjectDependency
 import org.gradle.api.internal.attributes.ImmutableAttributes
 import org.gradle.initialization.ProjectAccessListener
 import org.gradle.internal.component.local.model.DefaultProjectComponentSelector
-import org.gradle.internal.component.local.model.OpaqueComponentIdentifier
 import org.gradle.internal.component.model.LocalOriginDependencyMetadata
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.gradle.util.Path
@@ -34,10 +33,15 @@ import org.junit.Rule
 class ProjectDependencyDescriptorFactoryTest extends AbstractDependencyDescriptorFactoryInternalSpec {
 
     private ProjectIvyDependencyDescriptorFactory projectDependencyDescriptorFactory = new ProjectIvyDependencyDescriptorFactory(excludeRuleConverterStub)
-    private final ComponentIdentifier componentId = new OpaqueComponentIdentifier("foo")
+    private final ComponentIdentifier componentId = new ComponentIdentifier() {
+        @Override
+        String getDisplayName() {
+            return "example"
+        }
+    }
 
     @Rule
-    TestNameTestDirectoryProvider temporaryFolder = TestNameTestDirectoryProvider.newInstance()
+    TestNameTestDirectoryProvider temporaryFolder = TestNameTestDirectoryProvider.newInstance(getClass())
 
     def canConvert() {
         expect:
@@ -47,15 +51,31 @@ class ProjectDependencyDescriptorFactoryTest extends AbstractDependencyDescripto
 
     def testCreateFromProjectDependency() {
         when:
-        ProjectDependency projectDependency = createProjectDependency(TEST_DEP_CONF)
-        setUpDependency(projectDependency)
+        boolean withArtifacts = true
+        ProjectDependency projectDependency = createProjectDependency(null)
+        setUpDependency(projectDependency, withArtifacts)
         LocalOriginDependencyMetadata dependencyMetaData = projectDependencyDescriptorFactory.createDependencyDescriptor(componentId, TEST_CONF, null, projectDependency)
 
         then:
-        assertDependencyDescriptorHasCommonFixtureValues(dependencyMetaData)
+        assertDependencyDescriptorHasCommonFixtureValues(dependencyMetaData, withArtifacts)
         !dependencyMetaData.changing
         !dependencyMetaData.force
-        dependencyMetaData.selector == new DefaultProjectComponentSelector(DefaultBuildIdentifier.ROOT, Path.ROOT, Path.ROOT, "root", ImmutableAttributes.EMPTY)
+        dependencyMetaData.selector == new DefaultProjectComponentSelector(DefaultBuildIdentifier.ROOT, Path.ROOT, Path.ROOT, "root", ImmutableAttributes.EMPTY, [])
+        projectDependency == dependencyMetaData.source
+    }
+
+    def testCreateFromProjectDependencyWithoutArtifacts() {
+        when:
+        boolean withArtifacts = false
+        ProjectDependency projectDependency = createProjectDependency(TEST_DEP_CONF)
+        setUpDependency(projectDependency, withArtifacts)
+        LocalOriginDependencyMetadata dependencyMetaData = projectDependencyDescriptorFactory.createDependencyDescriptor(componentId, TEST_CONF, null, projectDependency)
+
+        then:
+        assertDependencyDescriptorHasCommonFixtureValues(dependencyMetaData, withArtifacts)
+        !dependencyMetaData.changing
+        !dependencyMetaData.force
+        dependencyMetaData.selector == new DefaultProjectComponentSelector(DefaultBuildIdentifier.ROOT, Path.ROOT, Path.ROOT, "root", ImmutableAttributes.EMPTY, [])
         projectDependency == dependencyMetaData.source
     }
 
@@ -63,7 +83,9 @@ class ProjectDependencyDescriptorFactoryTest extends AbstractDependencyDescripto
         Project dependencyProject = TestUtil.create(temporaryFolder).rootProject()
         dependencyProject.setGroup("someGroup")
         dependencyProject.setVersion("someVersion")
-        dependencyProject.configurations.create(dependencyConfiguration)
+        if (dependencyConfiguration != null) {
+            dependencyProject.configurations.create(dependencyConfiguration)
+        }
         return new DefaultProjectDependency(dependencyProject, dependencyConfiguration, {} as ProjectAccessListener, true)
     }
 }

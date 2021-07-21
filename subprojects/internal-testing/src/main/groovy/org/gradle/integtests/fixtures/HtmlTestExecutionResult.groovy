@@ -18,7 +18,7 @@ package org.gradle.integtests.fixtures
 import groovy.transform.EqualsAndHashCode
 import groovy.transform.ToString
 import org.gradle.internal.FileUtils
-import org.gradle.util.TextUtil
+import org.gradle.util.internal.TextUtil
 import org.hamcrest.Matcher
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
@@ -197,12 +197,13 @@ class HtmlTestExecutionResult implements TestExecutionResult {
             if (testCase.isEmpty()) {
                 return false
             }
-            def messages = testCase.first().messages.collect { it.readLines().first() }
+            def fullMessages = testCase.first().messages
+            def messages = fullMessages.collect { it.readLines().first() }
             if (messages.size() != messageMatchers.length) {
                 return false
             }
             for (int i = 0; i < messageMatchers.length; i++) {
-                if (!messageMatchers[i].matches(messages[i])) {
+                if (!messageMatchers[i].matches(messages[i]) && !messageMatchers[i].matches(fullMessages[i])) {
                     return false
                 }
             }

@@ -19,8 +19,9 @@ import org.gradle.api.JavaVersion
 import org.gradle.api.internal.classpath.Module
 import org.gradle.api.internal.classpath.ModuleRegistry
 import org.gradle.api.internal.classpath.PluginModuleRegistry
+import org.gradle.internal.classpath.ClassPath
 import org.gradle.internal.classpath.DefaultClassPath
-import org.gradle.testing.internal.util.Specification
+import spock.lang.Specification
 import spock.lang.Unroll
 
 class DynamicModulesClassPathProviderTest extends Specification {
@@ -95,6 +96,7 @@ class DynamicModulesClassPathProviderTest extends Specification {
         _ * module.classpath >> DefaultClassPath.of([new File("${name}.jar")] + additionalClasspathEntries.collect { new File(it) })
         _ * module.implementationClasspath >> DefaultClassPath.of(new File("${name}.jar"))
         _ * module.allRequiredModules >> (([module] + (requiredModules as List)) as LinkedHashSet)
+        _ * module.allRequiredModulesClasspath >> module.allRequiredModules.collect { it.classpath }.inject(ClassPath.EMPTY) { r, i -> r + i }
         return module
     }
 }

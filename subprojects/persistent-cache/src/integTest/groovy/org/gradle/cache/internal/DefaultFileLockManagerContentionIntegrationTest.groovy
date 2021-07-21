@@ -34,7 +34,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 
 import static org.gradle.test.fixtures.ConcurrentTestUtil.poll
-import static org.gradle.util.TextUtil.escapeString
+import static org.gradle.util.internal.TextUtil.escapeString
 
 class DefaultFileLockManagerContentionIntegrationTest extends AbstractIntegrationSpec {
     def addressFactory = new InetAddressFactory()
@@ -47,14 +47,37 @@ class DefaultFileLockManagerContentionIntegrationTest extends AbstractIntegratio
     def setup() {
         executer.withArguments("-d")
         executer.requireOwnGradleUserHomeDir().withDaemonBaseDir(file("daemonsRequestingLock")).requireDaemon()
-        buildFile << ""
+        buildFile << """
+            import org.gradle.cache.FileLockManager
+            import org.gradle.cache.internal.filelock.LockOptionsBuilder
+
+            abstract class FileLocker extends DefaultTask {
+                @Inject
+                abstract FileLockManager getFileLockManager()
+
+                @Inject
+                abstract ProjectLayout getProjectLayout()
+
+                @TaskAction
+                void lockIt() {
+                    def lock
+                    try {
+                        lock = fileLockManager.lock(projectLayout.projectDirectory.file("locks/testlock").asFile, LockOptionsBuilder.mode(FileLockManager.LockMode.Exclusive), "task file lock")
+                    } finally {
+                        lock?.close()
+                    }
+                }
+            }
+
+            tasks.register("lock", FileLocker)
+        """
     }
 
     def cleanup() {
         socketReceiverThread?.terminate = true
     }
 
-    def "the lock holder is not hammered with ping requests for the shared fileHashes lock"() {
+    def "the lock holder is not hammered with ping requests for the shared lock"() {
         given:
         setupLockOwner()
         def pingRequestCount = 0
@@ -62,13 +85,12 @@ class DefaultFileLockManagerContentionIntegrationTest extends AbstractIntegratio
         replaceSocketReceiver { pingRequestCount++ }
 
         when:
-        def build = executer.withTasks("help").start()
+        def build = executer.withTasks("lock").start()
         def timer = Time.startTimer()
-        poll {
+        poll(120) {
             assert (build.standardOutput =~ 'Pinged owner at port').count == 3
         }
         receivingLock.close()
-
         then:
         build.waitForFinish()
         pingRequestCount == 3 || pingRequestCount == 4
@@ -85,11 +107,11 @@ class DefaultFileLockManagerContentionIntegrationTest extends AbstractIntegratio
         }
 
         when:
-        def build = executer.withTasks("help").start()
-        poll { assert requestReceived }
+        def build = executer.withTasks("lock").start()
+        poll(120) { assert requestReceived }
 
         // simulate additional requests
-        def socket = new DatagramSocket(0, addressFactory.localBindingAddress)
+        def socket = new DatagramSocket(0, addressFactory.wildcardBindingAddress)
         (1..500).each {
             addressFactory.communicationAddresses.each { address ->
                 byte[] bytes = [1, 0, 0, 0, 0, 0, 0, 0, 0]
@@ -113,8 +135,8 @@ class DefaultFileLockManagerContentionIntegrationTest extends AbstractIntegratio
         setupLockOwner() { requestReceived = true }
 
         when:
-        def build = executer.withTasks("help").start()
-        poll {
+        def build = executer.withTasks("lock").start()
+        poll(120) {
             assert requestReceived
         }
         replaceSocketReceiver {
@@ -134,10 +156,10 @@ class DefaultFileLockManagerContentionIntegrationTest extends AbstractIntegratio
         setupLockOwner() { requestReceived = true }
 
         when:
-        def build1 = executer.withArguments("-d").withTasks("help").start()
-        def build2 = executer.withArguments("-d").withTasks("help").start()
-        def build3 = executer.withArguments("-d").withTasks("help").start()
-        poll {
+        def build1 = executer.withArguments("-d").withTasks("lock").start()
+        def build2 = executer.withArguments("-d").withTasks("lock").start()
+        def build3 = executer.withArguments("-d").withTasks("lock").start()
+        poll(120) {
             assert requestReceived
             assertConfirmationCount(build1)
             assertConfirmationCount(build2)
@@ -163,12 +185,12 @@ class DefaultFileLockManagerContentionIntegrationTest extends AbstractIntegratio
         }
 
         when:
-        def build1 = executer.withArguments("-d").withTasks("help").start()
-        def build2 = executer.withArguments("-d").withTasks("help").start()
-        def build3 = executer.withArguments("-d").withTasks("help").start()
+        def build1 = executer.withArguments("-d").withTasks("lock").start()
+        def build2 = executer.withArguments("-d").withTasks("lock").start()
+        def build3 = executer.withArguments("-d").withTasks("lock").start()
 
         then:
-        poll {
+        poll(120) {
             assert signal != null
             assertConfirmationCount(build1)
             assertConfirmationCount(build2)
@@ -179,7 +201,7 @@ class DefaultFileLockManagerContentionIntegrationTest extends AbstractIntegratio
         signal.trigger()
 
         then:
-        poll {
+        poll(120) {
             assertReleaseSignalTriggered(build1)
             assertReleaseSignalTriggered(build2)
             assertReleaseSignalTriggered(build3)
@@ -192,41 +214,6 @@ class DefaultFileLockManagerContentionIntegrationTest extends AbstractIntegratio
         build3.waitForFinish()
     }
 
-    def "if the lock was released by one lock holder, but taken away again, the new lock holder is pinged once"() {
-        given:
-        def requestReceived = false
-        def lock1 = setupLockOwner() { requestReceived = true }
-
-        when:
-        def build = executer.withTasks("help").start()
-        poll {
-            assert requestReceived
-            assert countPingsSent(build) == 1
-        }
-
-        requestReceived = false
-        def prevReceivingSocket = receivingSocket
-        def prevReceivingLock = receivingLock
-        lock1.close()
-        def lock2 = setupLockOwner() {
-            requestReceived = true
-        }
-        poll {
-            assert requestReceived
-            assert countPingsSent(build, prevReceivingSocket) == 1
-            assert countPingsSent(build, receivingSocket) == 1
-        }
-        lock2.close()
-
-        then:
-        build.waitForFinish()
-        countPingsSent(build, prevReceivingSocket) == 1
-        countPingsSent(build, receivingSocket) == 1
-        assertConfirmationCount(build, prevReceivingSocket, prevReceivingLock)
-        assertConfirmationCount(build, receivingSocket, receivingLock)
-        assertConfirmationCount(build, prevReceivingSocket, prevReceivingLock)
-    }
-
     // This test simulates a long running Zinc compiler setup by running code similar to ZincScalaCompilerFactory through the worker API.
     // if many workers wait for the same exclusive lock, a worker does not time out because several others get the lock before
     def "worker not timeout"() {
@@ -237,30 +224,29 @@ class DefaultFileLockManagerContentionIntegrationTest extends AbstractIntegratio
             import org.gradle.cache.PersistentCache
             import org.gradle.cache.FileLockManager
             import org.gradle.cache.internal.filelock.LockOptionsBuilder
-            import org.gradle.cache.internal.CacheRepositoryServices;
-            import org.gradle.internal.logging.events.OutputEventListener;
-            import org.gradle.internal.nativeintegration.services.NativeServices;
-            import org.gradle.internal.service.DefaultServiceRegistry;
-            import org.gradle.internal.service.scopes.GlobalScopeServices;
+            import org.gradle.cache.internal.CacheRepositoryServices
+            import org.gradle.internal.logging.events.OutputEventListener
+            import org.gradle.internal.nativeintegration.services.NativeServices
+            import org.gradle.internal.service.DefaultServiceRegistry
+            import org.gradle.internal.service.scopes.GlobalScopeServices
+            import org.gradle.workers.WorkParameters
 
             task doWorkInWorker(type: WorkerTask)
-            
-            class WorkerTask extends DefaultTask {
-                @javax.inject.Inject
-                WorkerExecutor getWorkerExecutor() { throw new UnsupportedOperationException() }
-                
+
+            abstract class WorkerTask extends DefaultTask {
+                @Inject
+                abstract WorkerExecutor getWorkerExecutor()
+
                 @TaskAction
                 void doWork() {
                     (1..8).each {
-                        workerExecutor.submit(ToolSetupRunnable) { WorkerConfiguration config ->
-                            config.isolationMode = IsolationMode.PROCESS
-                        }
+                        workerExecutor.processIsolation().submit(ToolSetupWorkAction) { }
                     }
                 }
             }
 
-            class ToolSetupRunnable implements Runnable {
-                void run() {
+            abstract class ToolSetupWorkAction implements WorkAction<WorkParameters.None> {
+                void execute() {
                     CacheRepository cacheRepository = ZincCompilerServices.getInstance(new File("${escapeString(gradleUserHome)}")).get(CacheRepository.class);
                     println "Waiting for lock..."
                     final PersistentCache zincCache = cacheRepository.cache("zinc-0.3.15")
@@ -275,21 +261,21 @@ class DefaultFileLockManagerContentionIntegrationTest extends AbstractIntegratio
                     }
                 }
             }
-            
+
             class ZincCompilerServices extends DefaultServiceRegistry {
                 private static ZincCompilerServices instance;
-        
+
                 private ZincCompilerServices(File gradleUserHome) {
                     super(NativeServices.getInstance());
-        
+
                     add(OutputEventListener.class, OutputEventListener.NO_OP);
                     addProvider(new GlobalScopeServices(true));
                     addProvider(new CacheRepositoryServices(gradleUserHome, null));
                 }
-        
+
                 public static ZincCompilerServices getInstance(File gradleUserHome) {
                     if (instance == null) {
-                        NativeServices.initialize(gradleUserHome);
+                        NativeServices.initializeOnWorker(gradleUserHome);
                         instance = new ZincCompilerServices(gradleUserHome);
                     }
                     return instance;
@@ -364,7 +350,7 @@ class DefaultFileLockManagerContentionIntegrationTest extends AbstractIntegratio
             String getProcessDisplayName() { return "process" }
         }, receivingFileLockContentionHandler)
         receivingSocket = receivingFileLockContentionHandler.communicator.socket
-        receivingLock = fileLockManager.lock(new File(executer.gradleUserHomeDir, "caches/${executer.gradleVersion.version}/fileHashes/fileHashes"), LockOptionsBuilder.mode(FileLockManager.LockMode.Exclusive), "fileHashes", "", whenContended)
+        receivingLock = fileLockManager.lock(file("locks/testlock"), LockOptionsBuilder.mode(FileLockManager.LockMode.Exclusive), "testlock", "test holding lock", whenContended)
     }
 
 }

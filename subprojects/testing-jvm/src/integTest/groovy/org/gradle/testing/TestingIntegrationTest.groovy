@@ -22,14 +22,13 @@ import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
 import org.gradle.testing.fixture.JUnitMultiVersionIntegrationSpec
 import org.gradle.util.Requires
 import org.gradle.util.TestPrecondition
-import org.hamcrest.Matchers
+import org.hamcrest.CoreMatchers
 import spock.lang.IgnoreIf
 import spock.lang.Issue
 import spock.lang.Unroll
 
-import static org.gradle.testing.fixture.JUnitCoverage.JUNIT_4_LATEST
-import static org.gradle.testing.fixture.JUnitCoverage.JUNIT_VINTAGE_JUPITER
-
+import static org.gradle.testing.fixture.JUnitCoverage.*
+import static org.hamcrest.CoreMatchers.equalTo
 /**
  * General tests for the JVM testing infrastructure that don't deserve their own test class.
  */
@@ -37,13 +36,12 @@ import static org.gradle.testing.fixture.JUnitCoverage.JUNIT_VINTAGE_JUPITER
 class TestingIntegrationTest extends JUnitMultiVersionIntegrationSpec {
 
     @Issue("https://issues.gradle.org/browse/GRADLE-1948")
-    @IgnoreIf({ GradleContextualExecuter.parallel })
     def "test interrupting its own thread does not kill test execution"() {
         given:
         buildFile << """
             apply plugin: 'java'
             ${mavenCentralRepository()}
-            dependencies { testCompile "junit:junit:4.12" }
+            dependencies { testImplementation "junit:junit:4.13" }
         """
 
         and:
@@ -61,7 +59,7 @@ class TestingIntegrationTest extends JUnitMultiVersionIntegrationSpec {
         run "test"
 
         then:
-        ":test" in nonSkippedTasks
+        executedAndNotSkipped(":test")
     }
 
     def "fails cleanly even if an exception is thrown that doesn't serialize cleanly"() {
@@ -91,7 +89,7 @@ class TestingIntegrationTest extends JUnitMultiVersionIntegrationSpec {
         file('build.gradle') << """
             apply plugin: 'java'
             ${mavenCentralRepository()}
-            dependencies { testCompile 'junit:junit:4.12' }
+            dependencies { testImplementation 'junit:junit:4.13' }
         """
 
         when:
@@ -103,7 +101,7 @@ class TestingIntegrationTest extends JUnitMultiVersionIntegrationSpec {
         and:
         def results = new DefaultTestExecutionResult(file("."))
         results.assertTestClassesExecuted("ExceptionTest")
-        results.testClass("ExceptionTest").assertTestFailed("testThrow", Matchers.equalTo('ExceptionTest$BadlyBehavedException: Broken writeObject()'))
+        results.testClass("ExceptionTest").assertTestFailed("testThrow", equalTo('ExceptionTest$BadlyBehavedException: Broken writeObject()'))
     }
 
     def "fails cleanly even if an exception is thrown that doesn't de-serialize cleanly"() {
@@ -134,7 +132,7 @@ class TestingIntegrationTest extends JUnitMultiVersionIntegrationSpec {
             apply plugin: 'java'
             ${mavenCentralRepository()}
             dependencies {
-                testCompile 'junit:junit:4.12'
+                testImplementation 'junit:junit:4.13'
             }
         """
 
@@ -148,7 +146,7 @@ class TestingIntegrationTest extends JUnitMultiVersionIntegrationSpec {
         and:
         def results = new DefaultTestExecutionResult(file("."))
         results.assertTestClassesExecuted("ExceptionTest")
-        results.testClass("ExceptionTest").assertTestFailed("testThrow", Matchers.equalTo('ExceptionTest$BadlyBehavedException: Broken readObject()'))
+        results.testClass("ExceptionTest").assertTestFailed("testThrow", equalTo('ExceptionTest$BadlyBehavedException: Broken readObject()'))
     }
 
     @Requires(TestPrecondition.NOT_WINDOWS)
@@ -163,7 +161,7 @@ class TestingIntegrationTest extends JUnitMultiVersionIntegrationSpec {
         buildFile << """
             apply plugin: 'java'
             ${mavenCentralRepository()}
-            dependencies { testCompile "junit:junit:4.12" }
+            dependencies { testImplementation "junit:junit:4.13" }
             test.workingDir = "${testWorkingDir.toURI()}"
         """
 
@@ -184,13 +182,13 @@ class TestingIntegrationTest extends JUnitMultiVersionIntegrationSpec {
 
     @Issue("https://issues.gradle.org/browse/GRADLE-2313")
     @Unroll
-    "can clean test after extracting class file with #framework"() {
+    def "can clean test after extracting class file with #framework"() {
         when:
         ignoreWhenJUnitPlatform()
         buildFile << """
             apply plugin: "java"
             ${mavenCentralRepository()}
-            dependencies { testCompile "$dependency" }
+            dependencies { testImplementation "$dependency" }
             test { $framework() }
         """
         and:
@@ -206,7 +204,7 @@ class TestingIntegrationTest extends JUnitMultiVersionIntegrationSpec {
 
         where:
         framework   | dependency                | superClass
-        "useJUnit"  | "junit:junit:4.12"        | "org.junit.runner.Result"
+        "useJUnit"  | "junit:junit:4.13"        | "org.junit.runner.Result"
         "useTestNG" | "org.testng:testng:6.3.1" | "org.testng.Converter"
     }
 
@@ -218,15 +216,15 @@ class TestingIntegrationTest extends JUnitMultiVersionIntegrationSpec {
                 apply plugin:'java'
                 ${mavenCentralRepository()}
 
-                sourceSets{
-	                othertests{
+                sourceSets {
+	                othertests {
 		                java.srcDir file('src/othertests/java')
 	                    resources.srcDir file('src/othertests/resources')
 	                }
                 }
 
                 dependencies{
-	                othertestsCompile "junit:junit:4.12"
+	                othertestsImplementation "junit:junit:4.13"
                 }
 
                 task othertestsTest(type:Test){
@@ -259,6 +257,8 @@ class TestingIntegrationTest extends JUnitMultiVersionIntegrationSpec {
         result.assertTestClassesExecuted("TestCaseExtendsAbstractClass")
     }
 
+    @Requires(TestPrecondition.JDK15_OR_EARLIER) // java.lang.IncompatibleClassChangeError: class com.google.common.collect.ImmutableCollection$EmptyImmutableCollection
+                                                 // overrides final method com.google.common.collect.ImmutableCollection.toArray()[Ljava/lang/Object;
     @Issue("https://issues.gradle.org/browse/GRADLE-2962")
     def "incompatible user versions of classes that we also use don't affect test execution"() {
 
@@ -285,9 +285,9 @@ class TestingIntegrationTest extends JUnitMultiVersionIntegrationSpec {
                 // guarantee ordering
                 first 'com.google.guava:guava:15.0'
                 last 'com.google.collections:google-collections:1.0'
-                compile configurations.first + configurations.last
+                implementation configurations.first + configurations.last
 
-                testCompile 'junit:junit:4.12'
+                testImplementation 'junit:junit:4.13'
             }
         """
 
@@ -308,20 +308,19 @@ class TestingIntegrationTest extends JUnitMultiVersionIntegrationSpec {
         and:
         def result = new DefaultTestExecutionResult(testDirectory)
         result.testClass("TestCase").with {
-            assertTestFailed("test", Matchers.containsString("java.lang.VerifyError"))
-            assertTestFailed("test", Matchers.containsString("\$EmptyImmutableCollection"))
+            assertTestFailed("test", CoreMatchers.containsString("java.lang.VerifyError"))
+            assertTestFailed("test", CoreMatchers.containsString("\$EmptyImmutableCollection"))
         }
     }
 
     @Issue("https://issues.gradle.org/browse/GRADLE-3157")
-    @Requires(TestPrecondition.JDK8_OR_LATER)
     def "test class detection works when '-parameters' compiler option is used (JEP 118)"() {
         when:
         buildScript """
             apply plugin: 'java'
             ${mavenCentralRepository()}
             dependencies {
-                testCompile 'junit:junit:4.12'
+                testImplementation 'junit:junit:4.13'
             }
             tasks.withType(JavaCompile) {
                 options.with {
@@ -347,7 +346,7 @@ class TestingIntegrationTest extends JUnitMultiVersionIntegrationSpec {
             public class TestCase {
                 @Test
                 public void test() {
-                    assertTrue(Double.valueOf(System.getProperty("java.specification.version")) >= 1.8);
+                    assertTrue(Double.parseDouble(System.getProperty("java.specification.version")) >= 1.8);
                 }
             }
         """
@@ -368,7 +367,7 @@ class TestingIntegrationTest extends JUnitMultiVersionIntegrationSpec {
             apply plugin:'java'
             ${mavenCentralRepository()}
             dependencies {
-                testCompile 'junit:junit:4.12'
+                testImplementation 'junit:junit:4.13'
             }
             test {
                 testLogging {
@@ -395,14 +394,14 @@ class TestingIntegrationTest extends JUnitMultiVersionIntegrationSpec {
         when:
         run "test"
         then:
-        nonSkippedTasks.contains ":test"
+        executedAndNotSkipped ":test"
         output.contains("FirstTest > test PASSED")
         output.contains("SecondTest > test PASSED")
 
         when:
         run "test"
         then:
-        skippedTasks.contains ":test"
+        skipped ":test"
 
         when:
         buildFile << """
@@ -415,7 +414,7 @@ class TestingIntegrationTest extends JUnitMultiVersionIntegrationSpec {
         then:
         run "test"
         then:
-        nonSkippedTasks.contains ":test"
+        executedAndNotSkipped ":test"
         output.contains("FirstTest > test PASSED")
         !output.contains("SecondTest > test PASSED")
     }
@@ -450,7 +449,7 @@ class TestingIntegrationTest extends JUnitMultiVersionIntegrationSpec {
         buildFile << """
             apply plugin:'java'
             ${mavenCentralRepository()}
-            dependencies { testCompile 'junit:junit:4.12' }
+            dependencies { testImplementation 'junit:junit:4.13' }
         """
 
         and:
@@ -478,5 +477,106 @@ class TestingIntegrationTest extends JUnitMultiVersionIntegrationSpec {
 
         then:
         outputContains "Unable to reset SecurityManager"
+    }
+
+    @IgnoreIf({ GradleContextualExecuter.embedded })
+    @Requires(TestPrecondition.JDK14_OR_LATER)
+    def "useful NPE messages are transported to the daemon"() {
+        buildFile << """
+            apply plugin:'java-library'
+            ${mavenCentralRepository()}
+            dependencies { testImplementation 'junit:junit:4.13' }
+
+            test {
+                jvmArgs("-XX:+ShowCodeDetailsInExceptionMessages")
+            }
+        """
+
+        file('src/test/java/UsefulNPETest.java') << """
+            import org.junit.Test;
+
+            public class UsefulNPETest {
+                @Test
+                public void testUsefulNPE() {
+                    Object o = null;
+                    o.toString();
+                }
+
+                @Test
+                public void testDeepUsefulNPE() {
+                    other(null);
+                }
+
+                @Test
+                public void testFailingGetMessage() {
+                    throw new NullPointerException() {
+                        public String getMessage() {
+                            throw new RuntimeException();
+                        }
+                    };
+                }
+
+                void other(Object param) {
+                    try {
+                       System.out.println(param.toString());
+                    } catch (NullPointerException ex) {
+                        throw new RuntimeException(ex);
+                    }
+                }
+
+            }
+        """
+
+        when:
+        fails 'test'
+
+        then:
+        def result = new DefaultTestExecutionResult(testDirectory)
+        result.testClass("UsefulNPETest")
+            .testFailed("testUsefulNPE", equalTo('java.lang.NullPointerException: Cannot invoke "Object.toString()" because "o" is null'))
+        result.testClass("UsefulNPETest")
+            .testFailed("testDeepUsefulNPE", equalTo('java.lang.RuntimeException: java.lang.NullPointerException: Cannot invoke "Object.toString()" because "param" is null'))
+        result.testClass("UsefulNPETest")
+            .testFailed("testFailingGetMessage", equalTo('Could not determine failure message for exception of type UsefulNPETest$1: java.lang.RuntimeException'))
+    }
+
+    def "test thread name is reset after test execution"() {
+        when:
+        ignoreWhenJUnitPlatform()
+        buildFile << """
+            apply plugin: "java"
+            ${mavenCentralRepository()}
+            dependencies {
+                testImplementation "junit:junit:${NEWEST}"
+            }
+            test { useJUnit() }
+        """
+
+        and:
+        file("src/test/java/SomeTest.java") << threadNameCheckTest("SomeTest")
+        file("src/test/java/AnotherTest.java") << threadNameCheckTest("AnotherTest")
+
+        then:
+        succeeds "clean", "test"
+
+        and:
+        def result = new DefaultTestExecutionResult(testDirectory)
+        result.testClass("SomeTest").assertTestPassed("checkThreadName")
+        result.testClass("AnotherTest").assertTestPassed("checkThreadName")
+    }
+
+    private static String threadNameCheckTest(String className) {
+        return """
+            import org.junit.Test;
+            import static org.junit.Assert.assertEquals;
+
+            public class ${className} {
+                @Test
+                public void checkThreadName() {
+                    assertEquals("Test worker", Thread.currentThread().getName());
+                    Thread.currentThread().setName(getClass().getSimpleName());
+                }
+            }
+        """
     }
 }

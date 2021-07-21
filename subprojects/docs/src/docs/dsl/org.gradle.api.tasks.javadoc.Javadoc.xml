@@ -49,8 +49,12 @@
                 <td><literal>[]</literal></td>
             </tr>
             <tr>
-                <td>toolChain</td>
-                <td></td>
+                <td>modularity</td>
+                <td/>
+            </tr>
+            <tr>
+                <td>javadocTool</td>
+                <td><literal>java.toolchain</literal></td>
             </tr>
         </table>
     </section>

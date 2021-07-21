@@ -18,6 +18,7 @@ package org.gradle.api.internal.artifacts.ivyservice.resolveengine.result
 
 import org.gradle.api.artifacts.component.ModuleComponentSelector
 import org.gradle.api.internal.artifacts.DefaultModuleIdentifier
+import org.gradle.api.internal.artifacts.DependencyManagementTestUtil
 import org.gradle.api.internal.artifacts.dependencies.DefaultMutableVersionConstraint
 import org.gradle.api.internal.artifacts.ivyservice.resolveengine.graph.DependencyGraphEdge
 import org.gradle.api.internal.artifacts.ivyservice.resolveengine.graph.DependencyGraphSelector
@@ -25,13 +26,17 @@ import org.gradle.internal.component.external.model.DefaultModuleComponentSelect
 import org.gradle.internal.resolve.ModuleVersionResolveException
 import org.gradle.internal.serialize.InputStreamBackedDecoder
 import org.gradle.internal.serialize.OutputStreamBackedEncoder
+import org.gradle.util.AttributeTestUtil
+import org.gradle.util.TestUtil
 import spock.lang.Specification
 
 import static org.gradle.api.internal.artifacts.DefaultModuleVersionSelector.newSelector
 
 class DependencyResultSerializerTest extends Specification {
 
-    def serializer = new DependencyResultSerializer()
+    def serializer = new DependencyResultSerializer(new ResolvedVariantResultSerializer(
+        new ComponentIdentifierSerializer(),
+        new DesugaredAttributeContainerSerializer(AttributeTestUtil.attributesFactory(), TestUtil.objectInstantiator())), DependencyManagementTestUtil.componentSelectionDescriptorFactory())
 
     def "serializes successful dependency result"() {
         def requested = DefaultModuleComponentSelector.newSelector(DefaultModuleIdentifier.newId("org", "foo"), new DefaultMutableVersionConstraint("1.0"))

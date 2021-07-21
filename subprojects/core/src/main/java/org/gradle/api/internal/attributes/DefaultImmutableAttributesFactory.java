@@ -18,19 +18,26 @@ package org.gradle.api.internal.attributes;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import org.gradle.api.attributes.Attribute;
+import org.gradle.api.attributes.Usage;
 import org.gradle.api.internal.model.NamedObjectInstantiator;
+import org.gradle.internal.Cast;
 import org.gradle.internal.isolation.Isolatable;
 import org.gradle.internal.isolation.IsolatableFactory;
+import org.gradle.internal.service.scopes.Scopes;
+import org.gradle.internal.service.scopes.ServiceScope;
 import org.gradle.internal.snapshot.impl.CoercingStringValueSnapshot;
 
+import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+@ServiceScope(Scopes.BuildSession.class)
 public class DefaultImmutableAttributesFactory implements ImmutableAttributesFactory {
     private final ImmutableAttributes root;
     private final Map<ImmutableAttributes, List<DefaultImmutableAttributes>> children;
     private final IsolatableFactory isolatableFactory;
+    private final UsageCompatibilityHandler usageCompatibilityHandler;
     private NamedObjectInstantiator instantiator;
 
     public DefaultImmutableAttributesFactory(IsolatableFactory isolatableFactory, NamedObjectInstantiator instantiator) {
@@ -39,6 +46,7 @@ public class DefaultImmutableAttributesFactory implements ImmutableAttributesFac
         this.root = ImmutableAttributes.EMPTY;
         this.children = Maps.newHashMap();
         children.put(root, new ArrayList<DefaultImmutableAttributes>());
+        usageCompatibilityHandler = new UsageCompatibilityHandler(isolatableFactory, instantiator);
     }
 
     public int size() {
@@ -61,13 +69,13 @@ public class DefaultImmutableAttributesFactory implements ImmutableAttributesFac
     }
 
     @Override
-    public <T> ImmutableAttributes concat(ImmutableAttributes node, Attribute<T> key, T value) {
-        return doConcatIsolatable(node, key, isolate(value));
+    public <T> ImmutableAttributes concat(ImmutableAttributes node, Attribute<T> key, @Nullable T value) {
+        return concat(node, key, isolate(value));
     }
 
-    private <T> Isolatable<T> isolate(T value) {
+    private <T> Isolatable<T> isolate(@Nullable T value) {
         if (value instanceof String) {
-            return (Isolatable<T>) new CoercingStringValueSnapshot((String) value, instantiator);
+            return Cast.uncheckedNonnullCast(new CoercingStringValueSnapshot((String) value, instantiator));
         } else {
             return isolatableFactory.isolate(value);
         }
@@ -75,16 +83,16 @@ public class DefaultImmutableAttributesFactory implements ImmutableAttributesFac
 
     @Override
     public <T> ImmutableAttributes concat(ImmutableAttributes node, Attribute<T> key, Isolatable<T> value) {
-        return doConcatIsolatable(node, key, value);
+        if (key.equals(Usage.USAGE_ATTRIBUTE) || key.getName().equals(Usage.USAGE_ATTRIBUTE.getName())) {
+            return usageCompatibilityHandler.doConcat(this, node, key, value);
+        } else {
+            return doConcatIsolatable(node, key, value);
+        }
     }
 
-    private <T> ImmutableAttributes doConcatIsolatable(ImmutableAttributes node, Attribute<?> key, Isolatable<?> value) {
+    ImmutableAttributes doConcatIsolatable(ImmutableAttributes node, Attribute<?> key, @Nullable Isolatable<?> value) {
         synchronized (this) {
-            List<DefaultImmutableAttributes> nodeChildren = children.get(node);
-            if (nodeChildren == null) {
-                nodeChildren = Lists.newArrayList();
-                children.put(node, nodeChildren);
-            }
+            List<DefaultImmutableAttributes> nodeChildren = children.computeIfAbsent(node, k -> Lists.newArrayList());
             for (DefaultImmutableAttributes child : nodeChildren) {
                 if (child.attribute.equals(key) && child.value.equals(value)) {
                     return child;
@@ -109,12 +117,12 @@ public class DefaultImmutableAttributesFactory implements ImmutableAttributesFac
             return attributes1;
         }
         ImmutableAttributes current = attributes2;
-        for (Attribute attribute : attributes1.keySet()) {
+        for (Attribute<?> attribute : attributes1.keySet()) {
             if (!current.findEntry(attribute.getName()).isPresent()) {
                 if (attributes1 instanceof DefaultImmutableAttributes) {
                     current = doConcatIsolatable(current, attribute, ((DefaultImmutableAttributes) attributes1).getIsolatableAttribute(attribute));
                 } else {
-                    current = concat(current, attribute, attributes1.getAttribute(attribute));
+                    current = concat(current, Cast.uncheckedNonnullCast(attribute), attributes1.getAttribute(attribute));
                 }
             }
         }
@@ -130,7 +138,7 @@ public class DefaultImmutableAttributesFactory implements ImmutableAttributesFac
             return attributes1;
         }
         ImmutableAttributes current = attributes2;
-        for (Attribute attribute : attributes1.keySet()) {
+        for (Attribute<?> attribute : attributes1.keySet()) {
             AttributeValue<?> entry = current.findEntry(attribute.getName());
             if (entry.isPresent()) {
                 Object currentAttribute = entry.get();
@@ -142,7 +150,7 @@ public class DefaultImmutableAttributesFactory implements ImmutableAttributesFac
             if (attributes1 instanceof DefaultImmutableAttributes) {
                 current = doConcatIsolatable(current, attribute, ((DefaultImmutableAttributes) attributes1).getIsolatableAttribute(attribute));
             } else {
-                current = concat(current, attribute, attributes1.getAttribute(attribute));
+                current = concat(current, Cast.uncheckedNonnullCast(attribute), attributes1.getAttribute(attribute));
             }
         }
         return current;

@@ -17,6 +17,7 @@
 package org.gradle.api.tasks.testing;
 
 import org.gradle.internal.HasInternalProtocol;
+import org.gradle.internal.scan.UsedByScanPlugin;
 
 import javax.annotation.Nullable;
 
@@ -34,11 +35,20 @@ public interface TestDescriptor {
     String getName();
 
     /**
+     * Returns the display name of the test. It may be the same as or different from {@link #getName()}
+     *
+     * @return the name for display.
+     * @since 6.1
+     */
+    String getDisplayName();
+
+    /**
      * Returns the test class name for this test, if any.
      *
      * @return The class name. May return null.
      */
     @Nullable
+    @UsedByScanPlugin("test-retry")
     String getClassName();
 
     /**

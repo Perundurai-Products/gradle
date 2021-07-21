@@ -18,8 +18,8 @@
 
 package org.gradle.integtests.resolve.caching
 
-
 import org.gradle.integtests.fixtures.AbstractHttpDependencyResolutionTest
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.test.fixtures.ivy.IvyFileRepository
 
 class CachingDependencyMetadataInMemoryIntegrationTest extends AbstractHttpDependencyResolutionTest {
@@ -34,7 +34,7 @@ class CachingDependencyMetadataInMemoryIntegrationTest extends AbstractHttpDepen
                 two
             }
             repositories {
-                ivy { url "${mavenRepo.uri}" }
+                maven { url "${mavenRepo.uri}" }
             }
             dependencies {
                 one 'org:lib:1.+'
@@ -50,7 +50,7 @@ class CachingDependencyMetadataInMemoryIntegrationTest extends AbstractHttpDepen
             task purgeRepo(type: Delete, dependsOn: resolveOne) {
                 delete "${mavenRepo.uri}"
             }
-            //runs last, still works even thoug local repo is empty
+            //runs last, still works even though local repo is empty
             task resolveTwo(dependsOn: purgeRepo) {
                 doLast {
                     println "Resolved " + configurations.two.files*.name
@@ -121,6 +121,7 @@ class CachingDependencyMetadataInMemoryIntegrationTest extends AbstractHttpDepen
         failure.assertResolutionFailure(":impl:conf").assertHasCause("Could not find org:lib:1.0")
     }
 
+    @ToBeFixedForConfigurationCache
     def "cache expires at the end of build"() {
         given:
         ivyRepo.module("org", "dependency").publish()

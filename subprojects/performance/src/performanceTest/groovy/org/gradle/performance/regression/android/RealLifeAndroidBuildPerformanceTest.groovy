@@ -16,21 +16,46 @@
 
 package org.gradle.performance.regression.android
 
+import org.gradle.integtests.fixtures.versions.AndroidGradlePluginVersions
+import org.gradle.performance.AbstractCrossVersionPerformanceTest
+import org.gradle.performance.annotations.RunFor
+import org.gradle.performance.annotations.Scenario
+import org.gradle.performance.fixture.AndroidTestProject
+import org.gradle.profiler.mutations.AbstractCleanupMutator
+import org.gradle.profiler.mutations.ClearArtifactTransformCacheMutator
 import spock.lang.Unroll
 
-class RealLifeAndroidBuildPerformanceTest extends AbstractAndroidPerformanceTest {
+import static org.gradle.performance.annotations.ScenarioType.PER_COMMIT
+import static org.gradle.performance.annotations.ScenarioType.PER_DAY
+import static org.gradle.performance.fixture.AndroidTestProject.LARGE_ANDROID_BUILD
+import static org.gradle.performance.results.OperatingSystem.LINUX
+
+class RealLifeAndroidBuildPerformanceTest extends AbstractCrossVersionPerformanceTest implements AndroidPerformanceTestFixture {
+
+    def setup() {
+        runner.args = [AndroidGradlePluginVersions.OVERRIDE_VERSION_CHECK]
+        runner.targetVersions = ["7.2-20210713113638+0000"]
+        AndroidTestProject.useStableAgpVersion(runner)
+        // AGP 4.1 requires 6.5+
+        // forUseAtConfigurationTime API used in this scenario
+        runner.minimumBaseVersion = "6.5"
+    }
 
     @Unroll
-    def "#tasks on #testProject"() {
+    @RunFor([
+        @Scenario(type = PER_COMMIT, operatingSystems = LINUX, testProjects = "largeAndroidBuild", iterationMatcher = "run help"),
+        @Scenario(type = PER_COMMIT, operatingSystems = LINUX, testProjects = ["largeAndroidBuild", "santaTrackerAndroidBuild"], iterationMatcher = "run assembleDebug"),
+        @Scenario(type = PER_COMMIT, operatingSystems = LINUX, testProjects = "largeAndroidBuild", iterationMatcher = ".*phthalic.*")
+    ])
+    def "run #tasks"() {
         given:
-        runner.testProject = testProject
+        AndroidTestProject testProject = androidTestProject
+        testProject.configure(runner)
         runner.tasksToRun = tasks.split(' ')
-        runner.gradleOpts = ["-Xms$memory", "-Xmx$memory"]
-        runner.args = parallel ? ['-Dorg.gradle.parallel=true'] : []
+        runner.args.add('-Dorg.gradle.parallel=true')
         runner.warmUpRuns = warmUpRuns
         runner.runs = runs
-        runner.minimumVersion = "4.3.1"
-        runner.targetVersions = ["5.2-20181218000039+0000"]
+        applyEnterprisePlugin()
 
         when:
         def result = runner.run()
@@ -39,12 +64,43 @@ class RealLifeAndroidBuildPerformanceTest extends AbstractAndroidPerformanceTest
         result.assertCurrentVersionHasNotRegressed()
 
         where:
-        testProject         | memory | parallel | warmUpRuns | runs | tasks
-        'k9AndroidBuild'    | '1g'   | false    | null       | null | 'help'
-        'k9AndroidBuild'    | '1g'   | false    | null       | null | 'assembleDebug'
-//        'k9AndroidBuild'    | '1g'   | false    | null       | null | 'clean k9mail:assembleDebug'
-        'largeAndroidBuild' | '5g'   | true     | null       | null | 'help'
-        'largeAndroidBuild' | '5g'   | true     | null       | null | 'assembleDebug'
-        'largeAndroidBuild' | '5g'   | true     | 2          | 8    | 'clean phthalic:assembleDebug'
+        tasks                          | warmUpRuns | runs
+        'help'                         | null       | null
+        'assembleDebug'                | null       | null
+        'clean phthalic:assembleDebug' | 2          | 8
+    }
+
+    @RunFor([
+        @Scenario(type = PER_DAY, operatingSystems = LINUX, testProjects = ["largeAndroidBuild", "santaTrackerAndroidBuild"], iterationMatcher = "clean assemble.*"),
+        @Scenario(type = PER_DAY, operatingSystems = LINUX, testProjects = "largeAndroidBuild", iterationMatcher = "clean phthalic.*")
+    ])
+    @Unroll
+    def "clean #tasks with clean transforms cache"() {
+        given:
+        def testProject = androidTestProject
+        boolean isLargeProject = androidTestProject == LARGE_ANDROID_BUILD
+        if (isLargeProject) {
+            runner.warmUpRuns = 2
+            runner.runs = 8
+        }
+
+        testProject.configure(runner)
+        runner.tasksToRun = tasks.split(' ')
+        runner.args.add('-Dorg.gradle.parallel=true')
+        runner.cleanTasks = ["clean"]
+        runner.useDaemon = false
+        runner.addBuildMutator { invocationSettings ->
+            new ClearArtifactTransformCacheMutator(invocationSettings.getGradleUserHome(), AbstractCleanupMutator.CleanupSchedule.BUILD)
+        }
+        applyEnterprisePlugin()
+
+        when:
+        def result = runner.run()
+
+        then:
+        result.assertCurrentVersionHasNotRegressed()
+
+        where:
+        tasks << ['assembleDebug', 'phthalic:assembleDebug']
     }
 }

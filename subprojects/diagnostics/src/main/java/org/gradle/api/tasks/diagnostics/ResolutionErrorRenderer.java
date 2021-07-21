@@ -24,6 +24,7 @@ import org.gradle.api.artifacts.result.DependencyResult;
 import org.gradle.api.artifacts.result.ResolvedComponentResult;
 import org.gradle.api.internal.artifacts.ivyservice.resolveengine.graph.conflicts.VersionConflictException;
 import org.gradle.api.specs.Spec;
+import org.gradle.internal.Pair;
 import org.gradle.internal.UncheckedException;
 import org.gradle.internal.component.external.model.DefaultModuleComponentSelector;
 import org.gradle.internal.locking.LockOutOfDateException;
@@ -62,40 +63,32 @@ class ResolutionErrorRenderer implements Action<Throwable> {
     }
 
     private void handleOutOfDateLocks(final LockOutOfDateException cause) {
-        registerError(new Action<StyledTextOutput>() {
-            @Override
-            public void execute(StyledTextOutput output) {
-                List<String> errors = cause.getErrors();
-                output.text("The dependency locks are out-of-date:");
-                output.println();
-                for (String error : errors) {
-                    output.text("   - " + error);
-                    output.println();
-                }
+        registerError(output -> {
+            List<String> errors = cause.getErrors();
+            output.text("The dependency locks are out-of-date:");
+            output.println();
+            for (String error : errors) {
+                output.text("   - " + error);
                 output.println();
             }
+            output.println();
         });
     }
 
     private void handleConflict(final VersionConflictException conflict) {
-        registerError(new Action<StyledTextOutput>() {
-            @Override
-            public void execute(StyledTextOutput output) {
-                for (List<ModuleVersionIdentifier> moduleVersionIdentifiers : conflict.getConflicts()) {
-                    boolean matchesSpec = hasVersionConflictOnRequestedDependency(moduleVersionIdentifiers);
-                    if (!matchesSpec) {
-                        continue;
-                    }
-                    output.text("Dependency resolution failed because of conflicts between the following modules:");
-                    output.println();
-                    for (ModuleVersionIdentifier moduleVersionIdentifier : moduleVersionIdentifiers) {
-                        output.text("   - ");
-                        output.withStyle(StyledTextOutput.Style.Error).text(moduleVersionIdentifier.toString());
-                        output.println();
-                    }
-                    output.println();
+        registerError(output -> {
+            output.text("Dependency resolution failed because of conflict(s) on the following module(s):");
+            output.println();
+            for (Pair<List<? extends ModuleVersionIdentifier>, String> identifierStringPair : conflict.getConflicts()) {
+                boolean matchesSpec = hasVersionConflictOnRequestedDependency(identifierStringPair.getLeft());
+                if (!matchesSpec) {
+                    continue;
                 }
+                output.text("   - ");
+                output.withStyle(StyledTextOutput.Style.Error).text(identifierStringPair.getRight());
+                output.println();
             }
+            output.println();
         });
 
     }
@@ -110,27 +103,32 @@ class ResolutionErrorRenderer implements Action<Throwable> {
         errorActions.add(errorAction);
     }
 
-    private boolean hasVersionConflictOnRequestedDependency(List<ModuleVersionIdentifier> moduleVersionIdentifiers) {
-        boolean matchesSpec = false;
-        for (final ModuleVersionIdentifier mvi : moduleVersionIdentifiers) {
-            matchesSpec |= dependencySpec.isSatisfiedBy(new DependencyResult() {
-                @Override
-                public ComponentSelector getRequested() {
-                    return DefaultModuleComponentSelector.newSelector(mvi.getModule(), mvi.getVersion());
-                }
-
-                @Override
-                public ResolvedComponentResult getFrom() {
-                    return null;
-                }
-
-                @Override
-                public boolean isConstraint() {
-                    return false;
-                }
-            });
+    private boolean hasVersionConflictOnRequestedDependency(final List<? extends ModuleVersionIdentifier> versionIdentifiers) {
+        for (final ModuleVersionIdentifier versionIdentifier : versionIdentifiers) {
+            if (dependencySpec.isSatisfiedBy(asDependencyResult(versionIdentifier))) {
+                return true;
+            }
         }
-        return matchesSpec;
+        return false;
+    }
+
+    private DependencyResult asDependencyResult(final ModuleVersionIdentifier versionIdentifier) {
+        return new DependencyResult() {
+            @Override
+            public ComponentSelector getRequested() {
+                return DefaultModuleComponentSelector.newSelector(versionIdentifier.getModule(), versionIdentifier.getVersion());
+            }
+
+            @Override
+            public ResolvedComponentResult getFrom() {
+                return null;
+            }
+
+            @Override
+            public boolean isConstraint() {
+                return false;
+            }
+        };
     }
 
 }

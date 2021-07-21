@@ -38,14 +38,14 @@ class DefaultPluginManagerTest extends Specification {
     }
     def registry = new DefaultPluginRegistry(new PluginInspector(new ModelRuleSourceDetector()), classLoaderScope)
     def target = Mock(PluginTarget)
-    def manager = new DefaultPluginManager(registry, TestUtil.instantiatorFactory().inject(), target, new TestBuildOperationExecutor(), new DefaultUserCodeApplicationContext(), CollectionCallbackActionDecorator.NOOP)
+    def manager = new DefaultPluginManager(registry, TestUtil.instantiatorFactory().inject(), target, new TestBuildOperationExecutor(), new DefaultUserCodeApplicationContext(), CollectionCallbackActionDecorator.NOOP, TestUtil.domainObjectCollectionFactory())
 
     Class<?> rulesClass
     Class<? extends Plugin> hybridClass
     Class<? extends Plugin> imperativeClass
 
     @Rule
-    TestNameTestDirectoryProvider testDirectoryProvider = new TestNameTestDirectoryProvider()
+    TestNameTestDirectoryProvider testDirectoryProvider = new TestNameTestDirectoryProvider(getClass())
 
     def setup() {
         rulesClass = classLoader.parseClass("""

@@ -148,7 +148,7 @@ class CompositeBuildContinueOnSingleFailureIntegrationTest extends AbstractCompo
         when:
         buildB.buildFile << """
             apply plugin: 'java'
-            
+
             jar.dependsOn 'checkContinueFlag'
 """
         dependency "org.test:buildB:1.0"

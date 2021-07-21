@@ -16,6 +16,7 @@
 
 package org.gradle.language.cpp
 
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.nativeplatform.fixtures.AbstractInstalledToolChainIntegrationSpec
 import org.gradle.nativeplatform.fixtures.app.CppAppWithLibraries
 import org.gradle.test.fixtures.file.TestFile
@@ -28,6 +29,7 @@ class CppDependenciesIntegrationTest extends AbstractInstalledToolChainIntegrati
     @Rule
     GitFileRepository repo = new GitFileRepository(testDirectory)
 
+    @ToBeFixedForConfigurationCache
     def "can combine C++ builds in a composite"() {
         given:
         settingsFile << """
@@ -55,6 +57,7 @@ class CppDependenciesIntegrationTest extends AbstractInstalledToolChainIntegrati
 
     // NOTE: This method is named in a short way because of the maximum path length
     // on Windows.
+    @ToBeFixedForConfigurationCache
     def "from VCS"() {
         given:
         settingsFile << """
@@ -124,7 +127,7 @@ class CppDependenciesIntegrationTest extends AbstractInstalledToolChainIntegrati
             apply plugin: 'cpp-library'
             group = 'org.gradle.cpp'
             version = '1.0'
-        
+
             dependencies {
                 api 'org.gradle.cpp:log:latest.integration'
             }

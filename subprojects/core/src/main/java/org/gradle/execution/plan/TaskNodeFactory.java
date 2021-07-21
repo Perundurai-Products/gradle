@@ -17,33 +17,47 @@
 package org.gradle.execution.plan;
 
 
-import org.gradle.api.Action;
+import com.google.common.collect.Maps;
+import org.gradle.api.Plugin;
 import org.gradle.api.Project;
 import org.gradle.api.Task;
-import org.gradle.api.artifacts.component.BuildIdentifier;
+import org.gradle.api.internal.DocumentationRegistry;
 import org.gradle.api.internal.GradleInternal;
 import org.gradle.api.internal.TaskInternal;
-import org.gradle.api.internal.project.ProjectInternal;
+import org.gradle.api.internal.plugins.PluginManagerInternal;
+import org.gradle.api.plugins.PluginContainer;
 import org.gradle.composite.internal.IncludedBuildTaskGraph;
-import org.gradle.composite.internal.IncludedBuildTaskResource.State;
-import org.gradle.internal.Actions;
-import org.gradle.internal.build.BuildState;
+import org.gradle.internal.Cast;
+import org.gradle.internal.execution.WorkValidationContext;
+import org.gradle.internal.execution.impl.DefaultWorkValidationContext;
+import org.gradle.internal.service.scopes.Scopes;
+import org.gradle.internal.service.scopes.ServiceScope;
+import org.gradle.plugin.use.PluginId;
+import org.gradle.plugin.use.internal.DefaultPluginId;
 
 import javax.annotation.Nullable;
+import java.io.File;
+import java.net.URISyntaxException;
+import java.net.URL;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 
+@ServiceScope(Scopes.Gradle.class)
 public class TaskNodeFactory {
-    private final Map<Task, TaskNode> nodes = new HashMap<Task, TaskNode>();
+    private final Map<Task, TaskNode> nodes = new HashMap<>();
     private final IncludedBuildTaskGraph taskGraph;
     private final GradleInternal thisBuild;
-    private final BuildIdentifier currentBuildId;
+    private final DocumentationRegistry documentationRegistry;
+    private final DefaultTypeOriginInspectorFactory typeOriginInspectorFactory;
 
-    public TaskNodeFactory(GradleInternal thisBuild, IncludedBuildTaskGraph taskGraph) {
+    public TaskNodeFactory(GradleInternal thisBuild, DocumentationRegistry documentationRegistry, IncludedBuildTaskGraph taskGraph) {
         this.thisBuild = thisBuild;
-        currentBuildId = thisBuild.getServices().get(BuildState.class).getBuildIdentifier();
+        this.documentationRegistry = documentationRegistry;
         this.taskGraph = taskGraph;
+        this.typeOriginInspectorFactory = new DefaultTypeOriginInspectorFactory();
     }
 
     public Set<Task> getTasks() {
@@ -54,9 +68,9 @@ public class TaskNodeFactory {
         TaskNode node = nodes.get(task);
         if (node == null) {
             if (task.getProject().getGradle() == thisBuild) {
-                node = new LocalTaskNode((TaskInternal) task);
+                node = new LocalTaskNode((TaskInternal) task, new DefaultWorkValidationContext(documentationRegistry, typeOriginInspectorFactory.forTask(task)));
             } else {
-                node = new TaskInAnotherBuild((TaskInternal) task, currentBuildId, taskGraph);
+                node = TaskInAnotherBuild.of((TaskInternal) task, taskGraph);
             }
             nodes.put(task, node);
         }
@@ -67,103 +81,53 @@ public class TaskNodeFactory {
         nodes.clear();
     }
 
-    private static class TaskInAnotherBuild extends TaskNode {
-        private final BuildIdentifier thisBuild;
-        private final IncludedBuildTaskGraph taskGraph;
-        private final BuildIdentifier targetBuild;
-        private final TaskInternal task;
-        private State state = State.WAITING;
+    private static class DefaultTypeOriginInspectorFactory {
+        private final Map<Project, ProjectScopedTypeOriginInspector> projectToInspector = Maps.newConcurrentMap();
+        private final Map<Class<?>, File> clazzToFile = Maps.newConcurrentMap();
 
-        TaskInAnotherBuild(TaskInternal task, BuildIdentifier thisBuild, IncludedBuildTaskGraph taskGraph) {
-            this.thisBuild = thisBuild;
-            this.task = task;
-            this.taskGraph = taskGraph;
-            this.targetBuild = ((ProjectInternal) task.getProject()).getServices().get(BuildState.class).getBuildIdentifier();
-            doNotRequire();
-        }
-
-        @Override
-        public TaskInternal getTask() {
-            // Expose the task to build logic (for now)
-            return task;
+        public ProjectScopedTypeOriginInspector forTask(Task task) {
+            return projectToInspector.computeIfAbsent(task.getProject(), ProjectScopedTypeOriginInspector::new);
         }
 
         @Nullable
-        @Override
-        public Project getProject() {
-            // Ignore, as the node in the other build's execution graph takes care of this
-            return null;
+        private File jarFileFor(Class<?> pluginClass) {
+            return clazzToFile.computeIfAbsent(pluginClass, clazz -> toFile(pluginClass.getProtectionDomain().getCodeSource().getLocation()));
         }
 
-        @Override
-        public Throwable getNodeFailure() {
-            throw new UnsupportedOperationException();
+        @Nullable
+        private static File toFile(@Nullable URL url) {
+            if (url == null) {
+                return null;
+            }
+            try {
+                return new File(url.toURI());
+            } catch (URISyntaxException e) {
+                return null;
+            }
         }
 
-        @Override
-        public void rethrowNodeFailure() {
-            throw new UnsupportedOperationException();
-        }
+        private class ProjectScopedTypeOriginInspector implements WorkValidationContext.TypeOriginInspector {
+            private final PluginContainer plugins;
+            private final PluginManagerInternal pluginManager;
+            private final Map<Class<?>, Optional<PluginId>> classToPlugin = Maps.newConcurrentMap();
 
-        @Override
-        public void appendPostAction(Action<? super Task> action) {
-            // Ignore. Currently the actions don't need to run, it's just better if they do
-            // By the time this node is notified that the task in the other build has completed, it's too late to run the action
-            // Instead, the action should be attached to the task in the other build rather than here
-        }
-
-        @Override
-        public Action<? super Task> getPostAction() {
-            return Actions.doNothing();
-        }
-
-        @Override
-        public void prepareForExecution() {
-            // Should get back some kind of reference that can be queried below instead of looking the task up every time
-            taskGraph.addTask(thisBuild, targetBuild, task.getPath());
-        }
-
-        @Override
-        public void resolveDependencies(TaskDependencyResolver dependencyResolver, Action<Node> processHardSuccessor) {
-        }
-
-        @Override
-        public void require() {
-            // Ignore
-        }
-
-        @Override
-        public boolean isSuccessful() {
-            return state == State.SUCCESS;
-        }
-
-        @Override
-        public boolean isFailed() {
-            return state == State.FAILED;
-        }
-
-        @Override
-        public boolean isComplete() {
-            if (state != State.WAITING) {
-                return true;
+            private ProjectScopedTypeOriginInspector(Project project) {
+                this.plugins = project.getPlugins();
+                this.pluginManager = (PluginManagerInternal) project.getPluginManager();
             }
 
-            state = taskGraph.getTaskState(targetBuild, task.getPath());
-            return state != State.WAITING;
-        }
-
-        @Override
-        public int compareTo(Node other) {
-            if (getClass() != other.getClass()) {
-                return getClass().getName().compareTo(other.getClass().getName());
+            @Override
+            public Optional<PluginId> findPluginDefining(Class<?> type) {
+                return classToPlugin.computeIfAbsent(type, clazz -> {
+                    File taskJar = jarFileFor(type);
+                    return plugins.stream()
+                        .map(plugin -> Cast.<Class<Plugin<?>>>uncheckedNonnullCast(plugin.getClass()))
+                        .filter(pluginType -> Objects.equals(jarFileFor(pluginType), taskJar))
+                        .map(pluginType -> pluginManager.findPluginIdForClass(pluginType)
+                            .orElseGet(() -> new DefaultPluginId(pluginType.getName())))
+                        .findFirst();
+                });
             }
-            TaskInAnotherBuild taskNode = (TaskInAnotherBuild) other;
-            return task.getIdentityPath().compareTo(taskNode.task.getIdentityPath());
-        }
-
-        @Override
-        public String toString() {
-            return task.getIdentityPath().toString();
         }
     }
 }

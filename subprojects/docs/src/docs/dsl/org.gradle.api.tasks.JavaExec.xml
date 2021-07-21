@@ -45,6 +45,18 @@
                 <td><literal>null</literal></td>
             </tr>
             <tr>
+                <td>mainClass</td>
+                <td><literal>null</literal></td>
+            </tr>
+            <tr>
+                <td>mainModule</td>
+                <td><literal>null</literal></td>
+            </tr>
+            <tr>
+                <td>modularity</td>
+                <td/>
+            </tr>
+            <tr>
                 <td>args</td>
                 <td><literal>[]</literal></td>
             </tr>
@@ -87,6 +99,14 @@
             <tr>
                 <td>commandLine</td>
                 <td/>
+            </tr>
+            <tr>
+                <td>executionResult</td>
+                <td/>
+            </tr>
+            <tr>
+                <td>javaLauncher</td>
+                <td><literal>java.toolchain</literal></td>
             </tr>
         </table>
     </section>

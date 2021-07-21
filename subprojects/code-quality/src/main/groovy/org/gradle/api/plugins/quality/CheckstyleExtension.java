@@ -15,7 +15,6 @@
  */
 package org.gradle.api.plugins.quality;
 
-import org.gradle.api.Incubating;
 import org.gradle.api.Project;
 import org.gradle.api.file.DirectoryProperty;
 import org.gradle.api.resources.TextResource;
@@ -34,15 +33,15 @@ public class CheckstyleExtension extends CodeQualityExtension {
     private final Project project;
 
     private TextResource config;
-    private Map<String, Object> configProperties = new LinkedHashMap<String, Object>();
+    private Map<String, Object> configProperties = new LinkedHashMap<>();
     private int maxErrors;
     private int maxWarnings = Integer.MAX_VALUE;
     private boolean showViolations = true;
-    private DirectoryProperty configDir;
+    private final DirectoryProperty configDirectory;
 
     public CheckstyleExtension(Project project) {
         this.project = project;
-        configDir = project.getObjects().directoryProperty();
+        this.configDirectory = project.getObjects().directoryProperty();
     }
 
     /**
@@ -96,46 +95,22 @@ public class CheckstyleExtension extends CodeQualityExtension {
      * <p>
      * This path will be exposed as the variable {@code config_loc} in Checkstyle's configuration files.
      * </p>
+     *
      * @return path to other Checkstyle configuration files
-     * @since 4.0
-     *
-     */
-    @Incubating
-    public File getConfigDir() {
-        return configDir.get().getAsFile();
-    }
-
-    /**
-     * Path to other Checkstyle configuration files. By default, this path is {@code $rootProject.projectDir/config/checkstyle}
-     * <p>
-     * This path will be exposed as the variable {@code config_loc} in Checkstyle's configuration files.
-     * </p>
-     * @since 4.0
-     */
-    @Incubating
-    public void setConfigDir(File configDir) {
-        this.configDir.set(configDir);
-    }
-
-    /**
-     * Gets the configuration directory.
-     *
-     * @return The configuration directory
      * @since 4.7
      */
-    @Incubating
     public DirectoryProperty getConfigDirectory() {
-        return configDir;
+        return configDirectory;
     }
 
     /**
      * The maximum number of errors that are tolerated before breaking the build
-     * or setting the failure property. Defaults to <code>0</code>.
+     * or setting the failure property. Defaults to <tt>0</tt>.
      * <p>
      * Example: maxErrors = 42
      *
-     * @since 3.4
      * @return the maximum number of errors allowed
+     * @since 3.4
      */
     public int getMaxErrors() {
         return maxErrors;
@@ -144,8 +119,8 @@ public class CheckstyleExtension extends CodeQualityExtension {
     /**
      * Set the maximum number of errors that are tolerated before breaking the build.
      *
-     * @since 3.4
      * @param maxErrors number of errors allowed
+     * @since 3.4
      */
     public void setMaxErrors(int maxErrors) {
         this.maxErrors = maxErrors;
@@ -153,12 +128,12 @@ public class CheckstyleExtension extends CodeQualityExtension {
 
     /**
      * The maximum number of warnings that are tolerated before breaking the build
-     * or setting the failure property. Defaults to <code>Integer.MAX_VALUE</code>.
+     * or setting the failure property. Defaults to <tt>Integer.MAX_VALUE</tt>.
      * <p>
      * Example: maxWarnings = 1000
      *
-     * @since 3.4
      * @return the maximum number of warnings allowed
+     * @since 3.4
      */
     public int getMaxWarnings() {
         return maxWarnings;
@@ -167,15 +142,15 @@ public class CheckstyleExtension extends CodeQualityExtension {
     /**
      * Set the maximum number of warnings that are tolerated before breaking the build.
      *
-     * @since 3.4
      * @param maxWarnings number of warnings allowed
+     * @since 3.4
      */
     public void setMaxWarnings(int maxWarnings) {
         this.maxWarnings = maxWarnings;
     }
 
     /**
-     * Whether rule violations are to be displayed on the console. Defaults to <code>true</code>.
+     * Whether rule violations are to be displayed on the console. Defaults to <tt>true</tt>.
      *
      * Example: showViolations = false
      */
@@ -184,7 +159,7 @@ public class CheckstyleExtension extends CodeQualityExtension {
     }
 
     /**
-     * Whether rule violations are to be displayed on the console. Defaults to <code>true</code>.
+     * Whether rule violations are to be displayed on the console. Defaults to <tt>true</tt>.
      *
      * Example: showViolations = false
      */

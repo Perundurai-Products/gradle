@@ -24,7 +24,7 @@ Please send security issues to [security@gradle.com](mailto:security@gradle.com)
 
 ## Accept Developer Certificate of Origin
 
-In order for your contributions to be accepted, you must [sign off](https://git-scm.com/docs/git-commit#git-commit---signoff) your Git commits to indicate that you agree to the terms of [Developer Certificate of Origin](https://developercertificate.org/).
+In order for your contributions to be accepted, you must [sign off](https://git-scm.com/docs/git-commit#Documentation/git-commit.txt---signoff) your Git commits to indicate that you agree to the terms of [Developer Certificate of Origin](https://developercertificate.org/).
 
 ## Follow the Code of Conduct
 
@@ -33,6 +33,42 @@ In order to foster a more inclusive community, Gradle has adopted the [Contribut
 Contributors must follow the Code of Conduct outlined at [https://gradle.org/conduct/](https://gradle.org/conduct/).
 
 ## Making Changes
+
+### Installing from source
+
+To create an install from the source tree you can run either of the following:
+
+    ./gradlew install -Pgradle_installPath=/usr/local/gradle-source-build
+
+This will create a minimal installation; just what's needed to run Gradle (i.e. no sources nor docs).
+
+You can then build a Gradle based project with this installation:
+
+    /usr/local/gradle-source-build/bin/gradle «some task»
+
+To create a full installation (includes sources and docs):
+
+    ./gradlew installAll -Pgradle_installPath=/usr/local/gradle-source-build
+
+### Building a distribution from source
+
+To create a Gradle distribution from the source tree you can run either of the following:
+
+    ./gradlew :distributions-full:binDistributionZip
+
+This will create a minimal distribution at `subprojects/distributions-full/build/distributions/gradle-<version>-bin.zip`, just what's needed to run Gradle (i.e. no sources nor docs).
+
+You can then use it as a Gradle Wrapper local distribution in a Gradle based project by using a `file:/` URL pointing to the built distribution:
+
+    ./gradlew wrapper --gradle-distribution-url=file:/path/to/gradle-<version>-bin.zip
+
+To create a full distribution (includes sources and docs):
+
+    ./gradlew :distributions-full:allDistributionZip
+
+The full distribution will be created at `subprojects/distributions-full/build/distributions/gradle-<version>-all.zip`. You can then use it as a Gradle Wrapper local distribution:
+
+    ./gradlew wrapper --gradle-distribution-url=file:/path/to/gradle-<version>-all.zip
 
 ### Development Setup
 
@@ -49,43 +85,42 @@ Gradle uses pull requests for contributions. Fork [gradle/gradle](https://github
 
 ### IntelliJ
 
-You can generate the IntelliJ projects by importing it using the import wizard. You must use IntelliJ 2018.3 or newer.
+You require IntelliJ 2018.3.1 or newer.
+- Open the `build.gradle.kts` file with IntelliJ and choose "Open as Project"
+- Make sure "Create separate module per source set" is selected
+- Make sure  "Use default gradle wrapper" is selected
+- Select a Java 11 VM as "Gradle JVM"
+- In the "File already exists" dialogue, choose "Yes" to overwrite
+- In the "Open Project" dialogue, choose "Delete Existing Project and Import"
+- Revert the Git changes to files in the `.idea` folder
 
+NOTE: Due to the project size, the initial import can take a while and IntelliJ might become unresponsive for several seconds during this period.
 
-Alternatively, you may also generated IDEA metadata files with:
+IntelliJ automatically hides stacktrace elements from the `org.gradle` package, which makes running/debugging tests more difficult.  You can disable this behavior by changing IntelliJ Preferences under Editor -> General -> Console. In the "Fold lines that contain" section, remove the `org.gradle` entry.
 
-    ./gradlew idea
+### Java Toolchain
 
-then open the generated `gradle.ipr` file.  This is unsupported and will be removed at some point.
+The build leverages the built-in [Java Toolchain](https://docs.gradle.org/current/userguide/toolchains.html) support to compile and execute tests.
+Available JDKs on your machine are automatically detected and wired for the various compile and test tasks.
 
-### Eclipse
+If you want to explicitly run tests with a different Java version:
+Specify either a Gradle or System property `testJavaVersion` with the major version of the JDK you want the tests to run with (e.g. `-PtestJavaVersion=14`).
 
-You can generate the Eclipse projects by running
+If some JDKs on your machine are not automatically detected, you can use the [toolchain mechanisms](https://docs.gradle.org/current/userguide/toolchains.html#sec:custom_loc) to let Gradle know about
+specific JDK installations.
 
-    ./gradlew eclipse
-
-Then you can import the generated projects into Eclipse
-  
-1. Install Eclipse 4.5 (Mars) at least
-2. Install the Groovy Eclipse plugin from http://dist.springsource.org/snapshot/GRECLIPSE/e4.5/
-3. Make sure you have a Java 8 compatible JDK configured in your workspace
-4. In `Window->Preferences->Groovy->Compiler`, check `Enable Script folder support` and add `**/*.gradle`
-5. Import all projects using the "Import Existing Projects into Workspace" wizard
-
-
- 
 ### Code Change Guidelines
 
 All code contributions should contain the following:
 
-* Unit Tests (using [Spock](http://spockframework.org/spock/docs/1.1-rc-2/index.html)) for any logic introduced
+* Unit Tests (using [Spock](https://spockframework.org/spock/docs/2.0/index.html)) for any logic introduced
 * Integration Test coverage of the bug/feature at the level of build execution. Please annotate tests guarding against a specific GitHub issue `@Issue("gradle/gradle#123")`.
 * Documentation in the User Manual and DSL Reference (under `subprojects/docs/src/docs`). You can generate docs by running `./gradlew :docs:docs`.
 
 Your code needs to run on all supported Java versions and operating systems. The [Gradle CI](http://builds.gradle.org/) will verify this, but here are some pointers that will avoid surprises:
 
 * Be careful when using features introduced in Java 1.7 or later. Some parts of Gradle still need to run on Java 6.
-* Normalise file paths in tests. The `org.gradle.util.TextUtil` class has some useful functions for this purpose.
+* Normalise file paths in tests. The `org.gradle.util.internal.TextUtil` class has some useful functions for this purpose.
 
 ### Development Workflow
 
@@ -98,6 +133,8 @@ Install: `./gradlew install -Pgradle_installPath=/any/path`. Use: `/any/path/bin
 
 You can debug Gradle by adding `-Dorg.gradle.debug=true` when executing. Gradle will wait for you to attach a debugger at `localhost:5005` by default.
 
+If you made changes to build logic in `build-logic`, you can test them by executing `./gradlew :build-logic:check`.
+
 ### Creating Commits And Writing Commit Messages
 
 The commit messages that accompany your code changes are an important piece of documentation, please follow these guidelines when writing commit messages:
@@ -105,7 +142,7 @@ The commit messages that accompany your code changes are an important piece of d
 * Keep commits discrete: avoid including multiple unrelated changes in a single commit
 * Keep commits self-contained: avoid spreading a single change across multiple commits. A single commit should make sense in isolation
 * If your commit pertains to a GitHub issue, include (`Issue: #123`) in the commit message on a separate line
-* [Sign off](https://git-scm.com/docs/git-commit#git-commit---signoff) your commits to indicate that you agree to the terms of [Developer Certificate of Origin](https://developercertificate.org/).
+* [Sign off](https://git-scm.com/docs/git-commit#Documentation/git-commit.txt---signoff) your commits to indicate that you agree to the terms of [Developer Certificate of Origin](https://developercertificate.org/).
 
 ### Submitting Your Change
 
@@ -123,7 +160,7 @@ To sign off a single commit:
 
 To sign off one or multiple commits:
 
-`git filter-branch --msg-filter "cat - && echo && echo 'Signed-off-by: Your Name <Your.Name@example.com>'" HEAD`
+`git rebase --signoff origin/master`
 
 Then force push your branch:
 

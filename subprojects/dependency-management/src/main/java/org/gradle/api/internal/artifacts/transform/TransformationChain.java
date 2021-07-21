@@ -17,7 +17,6 @@
 package org.gradle.api.internal.artifacts.transform;
 
 import org.gradle.api.Action;
-import org.gradle.internal.Try;
 
 /**
  * A series of {@link TransformationStep}s.
@@ -32,6 +31,14 @@ public class TransformationChain implements Transformation {
         this.first = first;
         this.second = second;
         this.stepsCount = first.stepsCount() + second.stepsCount();
+    }
+
+    public Transformation getFirst() {
+        return first;
+    }
+
+    public Transformation getSecond() {
+        return second;
     }
 
     @Override
@@ -54,12 +61,6 @@ public class TransformationChain implements Transformation {
     @Override
     public int stepsCount() {
         return stepsCount;
-    }
-
-    @Override
-    public Try<TransformationSubject> transform(TransformationSubject subjectToTransform, ExecutionGraphDependenciesResolver dependenciesResolver) {
-        return first.transform(subjectToTransform, dependenciesResolver)
-            .flatMap(intermediateSubject -> second.transform(intermediateSubject, dependenciesResolver));
     }
 
     @Override

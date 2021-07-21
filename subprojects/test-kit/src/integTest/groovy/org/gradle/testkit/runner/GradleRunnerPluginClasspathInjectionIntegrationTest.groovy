@@ -16,23 +16,27 @@
 
 package org.gradle.testkit.runner
 
+import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
 import org.gradle.internal.nativeintegration.ProcessEnvironment
 import org.gradle.testfixtures.internal.NativeServicesTestFixture
 import org.gradle.testkit.runner.fixtures.InjectsPluginClasspath
 import org.gradle.testkit.runner.fixtures.InspectsBuildOutput
 import org.gradle.testkit.runner.fixtures.InspectsExecutedTasks
 import org.gradle.testkit.runner.fixtures.PluginUnderTest
+import org.gradle.util.GradleVersion
 import org.gradle.util.UsesNativeServices
+import spock.lang.IgnoreIf
 import spock.lang.Unroll
 
 import static org.gradle.testkit.runner.TaskOutcome.SUCCESS
-import static org.hamcrest.Matchers.anyOf
-import static org.hamcrest.Matchers.containsString
+import static org.hamcrest.CoreMatchers.anyOf
+import static org.hamcrest.CoreMatchers.containsString
 
 @InjectsPluginClasspath
 @InspectsBuildOutput
 @UsesNativeServices
-@SuppressWarnings('IntegrationTestFixtures')
+@SuppressWarnings('IntegrationTestFixtures') // result.output.contains does mean something different here
+@IgnoreIf({ GradleContextualExecuter.embedded }) // Test causes builds to hang
 class GradleRunnerPluginClasspathInjectionIntegrationTest extends BaseGradleRunnerIntegrationTest {
 
     def plugin = new PluginUnderTest(1, file("plugin"))
@@ -49,7 +53,7 @@ class GradleRunnerPluginClasspathInjectionIntegrationTest extends BaseGradleRunn
             |Plugin [id: '$plugin.id'] was not found in any of the following sources:
             |
             |- Gradle Core Plugins (plugin is not in 'org.gradle' namespace)
-            |- Plugin Repositories (plugin dependency must include a version number for this source)
+            |- $pluginRepositoriesDisplayName (plugin dependency must include a version number for this source)
         """.stripMargin().trim())
     }
 
@@ -67,7 +71,7 @@ class GradleRunnerPluginClasspathInjectionIntegrationTest extends BaseGradleRunn
             |
             |- Gradle Core Plugins (plugin is not in 'org.gradle' namespace)
             |- Gradle TestKit (classpath: ${expectedClasspath*.absolutePath.join(File.pathSeparator)})
-            |- Plugin Repositories (plugin dependency must include a version number for this source)
+            |- $pluginRepositoriesDisplayName (plugin dependency must include a version number for this source)
         """.stripMargin().trim())
     }
 
@@ -110,9 +114,9 @@ class GradleRunnerPluginClasspathInjectionIntegrationTest extends BaseGradleRunn
         then:
         // This is how the class not being visible will manifest
         execFailure(result).assertThatCause(
-                anyOf(
-                        containsString("Could not get unknown property 'org' for task ':echo1' of type org.gradle.api.DefaultTask."),
-                        containsString("Could not find property 'org' on task ':echo1'.")))
+            anyOf(
+                containsString("Could not get unknown property 'org' for task ':echo1' of type org.gradle.api.DefaultTask."),
+                containsString("Could not find property 'org' on task ':echo1'.")))
     }
 
     def "injected classes are inherited by child projects of project that applies plugin"() {
@@ -148,9 +152,9 @@ class GradleRunnerPluginClasspathInjectionIntegrationTest extends BaseGradleRunn
         then:
         // This is how the class not being visible will manifest
         execFailure(result).assertThatCause(
-                anyOf(
-                        containsString("Could not get unknown property 'org' for task ':echo1' of type org.gradle.api.DefaultTask."),
-                        containsString("Could not find property 'org' on task ':echo1'.")))
+            anyOf(
+                containsString("Could not get unknown property 'org' for task ':echo1' of type org.gradle.api.DefaultTask."),
+                containsString("Could not find property 'org' on task ':echo1'.")))
     }
 
     def "injected classes are not visible to projects at run time that are not child projects of applying project"() {
@@ -276,6 +280,7 @@ class GradleRunnerPluginClasspathInjectionIntegrationTest extends BaseGradleRunn
         execFailure(result).assertHasDescription("Plugin [id: '$plugin.id'] was not found in any of the following sources:")
     }
 
+    @IgnoreIf({ GradleContextualExecuter.embedded }) // classloader isolation does not work here in embedded mode
     @InspectsExecutedTasks
     def "buildSrc classes are not visible to injected classes"() {
         plugin.build()
@@ -379,4 +384,9 @@ class GradleRunnerPluginClasspathInjectionIntegrationTest extends BaseGradleRunn
         result.output.contains('Hello world!1')
     }
 
+    private static String getPluginRepositoriesDisplayName() {
+        return gradleVersion >= GradleVersion.version("4.4")
+            ? "Plugin Repositories"
+            : "Gradle Central Plugin Repository"
+    }
 }

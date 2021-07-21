@@ -17,7 +17,11 @@
 package org.gradle.internal.execution.history;
 
 import com.google.common.collect.ImmutableSortedMap;
+import org.gradle.internal.execution.steps.SnapshotResult;
 import org.gradle.internal.fingerprint.CurrentFileCollectionFingerprint;
+import org.gradle.internal.snapshot.FileSystemSnapshot;
+
+import java.util.Optional;
 
 /**
  * The execution state before the current execution.
@@ -26,6 +30,20 @@ public interface BeforeExecutionState extends ExecutionState {
     @Override
     ImmutableSortedMap<String, CurrentFileCollectionFingerprint> getInputFileProperties();
 
-    @Override
-    ImmutableSortedMap<String, CurrentFileCollectionFingerprint> getOutputFileProperties();
+    /**
+     * Snapshots of the roots of output properties.
+     *
+     * This includes snapshots for the whole output {@link org.gradle.api.file.FileCollection}.
+     *
+     * @see AfterPreviousExecutionState#getOutputFilesProducedByWork()
+     * @see SnapshotResult#getOutputFilesProduceByWork()
+     */
+    ImmutableSortedMap<String, FileSystemSnapshot> getOutputFileLocationSnapshots();
+
+    /**
+     * Returns overlapping outputs if they are detected.
+     *
+     * @see org.gradle.internal.execution.UnitOfWork#getOverlappingOutputHandling()
+     */
+    Optional<OverlappingOutputs> getDetectedOverlappingOutputs();
 }

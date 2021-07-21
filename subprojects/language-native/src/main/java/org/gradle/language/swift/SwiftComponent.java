@@ -17,16 +17,14 @@
 package org.gradle.language.swift;
 
 import org.gradle.api.Action;
-import org.gradle.api.Incubating;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.file.ConfigurableFileCollection;
 import org.gradle.api.file.FileCollection;
 import org.gradle.api.provider.Property;
-import org.gradle.api.provider.SetProperty;
-import org.gradle.language.ComponentWithBinaries;
 import org.gradle.language.BinaryCollection;
+import org.gradle.language.ComponentWithBinaries;
 import org.gradle.language.ComponentWithDependencies;
-import org.gradle.nativeplatform.TargetMachine;
+import org.gradle.language.ComponentWithTargetMachines;
 
 /**
  * Configuration for a Swift component, such as a library or executable, defining the source files that make up the component plus other settings.
@@ -37,8 +35,7 @@ import org.gradle.nativeplatform.TargetMachine;
  *
  * @since 4.2
  */
-@Incubating
-public interface SwiftComponent extends ComponentWithBinaries, ComponentWithDependencies {
+public interface SwiftComponent extends ComponentWithBinaries, ComponentWithDependencies, ComponentWithTargetMachines {
     /**
      * Defines the Swift module for this component. The default value is calculated from the project name.
      */
@@ -66,6 +63,7 @@ public interface SwiftComponent extends ComponentWithBinaries, ComponentWithDepe
      *
      * @since 4.5
      */
+    @Override
     BinaryCollection<? extends SwiftBinary> getBinaries();
 
     /**
@@ -79,11 +77,4 @@ public interface SwiftComponent extends ComponentWithBinaries, ComponentWithDepe
      * @since 4.6
      */
     Property<SwiftVersion> getSourceCompatibility();
-
-    /**
-     * Specifies the target machines this component should be built for.
-     *
-     * @since 5.1
-     */
-    SetProperty<TargetMachine> getTargetMachines();
 }

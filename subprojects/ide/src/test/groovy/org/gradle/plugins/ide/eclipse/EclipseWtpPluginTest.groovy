@@ -261,6 +261,45 @@ class EclipseWtpPluginTest extends AbstractProjectBuilderSpec {
                 new Facet(FacetType.installed, 'someFancyFacet', '2.0')])
     }
 
+    @Issue('https://github.com/gradle/gradle/issues/945')
+    def "can overwrite ear default 'jst.ear' facet"() {
+        when:
+        project.apply(plugin: 'ear')
+        project.apply(plugin: 'eclipse-wtp')
+
+        project.eclipse.wtp {
+            facet {
+                facet name: 'jst.ear', version: '8.0'
+            }
+        }
+
+        then:
+        checkEclipseWtpFacet([
+                new Facet(FacetType.fixed, "jst.ear", null),
+                new Facet(FacetType.installed, "jst.ear", "8.0")])
+    }
+
+    @Issue('https://github.com/gradle/gradle/issues/945')
+    def "can overwrite war default 'jst.web' facet"() {
+        when:
+        project.apply(plugin: 'war')
+        project.apply(plugin: 'eclipse-wtp')
+        project.sourceCompatibility = 1.4
+
+        project.eclipse.wtp {
+            facet {
+                facet name: 'jst.web', version: '4.0'
+            }
+        }
+
+        then:
+        checkEclipseWtpFacet([
+                new Facet(FacetType.fixed, "jst.java", null),
+                new Facet(FacetType.fixed, "jst.web", null),
+                new Facet(FacetType.installed, "jst.web", "4.0"),
+                new Facet(FacetType.installed, "jst.java", "1.4")])
+    }
+
     @Issue(['GRADLE-2186', 'GRADLE-2221'])
     def "can change WTP components and add facets when java plugin is applied"() {
         when:
@@ -316,7 +355,7 @@ class EclipseWtpPluginTest extends AbstractProjectBuilderSpec {
         def wtp = checkAndGetEclipseWtpComponent()
         assert wtp.sourceDirs == project.sourceSets.main.allSource.srcDirs
         assert wtp.rootConfigurations == [] as Set
-        assert wtp.libConfigurations == [project.configurations.runtime] as Set
+        assert wtp.libConfigurations == [project.configurations.runtimeClasspath] as Set
         assert wtp.minusConfigurations == [] as Set
         assert wtp.deployName == project.name
         assert wtp.contextPath == null
@@ -329,10 +368,10 @@ class EclipseWtpPluginTest extends AbstractProjectBuilderSpec {
         def wtp = checkAndGetEclipseWtpComponent()
         assert wtp.sourceDirs == project.sourceSets.main.allSource.srcDirs
         assert wtp.rootConfigurations == [] as Set
-        assert wtp.libConfigurations == [project.configurations.runtime] as Set
+        assert wtp.libConfigurations == [project.configurations.runtimeClasspath] as Set
         assert wtp.minusConfigurations == [project.configurations.providedRuntime] as Set
         assert wtp.deployName == project.name
-        assert wtp.contextPath == project.war.baseName
+        assert wtp.contextPath == project.war.archiveBaseName.get()
         assert wtp.resources == [new WbResource('/', project.convention.plugins.war.webAppDirName)]
         assert wtp.classesDeployPath == "/WEB-INF/classes"
         assert wtp.libDeployPath == "/WEB-INF/lib"

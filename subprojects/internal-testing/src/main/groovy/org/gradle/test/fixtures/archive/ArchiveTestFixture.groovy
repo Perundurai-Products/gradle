@@ -19,20 +19,25 @@ package org.gradle.test.fixtures.archive
 import com.google.common.collect.ArrayListMultimap
 import com.google.common.collect.LinkedListMultimap
 import com.google.common.collect.ListMultimap
-import org.gradle.util.CollectionUtils
+import org.gradle.util.internal.CollectionUtils
 import org.hamcrest.Matcher
 
-import static org.hamcrest.Matchers.equalTo
-import static org.hamcrest.Matchers.hasItem
+import static org.hamcrest.CoreMatchers.equalTo
+import static org.hamcrest.CoreMatchers.hasItem
+import static org.hamcrest.MatcherAssert.assertThat
 import static org.junit.Assert.assertEquals
-import static org.junit.Assert.assertThat
 
 class ArchiveTestFixture {
     private final ListMultimap<String, String> filesByRelativePath = LinkedListMultimap.create()
     private final ListMultimap<String, Integer> fileModesByRelativePath = ArrayListMultimap.create()
+    private final List<String> dirs = new ArrayList<>()
 
     protected void add(String relativePath, String content) {
         filesByRelativePath.put(relativePath, content)
+    }
+
+    protected void addDir(String relativePath) {
+        dirs.add(relativePath)
     }
 
     protected void addMode(String relativePath, int mode) {
@@ -72,6 +77,11 @@ class ArchiveTestFixture {
 
     Integer countFiles(String relativePath) {
         filesByRelativePath.get(relativePath).size()
+    }
+
+    def hasDirs(String... relativePaths) {
+        assert dirs.sort() == relativePaths.collect { it + "/" }.sort()
+        this
     }
 
     def hasDescendants(String... relativePaths) {

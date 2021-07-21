@@ -15,33 +15,29 @@
  */
 
 
-
 package org.gradle.api.reporting.internal
 
+import org.gradle.api.Describable
 import org.gradle.api.InvalidUserDataException
-import org.gradle.api.Project
+import org.gradle.api.file.FileSystemLocation
+import org.gradle.api.file.FileSystemLocationProperty
 import org.gradle.api.internal.CollectionCallbackActionDecorator
+import org.gradle.api.provider.Property
 import org.gradle.api.reflect.ObjectInstantiationException
 import org.gradle.api.reporting.Report
 import org.gradle.api.reporting.ReportContainer
-import org.gradle.internal.Factories
-import org.gradle.internal.reflect.Instantiator
-import org.gradle.testfixtures.ProjectBuilder
+import org.gradle.internal.Describables
 import org.gradle.util.TestUtil
 import spock.lang.Specification
 
 class DefaultReportContainerTest extends Specification {
-
-    static Instantiator instantiator = TestUtil.instantiatorFactory().decorateLenient()
-    static Project project = ProjectBuilder.builder().build()
-
     static class TestReportContainer extends DefaultReportContainer {
         TestReportContainer(Closure c) {
-            super(Report, DefaultReportContainerTest.instantiator, CollectionCallbackActionDecorator.NOOP)
+            super(Report, TestUtil.instantiatorFactory().decorateLenient(), CollectionCallbackActionDecorator.NOOP)
 
             c.delegate = new Object() {
                 Report createReport(String name) {
-                    add(SimpleReport, name, Factories.constant(name), Report.OutputType.FILE, DefaultReportContainerTest.project)
+                    add(TestReport, name, Describables.of(name), Report.OutputType.FILE)
                 }
             }
 
@@ -49,9 +45,9 @@ class DefaultReportContainerTest extends Specification {
         }
     }
 
-    DefaultReportContainer createContainer(Closure c) {
+    DefaultReportContainer createContainer(Closure cl) {
         try {
-            instantiator.newInstance(TestReportContainer, c)
+            TestUtil.instantiatorFactory().decorateLenient().newInstance(TestReportContainer, cl)
         } catch (ObjectInstantiationException e) {
             throw e.cause
         }
@@ -69,7 +65,7 @@ class DefaultReportContainerTest extends Specification {
 
     def "reports given at construction are available"() {
         when:
-        container.configure { a { } }
+        container.configure { a {} }
 
         then:
         notThrown(MissingPropertyException)
@@ -77,7 +73,7 @@ class DefaultReportContainerTest extends Specification {
 
     def "container is immutable"() {
         when:
-        container.add(new SimpleReport("d", Factories.constant("d"), Report.OutputType.FILE, project))
+        container.add(Stub(Report))
 
         then:
         thrown(ReportContainer.ImmutableViolationException)
@@ -89,22 +85,22 @@ class DefaultReportContainerTest extends Specification {
         thrown(ReportContainer.ImmutableViolationException)
     }
 
-    def "enable empty by default"() {
+    def "require empty by default"() {
         expect:
-        container.every { !it.enabled } && container.enabled.empty
+        container.every { !it.required.get() } && container.enabled.empty
     }
 
-    def "can change enabled"() {
+    def "can change required"() {
         when:
-        container.each { it.enabled = false }
+        container.each { it.required = false }
 
         then:
         container.enabled.empty
 
         when:
         container.configure {
-            a.enabled true
-            b.enabled true
+            a.required = true
+            b.required = true
         }
 
         then:
@@ -133,7 +129,16 @@ class DefaultReportContainerTest extends Specification {
         thrown(MissingMethodException)
     }
 
-    def cleanupSpec() {
-        instantiator = null
+    static class TestReport extends SimpleReport {
+        final Property<Boolean> required = TestUtil.objectFactory().property(Boolean).value(false)
+
+        TestReport(String name, Describable displayName, OutputType outputType) {
+            super(name, displayName, outputType)
+        }
+
+        @Override
+        FileSystemLocationProperty<? extends FileSystemLocation> getOutputLocation() {
+            return null
+        }
     }
 }

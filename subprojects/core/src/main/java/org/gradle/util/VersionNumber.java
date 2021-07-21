@@ -22,17 +22,11 @@ import com.google.common.collect.Ordering;
 import javax.annotation.Nullable;
 
 /**
- * Represents, parses, and compares version numbers. Supports a couple of different schemes: <ul> <li>MAJOR.MINOR.MICRO-QUALIFIER (the default).</li> <li>MAJOR.MINOR.MICRO.PATCH-QUALIFIER.</li> </ul>
+ * This class is only here to maintain binary compatibility with existing plugins.
  *
- * <p>The {@link #parse} method handles missing parts and allows "." to be used instead of "-", and "_" to be used instead of "." for the patch number.
- *
- * <p>This class considers missing parts to be 0, so that "1.0" == "1.0.0" == "1.0.0_0".</p>
- *
- * <p>Note that this class considers "1.2.3-something" less than "1.2.3". Qualifiers are compared lexicographically ("1.2.3-alpha" < "1.2.3-beta") and case-insensitive ("1.2.3-alpha" <
- * "1.2.3.RELEASE").
- *
- * <p>To check if a version number is at least "1.2.3", disregarding a potential qualifier like "beta", use {@code version.getBaseVersion().compareTo(VersionNumber.parse("1.2.3")) >= 0}.
+ * @deprecated Will be removed in Gradle 8.0.
  */
+@Deprecated
 public class VersionNumber implements Comparable<VersionNumber> {
     private static final DefaultScheme DEFAULT_SCHEME = new DefaultScheme();
     private static final SchemeWithPatchVersion PATCH_SCHEME = new SchemeWithPatchVersion();
@@ -78,6 +72,7 @@ public class VersionNumber implements Comparable<VersionNumber> {
         return patch;
     }
 
+    @Nullable
     public String getQualifier() {
         return qualifier;
     }
@@ -86,6 +81,7 @@ public class VersionNumber implements Comparable<VersionNumber> {
         return new VersionNumber(major, minor, micro, patch, null, scheme);
     }
 
+    @Override
     public int compareTo(VersionNumber other) {
         if (major != other.major) {
             return major - other.major;
@@ -102,10 +98,12 @@ public class VersionNumber implements Comparable<VersionNumber> {
         return Ordering.natural().nullsLast().compare(toLowerCase(qualifier), toLowerCase(other.qualifier));
     }
 
-    public boolean equals(Object other) {
+    @Override
+    public boolean equals(@Nullable Object other) {
         return other instanceof VersionNumber && compareTo((VersionNumber) other) == 0;
     }
 
+    @Override
     public int hashCode() {
         int result = major;
         result = 31 * result + minor;
@@ -115,12 +113,17 @@ public class VersionNumber implements Comparable<VersionNumber> {
         return result;
     }
 
+    @Override
     public String toString() {
         return scheme.format(this);
     }
 
     public static VersionNumber version(int major) {
-        return new VersionNumber(major, 0, 0, 0, null, DEFAULT_SCHEME);
+        return version(major, 0);
+    }
+
+    public static VersionNumber version(int major, int minor) {
+        return new VersionNumber(major, minor, 0, 0, null, DEFAULT_SCHEME);
     }
 
     /**
@@ -141,14 +144,19 @@ public class VersionNumber implements Comparable<VersionNumber> {
         return DEFAULT_SCHEME.parse(versionString);
     }
 
+    @Nullable
     private String toLowerCase(@Nullable String string) {
         return string == null ? null : string.toLowerCase();
     }
 
+    /**
+     * Returns the version number scheme.
+     */
+    @Deprecated
     public interface Scheme {
-        public VersionNumber parse(String value);
+        VersionNumber parse(String value);
 
-        public String format(VersionNumber versionNumber);
+        String format(VersionNumber versionNumber);
     }
 
     private abstract static class AbstractScheme implements Scheme {
@@ -158,7 +166,8 @@ public class VersionNumber implements Comparable<VersionNumber> {
             this.depth = depth;
         }
 
-        public VersionNumber parse(String versionString) {
+        @Override
+        public VersionNumber parse(@Nullable String versionString) {
             if (versionString == null || versionString.length() == 0) {
                 return UNKNOWN;
             }
@@ -241,18 +250,11 @@ public class VersionNumber implements Comparable<VersionNumber> {
                 return pos == str.length();
             }
 
-            private boolean skip(char ch) {
-                if (pos < str.length() && str.charAt(pos) == ch) {
-                    pos++;
-                    return true;
-                }
-                return false;
-            }
-
             public void skipSeparator() {
                 pos++;
             }
 
+            @Nullable
             public String remainder() {
                 return pos == str.length() ? null : str.substring(pos);
             }
@@ -266,6 +268,7 @@ public class VersionNumber implements Comparable<VersionNumber> {
             super(3);
         }
 
+        @Override
         public String format(VersionNumber versionNumber) {
             return String.format(VERSION_TEMPLATE, versionNumber.major, versionNumber.minor, versionNumber.micro, versionNumber.qualifier == null ? "" : "-" + versionNumber.qualifier);
         }
@@ -278,6 +281,7 @@ public class VersionNumber implements Comparable<VersionNumber> {
             super(4);
         }
 
+        @Override
         public String format(VersionNumber versionNumber) {
             return String.format(VERSION_TEMPLATE, versionNumber.major, versionNumber.minor, versionNumber.micro, versionNumber.patch, versionNumber.qualifier == null ? "" : "-" + versionNumber.qualifier);
         }

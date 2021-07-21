@@ -16,20 +16,22 @@
 
 package org.gradle.integtests.resource.s3.fixtures
 
+
 import groovy.xml.StreamingMarkupBuilder
+import org.eclipse.jetty.server.Request
+import org.eclipse.jetty.server.handler.AbstractHandler
 import org.gradle.integtests.resource.s3.fixtures.stub.HttpStub
 import org.gradle.integtests.resource.s3.fixtures.stub.StubRequest
 import org.gradle.test.fixtures.file.TestDirectoryProvider
 import org.gradle.test.fixtures.server.RepositoryServer
 import org.gradle.test.fixtures.server.http.HttpServer
-import org.gradle.util.TextUtil
+import org.gradle.util.internal.TextUtil
 import org.joda.time.DateTimeZone
 import org.joda.time.format.DateTimeFormat
 import org.joda.time.format.DateTimeFormatter
 import org.joda.time.tz.FixedDateTimeZone
-import org.mortbay.jetty.Request
-import org.mortbay.jetty.handler.AbstractHandler
 
+import javax.servlet.ServletException
 import javax.servlet.http.HttpServletRequest
 import javax.servlet.http.HttpServletResponse
 import java.security.MessageDigest
@@ -46,6 +48,7 @@ class S3Server extends HttpServer implements RepositoryServer {
     public static final String X_AMZ_REQUEST_ID = '0A398F9A1BAD4027'
     public static final String X_AMZ_ACL = 'bucket-owner-full-control'
     public static final String X_AMZ_ID_2 = 'nwUZ/n/F2/ZFRTZhtzjYe7mcXkxCaRjfrJSWirV50lN7HuvhF60JpphwoiX/sMnh'
+    public static final String X_AMZ_UPLOAD_ID = 'VXBsb2FkIElEIGZvciA2aWWpbmcncyBteS1tb3ZpZS5tMnRzIHVwbG9hZA'
     public static final String DATE_HEADER = 'Mon, 29 Sep 2014 11:04:27 GMT'
     public static final String SERVER_AMAZON_S3 = 'AmazonS3'
 
@@ -77,7 +80,9 @@ class S3Server extends HttpServer implements RepositoryServer {
         StubRequest stubRequest = httpStub.request
         String path = stubRequest.path
         assert path.startsWith('/')
-        boolean result = path == request.pathInfo && stubRequest.method == request.method
+        boolean result = path == request.pathInfo && stubRequest.method == request.method &&
+            stubRequest.params.every { request.getParameterMap().containsKey(it.key) } &&
+            request.getParameterMap().every { stubRequest.params.containsKey(it.key) }
         result
     }
 
@@ -134,6 +139,129 @@ class S3Server extends HttpServer implements RepositoryServer {
                     "ETag": { calculateEtag(file) },
                     'Server': SERVER_AMAZON_S3
                 ]
+            }
+        }
+        expect(httpStub)
+    }
+
+    def stubMultipartUpload(String bucketName, String keyName, File file) {
+        stubInitiateMultipartUpload(bucketName, keyName)
+        stubUploadPart(bucketName, keyName, file)
+        stubCompleteMultipartUpload(bucketName, keyName, file)
+    }
+
+    def stubInitiateMultipartUpload(String bucketName, String keyName) {
+        def xml = new StreamingMarkupBuilder().bind {
+            InitiateMultipartUploadResult(xmlns: "http://s3.amazonaws.com/doc/2006-03-01/") {
+                Bucket(bucketName)
+                Key(keyName)
+                UploadId(X_AMZ_UPLOAD_ID)
+            }
+        }
+        def length = xml.toString().size()
+        def url = "/${bucketName}/${keyName}"
+        HttpStub httpStub = HttpStub.stubInteraction {
+            request {
+                method = 'POST'
+                path = url
+                params = ['uploads': ['']]
+                headers = [
+                    'Content-Type': "application/x-www-form-urlencoded; charset=utf-8",
+                    'Connection': 'Keep-Alive'
+                ]
+            }
+            response {
+                status = 200
+                headers = [
+                    'x-amz-id-2': X_AMZ_ID_2,
+                    'x-amz-request-id': X_AMZ_REQUEST_ID,
+                    'Date': DATE_HEADER,
+                    'Server': SERVER_AMAZON_S3,
+                    'Content-Length': length,
+                    'Last-Modified': RCF_822_DATE_FORMAT.print(new Date().getTime())
+                ]
+                body = { xml.toString() }
+            }
+        }
+        expect(httpStub)
+    }
+
+    def stubUploadPart(String bucketName, String keyName, File file) {
+        def url = "/${bucketName}/${keyName}"
+        def length = file.size()
+        HttpStub httpStub = HttpStub.stubInteraction {
+            request {
+                method = 'PUT'
+                path = url
+                params = [
+                    'partNumber': ['1'],
+                    'uploadId': [X_AMZ_UPLOAD_ID]
+                ]
+                headers = [
+                    'Content-Type': 'application/octet-stream',
+                    'Connection': 'Keep-Alive',
+                    'Content-Length': length
+                ]
+                body = { InputStream content ->
+                    file.parentFile.mkdirs()
+                    file.bytes = content.bytes
+                }
+            }
+            response {
+                status = 200
+                headers = [
+                    'x-amz-id-2': X_AMZ_ID_2,
+                    'x-amz-request-id': X_AMZ_REQUEST_ID,
+                    'Date': DATE_HEADER,
+                    'Server': SERVER_AMAZON_S3,
+                    'ETag': calculateEtag(file),
+                    'Content-Length': 0,
+                    'Last-Modified': RCF_822_DATE_FORMAT.print(new Date().getTime())
+                ]
+            }
+        }
+        expect(httpStub)
+    }
+
+    def stubCompleteMultipartUpload(String bucketName, String keyName, File file) {
+        def requestXml = new StreamingMarkupBuilder().bind {
+            CompleteMultipartUpload(xmlns: "http://s3.amazonaws.com/doc/2006-03-01/") {
+                Part() {
+                    PartNumber(1)
+                    ETag(calculateEtag(file))
+                }
+            }
+        }
+        def url = "/${bucketName}/${keyName}"
+        def responseXml = new StreamingMarkupBuilder().bind {
+            CompleteMultipartUploadResult(xmlns: "http://s3.amazonaws.com/doc/2006-03-01/") {
+                Location(url)
+                Bucket(bucketName)
+                Key(keyName)
+                ETag(calculateEtag(file))
+            }
+        }
+        HttpStub httpStub = HttpStub.stubInteraction {
+            request {
+                method = 'POST'
+                path = url
+                params = ['uploadId': [X_AMZ_UPLOAD_ID]]
+                headers = [
+                    'Content-Type': "application/x-www-form-urlencoded; charset=utf-8",
+                    'Connection': 'Keep-Alive',
+                ]
+                body = { requestXml.toString() }
+            }
+            response {
+                status = 200
+                headers = [
+                    'x-amz-id-2': X_AMZ_ID_2,
+                    'x-amz-request-id': X_AMZ_REQUEST_ID,
+                    'Date': DATE_HEADER,
+                    'Server': SERVER_AMAZON_S3,
+                    'Last-Modified': RCF_822_DATE_FORMAT.print(new Date().getTime())
+                ]
+                body = { responseXml.toString() }
             }
         }
         expect(httpStub)
@@ -286,7 +414,8 @@ class S3Server extends HttpServer implements RepositoryServer {
                 params = [
                     'prefix': [prefix],
                     'delimiter': ['/'],
-                    'max-keys': ["1000"]
+                    'max-keys': ["1000"],
+                    'encoding-type': ['url']
                 ]
             }
             response {
@@ -472,7 +601,9 @@ class S3Server extends HttpServer implements RepositoryServer {
         HttpServer.HttpExpectOne expectation = new HttpServer.HttpExpectOne(action, [httpStub.request.method], httpStub.request.path)
         expectations << expectation
         addHandler(new AbstractHandler() {
-            void handle(String target, HttpServletRequest request, HttpServletResponse response, int dispatch) {
+            @Override
+            void handle(String target, Request baseRequest, HttpServletRequest request, HttpServletResponse response) throws IOException, ServletException {
+
                 if (requestMatches(httpStub, request)) {
                     assertRequest(httpStub, request)
                     if (expectation.run) {
@@ -480,7 +611,7 @@ class S3Server extends HttpServer implements RepositoryServer {
                         return
                     }
                     if (!((Request) request).isHandled()) {
-                        expectation.run = true
+                        expectation.atomicRun.set(true)
                         action.handle(request, response)
                         ((Request) request).setHandled(true)
                     }

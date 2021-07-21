@@ -18,6 +18,9 @@ package org.gradle.api.internal.file;
 import groovy.lang.Closure;
 import org.gradle.api.Buildable;
 import org.gradle.api.InvalidUserDataException;
+import org.gradle.api.Task;
+import org.gradle.api.file.Directory;
+import org.gradle.api.file.DirectoryProperty;
 import org.gradle.api.file.DirectoryTree;
 import org.gradle.api.file.FileCollection;
 import org.gradle.api.file.FileTreeElement;
@@ -25,66 +28,77 @@ import org.gradle.api.file.SourceDirectorySet;
 import org.gradle.api.internal.file.collections.DirectoryFileTree;
 import org.gradle.api.internal.file.collections.DirectoryFileTreeFactory;
 import org.gradle.api.internal.file.collections.FileCollectionAdapter;
-import org.gradle.api.internal.file.collections.FileCollectionResolveContext;
 import org.gradle.api.internal.file.collections.MinimalFileSet;
-import org.gradle.api.internal.model.InstantiatorBackedObjectFactory;
 import org.gradle.api.internal.tasks.TaskDependencyResolveContext;
 import org.gradle.api.model.ObjectFactory;
-import org.gradle.api.provider.Property;
 import org.gradle.api.provider.Provider;
 import org.gradle.api.specs.Spec;
 import org.gradle.api.tasks.TaskDependency;
+import org.gradle.api.tasks.TaskProvider;
 import org.gradle.api.tasks.util.PatternFilterable;
 import org.gradle.api.tasks.util.PatternSet;
-import org.gradle.internal.reflect.DirectInstantiator;
-import org.gradle.util.DeprecationLogger;
-import org.gradle.util.GUtil;
+import org.gradle.internal.Factory;
+import org.gradle.internal.deprecation.DeprecationLogger;
+import org.gradle.util.internal.GUtil;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
+import java.util.function.Function;
 
 public class DefaultSourceDirectorySet extends CompositeFileTree implements SourceDirectorySet {
-    private final List<Object> source = new ArrayList<Object>();
+    private final List<Object> source = new ArrayList<>();
     private final String name;
     private final String displayName;
-    private final FileResolver fileResolver;
+    private final FileCollectionFactory fileCollectionFactory;
     private final DirectoryFileTreeFactory directoryFileTreeFactory;
     private final PatternSet patterns;
     private final PatternSet filter;
     private final FileCollection dirs;
-    private final Property<File> outputDir;
+    private final DirectoryProperty destinationDirectory; // the user configurable output directory
+    private final DirectoryProperty classesDirectory;     // bound to the compile task output
 
-    // Note: don't actually remove this in 6.0, the deprecation is here to encourage people to use ObjectFactory instead. Just remove the overload and the nag and leave the method here
-    @Deprecated
-    public DefaultSourceDirectorySet(String name, String displayName, FileResolver fileResolver, DirectoryFileTreeFactory directoryFileTreeFactory, ObjectFactory objectFactory) {
-        DeprecationLogger.nagUserOfDeprecated("The DefaultSourceDirectorySet constructor", "Please use the ObjectFactory service to create instances of SourceDirectorySet instead.");
+    private TaskProvider<?> compileTaskProvider;
+
+    public DefaultSourceDirectorySet(String name, String displayName, Factory<PatternSet> patternSetFactory, FileCollectionFactory fileCollectionFactory, DirectoryFileTreeFactory directoryFileTreeFactory, ObjectFactory objectFactory) {
+        this(name, displayName, patternSetFactory.create(), patternSetFactory.create(), fileCollectionFactory, directoryFileTreeFactory, objectFactory.directoryProperty(), objectFactory.directoryProperty());
+    }
+
+    DefaultSourceDirectorySet(String name, String displayName, PatternSet patterns, PatternSet filters, FileCollectionFactory fileCollectionFactory, DirectoryFileTreeFactory directoryFileTreeFactory, DirectoryProperty destinationDirectory, DirectoryProperty classesDirectory) {
         this.name = name;
         this.displayName = displayName;
-        this.fileResolver = fileResolver;
+        this.fileCollectionFactory = fileCollectionFactory;
         this.directoryFileTreeFactory = directoryFileTreeFactory;
-        this.patterns = fileResolver.getPatternSetFactory().create();
-        this.filter = fileResolver.getPatternSetFactory().create();
+        this.patterns = patterns;
+        this.filter = filters;
         this.dirs = new FileCollectionAdapter(new SourceDirectories());
-        this.outputDir = objectFactory.property(File.class);
+        this.destinationDirectory = destinationDirectory;
+        this.classesDirectory = classesDirectory;
     }
 
-    // Used by the Javascript plugins
-    @Deprecated
-    public DefaultSourceDirectorySet(String name, String displayName, FileResolver fileResolver, DirectoryFileTreeFactory directoryFileTreeFactory) {
-        this(name, displayName, fileResolver, directoryFileTreeFactory, new InstantiatorBackedObjectFactory(DirectInstantiator.INSTANCE));
+    public DefaultSourceDirectorySet(SourceDirectorySet sourceSet) {
+        if (!(sourceSet instanceof DefaultSourceDirectorySet)) {
+            throw new RuntimeException("Invalid source set type:" + source.getClass());
+        }
+        DefaultSourceDirectorySet defaultSourceSet = (DefaultSourceDirectorySet) sourceSet;
+        this.name = defaultSourceSet.name;
+        this.displayName = defaultSourceSet.displayName;
+        this.fileCollectionFactory = defaultSourceSet.fileCollectionFactory;
+        this.directoryFileTreeFactory = defaultSourceSet.directoryFileTreeFactory;
+        this.patterns = defaultSourceSet.patterns;
+        this.filter = defaultSourceSet.filter;
+        this.dirs = new FileCollectionAdapter(new SourceDirectories());
+        this.destinationDirectory = defaultSourceSet.destinationDirectory;
+        this.classesDirectory = defaultSourceSet.classesDirectory;
     }
 
-    // Used by the Kotlin plugin
-    @Deprecated
-    public DefaultSourceDirectorySet(String name, FileResolver fileResolver, DirectoryFileTreeFactory directoryFileTreeFactory) {
-        this(name, name, fileResolver, directoryFileTreeFactory);
-    }
-
+    @Override
     public String getName() {
         return this.name;
     }
@@ -94,110 +108,167 @@ public class DefaultSourceDirectorySet extends CompositeFileTree implements Sour
         return dirs;
     }
 
+    @Override
     public Set<File> getSrcDirs() {
-        Set<File> dirs = new LinkedHashSet<File>();
+        Set<File> dirs = new LinkedHashSet<>();
         for (DirectoryTree tree : getSrcDirTrees()) {
             dirs.add(tree.getDir());
         }
         return dirs;
     }
 
+    @Override
     public Set<String> getIncludes() {
         return patterns.getIncludes();
     }
 
+    @Override
     public Set<String> getExcludes() {
         return patterns.getExcludes();
     }
 
+    @Override
     public PatternFilterable setIncludes(Iterable<String> includes) {
         patterns.setIncludes(includes);
         return this;
     }
 
+    @Override
     public PatternFilterable setExcludes(Iterable<String> excludes) {
         patterns.setExcludes(excludes);
         return this;
     }
 
+    @Override
     public PatternFilterable include(String... includes) {
         patterns.include(includes);
         return this;
     }
 
+    @Override
     public PatternFilterable include(Iterable<String> includes) {
         patterns.include(includes);
         return this;
     }
 
+    @Override
     public PatternFilterable include(Spec<FileTreeElement> includeSpec) {
         patterns.include(includeSpec);
         return this;
     }
 
+    @Override
     public PatternFilterable include(Closure includeSpec) {
         patterns.include(includeSpec);
         return this;
     }
 
+    @Override
     public PatternFilterable exclude(Iterable<String> excludes) {
         patterns.exclude(excludes);
         return this;
     }
 
+    @Override
     public PatternFilterable exclude(String... excludes) {
         patterns.exclude(excludes);
         return this;
     }
 
+    @Override
     public PatternFilterable exclude(Spec<FileTreeElement> excludeSpec) {
         patterns.exclude(excludeSpec);
         return this;
     }
 
+    @Override
     public PatternFilterable exclude(Closure excludeSpec) {
         patterns.exclude(excludeSpec);
         return this;
     }
 
+    @Override
     public PatternFilterable getFilter() {
         return filter;
     }
 
     @Override
+    @Deprecated
     public File getOutputDir() {
-        return outputDir.get();
+        DeprecationLogger.deprecateProperty(SourceDirectorySet.class, "outputDir")
+            .replaceWith("classesDirectory")
+            .willBeRemovedInGradle8()
+            .withDslReference()
+            .nagUser();
+
+        return destinationDirectory.getAsFile().get();
     }
 
     @Override
+    @Deprecated
     public void setOutputDir(Provider<File> provider) {
-        this.outputDir.set(provider);
+        DeprecationLogger.deprecateMethod(SourceDirectorySet.class, "setOutputDir(Provider<File>)")
+            .withAdvice("Please use the destinationDirectory property instead.")
+            .willBeRemovedInGradle8()
+            .withDslReference(SourceDirectorySet.class, "destinationDirectory")
+            .nagUser();
+
+        destinationDirectory.set(classesDirectory.fileProvider(provider));
     }
 
     @Override
+    @Deprecated
     public void setOutputDir(File outputDir) {
-        this.outputDir.set(outputDir);
+        DeprecationLogger.deprecateMethod(SourceDirectorySet.class, "setOutputDir(File)")
+            .withAdvice("Please use the destinationDirectory property instead.")
+            .willBeRemovedInGradle8()
+            .withDslReference(SourceDirectorySet.class, "destinationDirectory")
+            .nagUser();
+
+        destinationDirectory.set(outputDir);
     }
 
+    @Override
+    public DirectoryProperty getDestinationDirectory() {
+        return destinationDirectory;
+    }
+
+    @Override
+    public Provider<Directory> getClassesDirectory() {
+        return classesDirectory;
+    }
+
+    @Override
+    public <T extends Task> void compiledBy(TaskProvider<T> taskProvider, Function<T, DirectoryProperty> mapping) {
+        this.compileTaskProvider = taskProvider;
+        taskProvider.configure(task -> {
+            if (taskProvider == this.compileTaskProvider) {
+                mapping.apply(task).set(destinationDirectory);
+            }
+        });
+        classesDirectory.set(taskProvider.flatMap(mapping::apply));
+    }
+
+    @Override
     public Set<DirectoryTree> getSrcDirTrees() {
         // This implementation is broken. It does not consider include and exclude patterns
-        Map<File, DirectoryTree> trees = new LinkedHashMap<File, DirectoryTree>();
-        for (DirectoryTree tree : doGetSrcDirTrees()) {
+        Map<File, DirectoryTree> trees = new LinkedHashMap<>();
+        for (DirectoryTree tree : getSourceTrees()) {
             if (!trees.containsKey(tree.getDir())) {
                 trees.put(tree.getDir(), tree);
             }
         }
-        return new LinkedHashSet<DirectoryTree>(trees.values());
+        return new LinkedHashSet<>(trees.values());
     }
 
-    private Set<DirectoryTree> doGetSrcDirTrees() {
-        Set<DirectoryTree> result = new LinkedHashSet<DirectoryTree>();
+    protected Set<DirectoryFileTree> getSourceTrees() {
+        Set<DirectoryFileTree> result = new LinkedHashSet<>();
         for (Object path : source) {
-            if (path instanceof SourceDirectorySet) {
-                SourceDirectorySet nested = (SourceDirectorySet) path;
-                result.addAll(nested.getSrcDirTrees());
+            if (path instanceof DefaultSourceDirectorySet) {
+                DefaultSourceDirectorySet nested = (DefaultSourceDirectorySet) path;
+                result.addAll(nested.getSourceTrees());
             } else {
-                for (File srcDir : fileResolver.resolveFiles(path)) {
+                for (File srcDir : fileCollectionFactory.resolving(path)) {
                     if (srcDir.exists() && !srcDir.isDirectory()) {
                         throw new InvalidUserDataException(String.format("Source directory '%s' is not a directory.", srcDir));
                     }
@@ -214,15 +285,15 @@ public class DefaultSourceDirectorySet extends CompositeFileTree implements Sour
             if (path instanceof SourceDirectorySet) {
                 context.add(((SourceDirectorySet) path).getBuildDependencies());
             } else {
-                context.add(fileResolver.resolveFiles(path));
+                context.add(fileCollectionFactory.resolving(path));
             }
         }
     }
 
     @Override
-    public void visitContents(FileCollectionResolveContext context) {
-        for (DirectoryTree directoryTree : doGetSrcDirTrees()) {
-            context.add(((DirectoryFileTree) directoryTree).filter(filter));
+    protected void visitChildren(Consumer<FileCollectionInternal> visitor) {
+        for (DirectoryFileTree directoryTree : getSourceTrees()) {
+            visitor.accept(fileCollectionFactory.treeOf(directoryTree.filter(filter)));
         }
     }
 
@@ -231,24 +302,26 @@ public class DefaultSourceDirectorySet extends CompositeFileTree implements Sour
         return displayName;
     }
 
+    @Override
     public SourceDirectorySet srcDir(Object srcDir) {
         source.add(srcDir);
         return this;
     }
 
+    @Override
     public SourceDirectorySet srcDirs(Object... srcDirs) {
-        for (Object srcDir : srcDirs) {
-            source.add(srcDir);
-        }
+        source.addAll(Arrays.asList(srcDirs));
         return this;
     }
 
+    @Override
     public SourceDirectorySet setSrcDirs(Iterable<?> srcPaths) {
         source.clear();
         GUtil.addToCollection(source, srcPaths);
         return this;
     }
 
+    @Override
     public SourceDirectorySet source(SourceDirectorySet source) {
         this.source.add(source);
         return this;

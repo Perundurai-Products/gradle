@@ -22,12 +22,14 @@ import org.gradle.api.reporting.model.internal.ModelNodeRenderer;
 import org.gradle.api.reporting.model.internal.TextModelReportRenderer;
 import org.gradle.api.tasks.Console;
 import org.gradle.api.tasks.TaskAction;
+import org.gradle.api.tasks.diagnostics.internal.ProjectDetails;
 import org.gradle.api.tasks.options.Option;
 import org.gradle.internal.logging.text.StyledTextOutput;
 import org.gradle.internal.logging.text.StyledTextOutputFactory;
 import org.gradle.model.internal.core.ModelNode;
 import org.gradle.model.internal.core.ModelPath;
 import org.gradle.model.internal.registry.ModelRegistry;
+import org.gradle.work.DisableCachingByDefault;
 
 import javax.inject.Inject;
 
@@ -35,6 +37,8 @@ import javax.inject.Inject;
  * Displays some details about the configuration model of the project.
  * An instance of this type is used when you execute the {@code model} task from the command-line.
  */
+@Deprecated
+@DisableCachingByDefault(because = "Produces only non-cacheable console output")
 public class ModelReport extends DefaultTask {
 
     /**
@@ -93,7 +97,8 @@ public class ModelReport extends DefaultTask {
         TextModelReportRenderer textModelReportRenderer = new TextModelReportRenderer(renderer);
 
         textModelReportRenderer.setOutput(textOutput);
-        textModelReportRenderer.startProject(project);
+        ProjectDetails projectDetails = ProjectDetails.of(project);
+        textModelReportRenderer.startProject(projectDetails);
 
         ModelRegistry modelRegistry = getModelRegistry();
         ModelNode rootNode = modelRegistry.realizeNode(ModelPath.ROOT);
@@ -101,7 +106,7 @@ public class ModelReport extends DefaultTask {
         modelRegistry.bindAllReferences();
         textModelReportRenderer.render(rootNode);
 
-        textModelReportRenderer.completeProject(project);
+        textModelReportRenderer.completeProject(projectDetails);
         textModelReportRenderer.complete();
     }
 }

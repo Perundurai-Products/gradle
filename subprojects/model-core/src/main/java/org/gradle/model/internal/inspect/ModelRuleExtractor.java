@@ -23,7 +23,7 @@ import com.google.common.cache.LoadingCache;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Ordering;
 import com.google.common.util.concurrent.UncheckedExecutionException;
-import net.jcip.annotations.ThreadSafe;
+import javax.annotation.concurrent.ThreadSafe;
 import org.gradle.api.Transformer;
 import org.gradle.internal.Cast;
 import org.gradle.internal.Factory;
@@ -53,7 +53,7 @@ import org.gradle.model.internal.method.WeaklyTypeReferencingMethod;
 import org.gradle.model.internal.registry.ModelRegistry;
 import org.gradle.model.internal.registry.RuleContext;
 import org.gradle.model.internal.type.ModelType;
-import org.gradle.util.CollectionUtils;
+import org.gradle.util.internal.CollectionUtils;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Constructor;
@@ -75,6 +75,7 @@ public class ModelRuleExtractor {
     private final LoadingCache<Class<?>, CachedRuleSource> cache = CacheBuilder.newBuilder()
             .weakKeys()
             .build(new CacheLoader<Class<?>, CachedRuleSource>() {
+                @Override
                 public CachedRuleSource load(Class<?> source) {
                     return doExtract(source);
                 }
@@ -94,6 +95,7 @@ public class ModelRuleExtractor {
 
     private String describeHandlers() {
         String desc = Joiner.on(", ").join(CollectionUtils.collect(handlers, new Transformer<String, MethodModelRuleExtractor>() {
+            @Override
             public String transform(MethodModelRuleExtractor original) {
                 return original.getDescription();
             }

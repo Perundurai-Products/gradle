@@ -15,7 +15,7 @@
  */
 package org.gradle.api.plugins.quality.pmd
 
-import org.gradle.util.VersionNumber
+import org.gradle.util.internal.VersionNumber
 
 import static org.junit.Assume.assumeTrue
 
@@ -34,7 +34,7 @@ class PmdPluginSubtypeParamIntegrationTest extends AbstractPmdPluginVersionInteg
 
             dependencies {
                 pmd "${calculateDefaultDependencyNotation()}"
-                compile 'ch.qos.logback.contrib:logback-json-core:0.1.4'
+                implementation 'ch.qos.logback.contrib:logback-json-core:0.1.4'
             }
         """
 
@@ -42,6 +42,7 @@ class PmdPluginSubtypeParamIntegrationTest extends AbstractPmdPluginVersionInteg
             buildFile << """
                 pmd {
                     ruleSets = ["java-unusedcode"]
+                    incrementalAnalysis = false
                 }
             """
         } else {

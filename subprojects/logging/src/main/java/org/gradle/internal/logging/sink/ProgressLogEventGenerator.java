@@ -26,7 +26,7 @@ import org.gradle.internal.logging.events.ProgressStartEvent;
 import org.gradle.internal.logging.events.RenderableOutputEvent;
 import org.gradle.internal.logging.events.StyledTextOutputEvent;
 import org.gradle.internal.operations.OperationIdentifier;
-import org.gradle.util.GUtil;
+import org.gradle.util.internal.GUtil;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -49,6 +49,7 @@ public class ProgressLogEventGenerator implements OutputEventListener {
         this.listener = listener;
     }
 
+    @Override
     public void onOutput(OutputEvent event) {
         if (event instanceof ProgressStartEvent) {
             onStart((ProgressStartEvent) event);
@@ -69,8 +70,13 @@ public class ProgressLogEventGenerator implements OutputEventListener {
     }
 
     private void onComplete(ProgressCompleteEvent progressCompleteEvent) {
-        assert !operations.isEmpty();
+        if (operations.isEmpty()) {
+            return;
+        }
         Operation operation = operations.remove(progressCompleteEvent.getProgressOperationId());
+        if (operation == null) {
+            return;
+        }
         completeOperation(progressCompleteEvent, operation);
     }
 

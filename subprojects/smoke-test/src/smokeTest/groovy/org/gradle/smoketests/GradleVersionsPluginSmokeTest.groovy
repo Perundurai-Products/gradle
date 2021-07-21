@@ -16,9 +16,13 @@
 
 package org.gradle.smoketests
 
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
+
 import static org.gradle.testkit.runner.TaskOutcome.SUCCESS
 
-class GradleVersionsPluginSmokeTest extends AbstractSmokeTest {
+class GradleVersionsPluginSmokeTest extends AbstractPluginValidatingSmokeTest {
+
+    @ToBeFixedForConfigurationCache(because = "Task.getProject() during execution")
     def 'can check for updated versions'() {
         given:
         buildFile << """
@@ -28,17 +32,17 @@ class GradleVersionsPluginSmokeTest extends AbstractSmokeTest {
 
             subprojects {
                 apply plugin: 'java'
-                
-                ${jcenterRepository()}
+
+                ${mavenCentralRepository()}
             }
             project(":sub1") {
                 dependencies {
-                    compile group: 'log4j', name: 'log4j', version: '1.2.14'
+                    implementation group: 'log4j', name: 'log4j', version: '1.2.14'
                 }
             }
             project(":sub2") {
                 dependencies {
-                    compile group: 'junit', name: 'junit', version: '4.10'
+                    implementation group: 'junit', name: 'junit', version: '4.10'
                 }
             }
         """
@@ -53,7 +57,14 @@ class GradleVersionsPluginSmokeTest extends AbstractSmokeTest {
         result.task(':dependencyUpdates').outcome == SUCCESS
         result.output.contains("- junit:junit [4.10 -> 4.13")
         result.output.contains("- log4j:log4j [1.2.14 -> 1.2.17]")
-        
+
         file("build/dependencyUpdates/report.txt").exists()
+    }
+
+    @Override
+    Map<String, Versions> getPluginsToValidate() {
+        [
+            'com.github.ben-manes.versions': Versions.of(TestedVersions.gradleVersions)
+        ]
     }
 }

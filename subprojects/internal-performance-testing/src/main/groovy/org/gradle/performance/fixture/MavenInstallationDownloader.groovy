@@ -31,11 +31,11 @@ class MavenInstallationDownloader {
     private final static Lock LOCK = new ReentrantLock()
     private final File installsRoot
 
-    public MavenInstallationDownloader(File installsRoot) {
+    MavenInstallationDownloader(File installsRoot) {
         this.installsRoot = installsRoot
     }
 
-    public MavenInstallation getMavenInstallation(String mavenVersion) {
+    MavenInstallation getMavenInstallation(String mavenVersion) {
         LOCK.lock()
         try {
             def home = mavenInstallDirectory(installsRoot, mavenVersion)
@@ -84,7 +84,7 @@ class MavenInstallationDownloader {
 
     private static String fetchPreferredUrl(String mavenVersion) {
         // Use ASF preferred mirror resolution
-        def url = "http://www.apache.org/dyn/closer.cgi/maven/maven-3/$mavenVersion/binaries/apache-maven-$mavenVersion-bin.zip?as_json=1"
+        def url = "https://www.apache.org/dyn/closer.cgi/maven/maven-3/$mavenVersion/binaries/apache-maven-$mavenVersion-bin.zip?as_json=1"
         def parsed = new JsonSlurper().parse(new URL(url))
         parsed.preferred + parsed.path_info
     }

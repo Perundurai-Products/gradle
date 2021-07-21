@@ -22,11 +22,11 @@ import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.junit.Rule
 import spock.lang.Specification
 
-import static org.gradle.util.TextUtil.toPlatformLineSeparators
+import static org.gradle.util.internal.TextUtil.toPlatformLineSeparators
 
 class ProfileReportRendererTest extends Specification {
 
-    @Rule TestNameTestDirectoryProvider temp = new TestNameTestDirectoryProvider()
+    @Rule TestNameTestDirectoryProvider temp = new TestNameTestDirectoryProvider(getClass())
 
     def "renders report"() {
         def model = new BuildProfile(new StartParameter())
@@ -116,7 +116,7 @@ class ProfileReportRendererTest extends Specification {
 <td class="numeric">0.700s</td>
 </tr>
 <tr>
-<td>Settings and BuildSrc</td>
+<td>Settings and buildSrc</td>
 <td class="numeric">2.300s</td>
 </tr>
 <tr>

@@ -19,16 +19,16 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import org.gradle.api.NonNullApi;
 import org.gradle.api.internal.TaskOutputsInternal;
-import org.gradle.api.logging.LogLevel;
-import org.gradle.api.logging.Logger;
-import org.gradle.api.logging.Logging;
 import org.gradle.api.tasks.WorkResult;
 import org.gradle.api.tasks.WorkResults;
 import org.gradle.cache.PersistentStateCache;
+import org.gradle.internal.file.Deleter;
 import org.gradle.internal.hash.HashCode;
 import org.gradle.language.base.internal.compile.Compiler;
-import org.gradle.language.base.internal.tasks.SimpleStaleClassCleaner;
+import org.gradle.language.base.internal.tasks.StaleOutputCleaner;
 import org.gradle.nativeplatform.toolchain.internal.NativeCompileSpec;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.util.Collections;
@@ -36,16 +36,24 @@ import java.util.List;
 
 @NonNullApi
 public class IncrementalNativeCompiler<T extends NativeCompileSpec> implements Compiler<T> {
-    private final Logger logger = Logging.getLogger(IncrementalNativeCompiler.class);
+    private final Logger logger = LoggerFactory.getLogger(IncrementalNativeCompiler.class);
 
     private final Compiler<T> delegateCompiler;
     private final TaskOutputsInternal outputs;
+    private final Deleter deleter;
     private final PersistentStateCache<CompilationState> compileStateCache;
     private final IncrementalCompilation incrementalCompilation;
 
-    public IncrementalNativeCompiler(TaskOutputsInternal outputs, Compiler<T> delegateCompiler, PersistentStateCache<CompilationState> compileStateCache, IncrementalCompilation incrementalCompilation) {
+    public IncrementalNativeCompiler(
+        TaskOutputsInternal outputs,
+        Compiler<T> delegateCompiler,
+        Deleter deleter,
+        PersistentStateCache<CompilationState> compileStateCache,
+        IncrementalCompilation incrementalCompilation
+    ) {
         this.outputs = outputs;
         this.delegateCompiler = delegateCompiler;
+        this.deleter = deleter;
         this.compileStateCache = compileStateCache;
         this.incrementalCompilation = incrementalCompilation;
     }
@@ -87,7 +95,7 @@ public class IncrementalNativeCompiler<T extends NativeCompileSpec> implements C
                 } else {
                     boolean containsHeader = headers.contains(header);
                     if (containsHeader) {
-                        logger.log(LogLevel.WARN, getCantUsePCHMessage(spec.getPreCompiledHeader(), sourceFile));
+                        logger.warn(getCantUsePCHMessage(spec.getPreCompiledHeader(), sourceFile));
                     }
                 }
             }
@@ -124,9 +132,6 @@ public class IncrementalNativeCompiler<T extends NativeCompileSpec> implements C
     }
 
     private boolean cleanPreviousOutputs(NativeCompileSpec spec) {
-        SimpleStaleClassCleaner cleaner = new SimpleStaleClassCleaner(outputs);
-        cleaner.addDirToClean(spec.getObjectFileDir());
-        cleaner.execute();
-        return cleaner.getDidWork();
+        return StaleOutputCleaner.cleanOutputs(deleter, outputs.getPreviousOutputFiles(), spec.getObjectFileDir());
     }
 }

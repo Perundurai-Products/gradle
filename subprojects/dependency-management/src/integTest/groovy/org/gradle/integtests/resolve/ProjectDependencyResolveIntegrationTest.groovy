@@ -17,17 +17,15 @@ package org.gradle.integtests.resolve
 
 import groovy.transform.NotYetImplemented
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.integtests.fixtures.FluidDependenciesResolveRunner
-import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
+import org.gradle.integtests.fixtures.extensions.FluidDependenciesResolveTest
 import org.gradle.integtests.fixtures.resolve.ResolveTestFixture
-import org.junit.runner.RunWith
-import spock.lang.IgnoreIf
 import spock.lang.Issue
 
-@RunWith(FluidDependenciesResolveRunner)
+@FluidDependenciesResolveTest
 class ProjectDependencyResolveIntegrationTest extends AbstractIntegrationSpec {
     def setup() {
-        new ResolveTestFixture(buildFile).addDefaultVariantDerivationStrategy()
+        new ResolveTestFixture(buildFile, "compile").addDefaultVariantDerivationStrategy()
     }
 
     def "project dependency includes artifacts and transitive dependencies of default configuration in target project"() {
@@ -53,8 +51,8 @@ project(":a") {
         'default' "org.other:externalB:2.1"
     }
     task jar(type: Jar) {
-        baseName = 'a'
-        destinationDir = buildDir
+        archiveBaseName = 'a'
+        destinationDirectory = buildDir
     }
     artifacts { api jar }
 }
@@ -129,7 +127,7 @@ project(":b") {
         mavenRepo.module("org.other", "externalA", "1.2").publish()
 
         and:
-        file('settings.gradle') << """rootProject.name='test' 
+        file('settings.gradle') << """rootProject.name='test'
 include 'a', 'b'"""
 
         and:
@@ -148,7 +146,7 @@ project(":a") {
             because 'also check dependency reasons'
         }
     }
-    task jar(type: Jar) { baseName = 'a' }
+    task jar(type: Jar) { archiveBaseName = 'a' }
     artifacts { api jar }
 }
 project(":b") {
@@ -167,7 +165,7 @@ project(":b") {
     }
 }
 """
-        def resolve = new ResolveTestFixture(buildFile)
+        def resolve = new ResolveTestFixture(buildFile, "compile")
 
         when:
         resolve.prepare()
@@ -187,7 +185,7 @@ project(":b") {
                     variant('runtime')
                     module('org.other:externalA:1.2') {
                         byReason('also check dependency reasons')
-                        variant('runtime', ['org.gradle.status': 'release', 'org.gradle.component.category':'library', 'org.gradle.usage':'java-runtime'])
+                        variant('runtime', ['org.gradle.status': 'release', 'org.gradle.category':'library', 'org.gradle.usage':'java-runtime', 'org.gradle.libraryelements': 'jar'])
                     }
                 }
             }
@@ -208,10 +206,10 @@ project(':a') {
         configA2
     }
     task A1jar(type: Jar) {
-        archiveName = 'A1.jar'
+        archiveFileName = 'A1.jar'
     }
     task A2jar(type: Jar) {
-        archiveName = 'A2.jar'
+        archiveFileName = 'A2.jar'
     }
     artifacts {
         configA1 A1jar
@@ -292,8 +290,8 @@ project(':b') {
             configurations { compile }
             task configureJar {
                 doLast {
-                    tasks.aJar.extension = "txt"
-                    tasks.aJar.classifier = "modified"
+                    tasks.aJar.archiveExtension = "txt"
+                    tasks.aJar.archiveClassifier = "modified"
                 }
             }
             task aJar(type: Jar) {
@@ -335,10 +333,13 @@ allprojects {
 }
 
 project(":a") {
-    configurations { 'default' {} }
-    dependencies { 'default' 'group:externalA:1.5' }
-    task xJar(type: Jar) { baseName='x' }
-    task yJar(type: Jar) { baseName='y' }
+    configurations {
+        deps
+        'default' { extendsFrom deps }
+    }
+    dependencies { deps 'group:externalA:1.5' }
+    task xJar(type: Jar) { archiveBaseName='x' }
+    task yJar(type: Jar) { archiveBaseName='y' }
     artifacts { 'default' xJar, yJar }
 }
 
@@ -360,6 +361,7 @@ project(":b") {
         executedAndNotSkipped ":a:yJar"
     }
 
+    @ToBeFixedForConfigurationCache
     def "reports project dependency that refers to an unknown artifact"() {
         given:
         file('settings.gradle') << """
@@ -378,6 +380,7 @@ project(":b") {
     dependencies { compile(project(':a')) { artifact { name = 'b'; type = 'jar' } } }
     task test {
         inputs.files configurations.compile
+        outputs.upToDateWhen { false }
         doFirst {
             configurations.compile.files.collect { it.name }
         }
@@ -408,17 +411,17 @@ allprojects {
 }
 project(':a') {
     dependencies {
-        compile 'group:externalA:1.5'
-        compile files('libs/externalB.jar')
+        implementation 'group:externalA:1.5'
+        implementation files('libs/externalB.jar')
     }
 }
 project(':b') {
     dependencies {
-        compile project(':a'), { transitive = false }
+        implementation project(':a'), { transitive = false }
     }
-    task listJars(dependsOn: configurations.compile) {
+    task listJars(dependsOn: configurations.runtimeClasspath) {
         doLast {
-            assert configurations.compile.collect { it.name } == ['a.jar']
+            assert configurations.runtimeClasspath.collect { it.name } == ['a.jar']
         }
     }
 }
@@ -439,8 +442,11 @@ project(':b') {
 subprojects {
     apply plugin: 'base'
     configurations {
-        'default'
+        first
         other
+        'default' {
+            extendsFrom first
+        }
     }
     task jar(type: Jar)
     artifacts {
@@ -450,25 +456,25 @@ subprojects {
 
 project('a') {
     dependencies {
-        'default' project(':b')
+        first project(':b')
         other project(':b')
     }
     task listJars {
-        dependsOn configurations.default
+        dependsOn configurations.first
         dependsOn configurations.other
         doFirst {
-            def jars = configurations.default.collect { it.name } as Set
+            def jars = configurations.first.collect { it.name } as Set
             assert jars == ['a.jar', 'b.jar', 'c.jar'] as Set
 
             jars = configurations.other.collect { it.name } as Set
             assert jars == ['a.jar', 'b.jar', 'c.jar'] as Set
 
             // Check type of root component
-            def defaultResult = configurations.default.incoming.resolutionResult
+            def defaultResult = configurations.first.incoming.resolutionResult
             def defaultRootId = defaultResult.root.id
             assert defaultRootId instanceof ProjectComponentIdentifier
 
-            def otherResult = configurations.default.incoming.resolutionResult
+            def otherResult = configurations.other.incoming.resolutionResult
             def otherRootId = otherResult.root.id
             assert otherRootId instanceof ProjectComponentIdentifier
         }
@@ -477,13 +483,13 @@ project('a') {
 
 project('b') {
     dependencies {
-        'default' project(':c')
+        first project(':c')
     }
 }
 
 project('c') {
     dependencies {
-        'default' project(':a')
+        first project(':a')
     }
 }
 """
@@ -542,7 +548,6 @@ project('c') {
 
     // this test is largely covered by other tests, but does ensure that there is nothing special about
     // project dependencies that are “built” by built in plugins like the Java plugin's created jars
-    @IgnoreIf({ GradleContextualExecuter.parallel })
     def "can use zip files as project dependencies"() {
         given:
         file("settings.gradle") << "include 'a'; include 'b'"
@@ -582,6 +587,7 @@ project('c') {
         file("b/build/copied/a-1.0.zip").exists()
     }
 
+    @ToBeFixedForConfigurationCache(because = "Task.getProject() during execution")
     def "resolving configuration with project dependency marks dependency's configuration as observed"() {
         settingsFile << "include 'api'; include 'impl'"
 
@@ -619,11 +625,11 @@ project('c') {
         fails("impl:check")
 
         then:
-        failure.assertHasCause "Cannot change dependencies of configuration ':api:conf' after it has been included in dependency resolution"
+        failure.assertHasCause "Cannot change dependencies of dependency configuration ':api:conf' after it has been included in dependency resolution"
     }
 
     @Issue(["GRADLE-3330", "GRADLE-3362"])
-    def "project dependency can resolve multiple artifacts from target project that are differentiated by archiveName only"() {
+    def "project dependency can resolve multiple artifacts from target project that are differentiated by archiveFileName only"() {
         given:
         file('settings.gradle') << "include 'a', 'b'"
 
@@ -636,13 +642,13 @@ project(':a') {
         configTwo
     }
     task A1jar(type: Jar) {
-        archiveName = 'A1.jar'
+        archiveFileName = 'A1.jar'
     }
     task A2jar(type: Jar) {
-        archiveName = 'A2.jar'
+        archiveFileName = 'A2.jar'
     }
     task A3jar(type: Jar) {
-        archiveName = 'A3.jar'
+        archiveFileName = 'A3.jar'
     }
     artifacts {
         configOne A1jar

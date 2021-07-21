@@ -109,24 +109,22 @@ assert 'value' == doStuff.someProp
 
     @Test
     void canExecuteExternalScriptFromSettingsScript() {
+
         testFile('settings.gradle') << ''' apply { from 'other.gradle' } '''
         testFile('other.gradle') << ''' include 'child' '''
         testFile('build.gradle') << ''' assert ['child'] == subprojects*.name '''
 
-        inTestDirectory().withTaskList().run()
+        inTestDirectory().withTasks("help").run()
     }
 
     @Test
     void canExecuteExternalScriptFromInitScript() {
         TestFile initScript = testFile('init.gradle') << ''' apply { from 'other.gradle' } '''
         testFile('other.gradle') << '''
-addListener(new ListenerImpl())
-class ListenerImpl extends BuildAdapter {
-    public void projectsEvaluated(Gradle gradle) {
-        gradle.rootProject.task('doStuff')
-    }
-}
-'''
+            projectsEvaluated {
+                gradle.rootProject.task('doStuff')
+            }
+        '''
         inTestDirectory().usingInitScript(initScript).withTasks('doStuff').run()
     }
 
@@ -151,11 +149,11 @@ class ListenerImpl extends BuildAdapter {
         script << """
             task doStuff
             assert buildscript.sourceFile == null
-            assert "http://localhost:$server.port/external.gradle" == buildscript.sourceURI as String
+            assert "${server.uri}/external.gradle" == buildscript.sourceURI as String
 """
 
         testFile('build.gradle') << """
-            apply from: 'http://localhost:$server.port/external.gradle'
+            apply from: '${server.uri}/external.gradle'
             defaultTasks 'doStuff'
 """
 

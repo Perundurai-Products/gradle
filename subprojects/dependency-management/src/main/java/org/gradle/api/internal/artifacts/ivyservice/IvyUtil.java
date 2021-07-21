@@ -18,7 +18,7 @@ package org.gradle.api.internal.artifacts.ivyservice;
 import org.apache.ivy.core.module.id.ModuleId;
 import org.apache.ivy.core.module.id.ModuleRevisionId;
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier;
-import org.gradle.util.GUtil;
+import org.gradle.util.internal.GUtil;
 
 import java.util.Map;
 
@@ -40,11 +40,11 @@ public class IvyUtil {
         return GUtil.elvis(value, "");
     }
 
-    public static ModuleRevisionId createModuleRevisionId(String org, String name, String branch, String rev, Map extraAttributes) {
+    public static ModuleRevisionId createModuleRevisionId(String org, String name, String branch, String rev, Map<String, String> extraAttributes) {
         return createModuleRevisionId(org, name, branch, rev, extraAttributes, true);
     }
 
-    public static ModuleRevisionId createModuleRevisionId(String org, String name, String branch, String revConstraint, Map extraAttributes, boolean replaceNullBranchWithDefault) {
+    public static ModuleRevisionId createModuleRevisionId(String org, String name, String branch, String revConstraint, Map<String, String> extraAttributes, boolean replaceNullBranchWithDefault) {
         synchronized (MODULE_ID_LOCK) {
             return ModuleRevisionId.newInstance(org, name, branch, revConstraint, extraAttributes, replaceNullBranchWithDefault);
         }

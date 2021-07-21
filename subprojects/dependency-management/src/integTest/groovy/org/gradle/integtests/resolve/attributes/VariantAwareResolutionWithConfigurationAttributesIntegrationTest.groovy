@@ -18,11 +18,11 @@
 package org.gradle.integtests.resolve.attributes
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.integtests.fixtures.FluidDependenciesResolveRunner
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
+import org.gradle.integtests.fixtures.extensions.FluidDependenciesResolveTest
 import org.gradle.test.fixtures.archive.JarTestFixture
-import org.junit.runner.RunWith
 
-@RunWith(FluidDependenciesResolveRunner)
+@FluidDependenciesResolveTest
 class VariantAwareResolutionWithConfigurationAttributesIntegrationTest extends AbstractIntegrationSpec {
 
     def setup() {
@@ -48,28 +48,33 @@ class VariantAwareResolutionWithConfigurationAttributesIntegrationTest extends A
                         def buildTypes = ['debug', 'release']
                         def flavors = ['free', 'paid']
                         def processResources = p.tasks.processResources
-                        p.configurations.compile.canBeResolved = false
-                        p.configurations.compile.canBeConsumed = false
                         buildTypes.each { bt ->
                             flavors.each { f ->
-                                String baseName = "compile${f.capitalize()}${bt.capitalize()}"
-                                def compileConfig = p.configurations.create(baseName) {
-                                    extendsFrom p.configurations.compile
+                                String baseName = "${f.capitalize()}${bt.capitalize()}"
+                                def implementationConfig = p.configurations.create("implementation$baseName") {
+                                    extendsFrom p.configurations.implementation
+                                    canBeConsumed = false
+                                    canBeResolved = false
+                                }
+                                def compileConfig = p.configurations.create("compile$baseName") {
+                                    extendsFrom p.configurations.implementation
+                                    canBeConsumed = true
                                     canBeResolved = false
                                     attributes.attribute(buildType, bt)
                                     attributes.attribute(flavor, f)
                                     attributes.attribute(usage, 'compile')
                                 }
-                                def _compileConfig = p.configurations.create("_$baseName") {
-                                    extendsFrom p.configurations.compile
+                                def _compileConfig = p.configurations.create("_compile$baseName") {
+                                    extendsFrom implementationConfig
                                     canBeConsumed = false
+                                    canBeResolved = true
                                     attributes.attribute(buildType, bt)
                                     attributes.attribute(flavor, f)
                                     attributes.attribute(usage, 'compile')
                                 }
                                 def mergedResourcesConf = p.configurations.create("resources${f.capitalize()}${bt.capitalize()}") {
-                                    extendsFrom p.configurations.compile
-                                    
+                                    extendsFrom p.configurations.implementation
+
                                     attributes.attribute(buildType, bt)
                                     attributes.attribute(flavor, f)
                                     attributes.attribute(usage, 'resources')
@@ -78,7 +83,7 @@ class VariantAwareResolutionWithConfigurationAttributesIntegrationTest extends A
                                 def compileTask = p.tasks.create("compileJava${f.capitalize()}${bt.capitalize()}", JavaCompile) { task ->
                                     def taskName = task.name
                                     task.source(p.tasks.compileJava.source)
-                                    task.destinationDir = project.file("${p.buildDir}/classes/$taskName")
+                                    task.destinationDirectory = project.file("${p.buildDir}/classes/$taskName")
                                     task.classpath = _compileConfig
                                     task.doFirst {
                                        // this is only for assertions in tests
@@ -86,23 +91,25 @@ class VariantAwareResolutionWithConfigurationAttributesIntegrationTest extends A
                                     }
                                 }
                                 def mergeResourcesTask = p.tasks.create("merge${f.capitalize()}${bt.capitalize()}Resources", Zip) { task ->
-                                    task.baseName = "resources-${p.name}-${f}${bt}"
+                                    task.archiveBaseName = "resources-${p.name}-${f}${bt}"
                                     task.from mergedResourcesConf
                                 }
                                 def aarTask = p.tasks.create("${f}${bt.capitalize()}Aar", Jar) { task ->
                                     // it's called AAR to reflect something that bundles everything
+                                    task.dependsOn compileTask
                                     task.dependsOn mergeResourcesTask
-                                    task.baseName = "${p.name}-${f}${bt}"
-                                    task.extension = 'aar'
-                                    task.from compileTask.outputs.files
+                                    task.archiveBaseName = "${p.name}-${f}${bt}"
+                                    task.archiveExtension = 'aar'
+                                    task.from compileTask.destinationDirectory
                                     task.from p.zipTree(mergeResourcesTask.outputs.files.singleFile)
                                 }
                                 def jarTask = p.tasks.create("${f}${bt.capitalize()}Jar", Jar) { task ->
-                                    task.baseName = "${p.name}-${f}${bt}"
-                                    task.from compileTask.outputs.files
+                                    task.dependsOn compileTask
+                                    task.archiveBaseName = "${p.name}-${f}${bt}"
+                                    task.from compileTask.destinationDirectory
                                 }
-                                p.artifacts.add(baseName, jarTask)
-                                p.artifacts.add("_$baseName", aarTask)
+                                p.artifacts.add("compile$baseName", jarTask)
+                                p.artifacts.add("_compile$baseName", aarTask)
                                 //p.artifacts.add(mergedResourcesConf.name, mergeResourcesTask)
                             }
                         }
@@ -135,13 +142,14 @@ class VariantAwareResolutionWithConfigurationAttributesIntegrationTest extends A
         noExceptionThrown()
     }
 
+    @ToBeFixedForConfigurationCache
     def "compiling project variant doesn't imply execution of other variants build tasks"() {
         def projectDir = new FileTreeBuilder(testDirectory)
         given:
         projectDir {
             withVariants(buildFile)
             withExternalDependencies(buildFile, '''
-                _compileFreeDebug 'org.apache.commons:commons-lang3:3.5'
+                implementationFreeDebug 'org.apache.commons:commons-lang3:3.5'
             ''')
             src {
                 main {
@@ -169,13 +177,14 @@ class VariantAwareResolutionWithConfigurationAttributesIntegrationTest extends A
         notExecuted ':compileJavaPaidRelease'
     }
 
+    @ToBeFixedForConfigurationCache
     def "consuming subproject variant builds the project with the appropriate tasks"() {
         given:
         subproject('core') {
             def buildDotGradle = file('build.gradle')
             withVariants(buildDotGradle)
             withExternalDependencies(buildDotGradle, '''
-                _compileFreeDebug 'org.apache.commons:commons-lang3:3.5'
+                implementationFreeDebug 'org.apache.commons:commons-lang3:3.5'
             ''')
             src {
                 main {
@@ -207,7 +216,7 @@ class VariantAwareResolutionWithConfigurationAttributesIntegrationTest extends A
         subproject('client') {
             def buildDotGradle = file('build.gradle')
             withVariants(buildDotGradle)
-            withDependencies(buildDotGradle, 'compile project(":core")')
+            withDependencies(buildDotGradle, 'implementation project(":core")')
             src {
                 main {
                     resources {
@@ -265,7 +274,7 @@ class VariantAwareResolutionWithConfigurationAttributesIntegrationTest extends A
 
     private static File withExternalDependencies(File buildFile, String dependenciesBlock) {
         buildFile << """
-            ${jcenterRepository()}
+            ${mavenCentralRepository()}
             dependencies {
                 $dependenciesBlock
             }

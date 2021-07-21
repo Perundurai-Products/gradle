@@ -65,9 +65,11 @@ public class DefaultAntBuilder extends BasicAntBuilder implements GroovyObject {
         throw new MissingPropertyException(name, getClass());
     }
 
+    @Override
     public Map<String, Object> getProperties() {
         ObservableMap map = new ObservableMap(getProject().getProperties());
         map.addPropertyChangeListener(new PropertyChangeListener() {
+            @Override
             public void propertyChange(PropertyChangeEvent event) {
                 doSetProperty(event.getPropertyName(), event.getNewValue());
             }
@@ -77,9 +79,11 @@ public class DefaultAntBuilder extends BasicAntBuilder implements GroovyObject {
         return castMap;
     }
 
+    @Override
     public Map<String, Object> getReferences() {
         ObservableMap map = new ObservableMap(getProject().getReferences());
         map.addPropertyChangeListener(new PropertyChangeListener() {
+            @Override
             public void propertyChange(PropertyChangeEvent event) {
                 getProject().addReference(event.getPropertyName(), event.getNewValue());
             }
@@ -89,13 +93,27 @@ public class DefaultAntBuilder extends BasicAntBuilder implements GroovyObject {
         return castMap;
     }
 
+    @Override
     public void importBuild(Object antBuildFile) {
         importBuild(antBuildFile, Transformers.<String>noOpTransformer());
     }
 
+    @Override
+    public void importBuild(Object antBuildFile, String baseDirectory) {
+        importBuild(antBuildFile, baseDirectory, Transformers.<String>noOpTransformer());
+    }
+
+    @Override
     public void importBuild(Object antBuildFile, Transformer<? extends String, ? super String> taskNamer) {
+        importBuild(antBuildFile, null, taskNamer);
+    }
+
+    @Override
+    public void importBuild(Object antBuildFile, String baseDirectory, Transformer<? extends String, ? super String> taskNamer) {
         File file = gradleProject.file(antBuildFile);
-        final File baseDir = file.getParentFile();
+
+        Optional<Object> baseDirectoryOptional = Optional.ofNullable(baseDirectory);
+        final File baseDir = gradleProject.file(baseDirectoryOptional.orElse(file.getParentFile().getAbsolutePath()));
 
         Set<String> existingAntTargets = new HashSet<String>(getAntProject().getTargets().keySet());
         File oldBaseDir = getAntProject().getBaseDir();
@@ -149,6 +167,7 @@ public class DefaultAntBuilder extends BasicAntBuilder implements GroovyObject {
             if (previous != null) {
                 final String finalPrevious = previous;
                 tasks.all(new Action<Task>() {
+                    @Override
                     public void execute(Task task) {
                         if (task.getName().equals(dependency)) {
                             task.shouldRunAfter(finalPrevious);
@@ -178,6 +197,7 @@ public class DefaultAntBuilder extends BasicAntBuilder implements GroovyObject {
             this.taskDependencyNames = taskDependencyNames;
         }
 
+        @Override
         public Set<? extends Task> getDependencies(Task task) {
             Set<Task> tasks = Sets.newHashSetWithExpectedSize(taskDependencyNames.size());
             for (String dependedOnTaskName : taskDependencyNames) {

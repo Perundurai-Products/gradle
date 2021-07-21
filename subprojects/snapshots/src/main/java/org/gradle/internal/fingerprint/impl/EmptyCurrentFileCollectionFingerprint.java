@@ -17,14 +17,12 @@
 package org.gradle.internal.fingerprint.impl;
 
 import com.google.common.collect.ImmutableMultimap;
-import org.gradle.internal.change.ChangeVisitor;
-import org.gradle.internal.change.FileChange;
+import com.google.common.collect.ImmutableSet;
 import org.gradle.internal.fingerprint.CurrentFileCollectionFingerprint;
-import org.gradle.internal.fingerprint.FileCollectionFingerprint;
 import org.gradle.internal.fingerprint.FileSystemLocationFingerprint;
 import org.gradle.internal.hash.HashCode;
 import org.gradle.internal.hash.Hashing;
-import org.gradle.internal.snapshot.FileSystemSnapshotVisitor;
+import org.gradle.internal.snapshot.FileSystemSnapshot;
 
 import java.util.Collections;
 import java.util.Map;
@@ -37,16 +35,6 @@ public class EmptyCurrentFileCollectionFingerprint implements CurrentFileCollect
 
     public EmptyCurrentFileCollectionFingerprint(String identifier) {
         this.identifier = identifier;
-    }
-
-    @Override
-    public boolean visitChangesSince(FileCollectionFingerprint oldFingerprint, final String title, boolean includeAdded, ChangeVisitor visitor) {
-        for (Map.Entry<String, FileSystemLocationFingerprint> entry : oldFingerprint.getFingerprints().entrySet()) {
-            if (!visitor.visitChange(FileChange.removed(entry.getKey(), title, entry.getValue().getType()))) {
-                return false;
-            }
-        }
-        return true;
     }
 
     @Override
@@ -65,11 +53,23 @@ public class EmptyCurrentFileCollectionFingerprint implements CurrentFileCollect
     }
 
     @Override
-    public void accept(FileSystemSnapshotVisitor visitor) {
+    public FileSystemSnapshot getSnapshot() {
+        return FileSystemSnapshot.EMPTY;
     }
 
+    @Override
     public ImmutableMultimap<String, HashCode> getRootHashes() {
         return ImmutableMultimap.of();
+    }
+
+    @Override
+    public ImmutableSet<String> getRootPaths() {
+        return ImmutableSet.of();
+    }
+
+    @Override
+    public HashCode getStrategyConfigurationHash() {
+        return SIGNATURE;
     }
 
     @Override
@@ -79,6 +79,6 @@ public class EmptyCurrentFileCollectionFingerprint implements CurrentFileCollect
 
     @Override
     public String toString() {
-        return "EMPTY{" + identifier + "}";
+        return identifier + "{EMPTY}";
     }
 }

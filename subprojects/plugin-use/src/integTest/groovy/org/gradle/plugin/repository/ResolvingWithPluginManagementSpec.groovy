@@ -38,7 +38,7 @@ class ResolvingWithPluginManagementSpec extends AbstractDependencyResolutionTest
         def taskName = "pluginTask"
 
         pluginBuilder.addPluginWithPrintlnTask(taskName, message, "org.example.plugin")
-        if(repository instanceof  MavenRepository) {
+        if (repository instanceof MavenRepository) {
             pluginBuilder.publishAs("org.example.plugin:plugin:1.0", repository, executer)
         } else if (repository instanceof IvyRepository) {
             pluginBuilder.publishAs("org.example.plugin:plugin:1.0", repository, executer)
@@ -57,6 +57,7 @@ class ResolvingWithPluginManagementSpec extends AbstractDependencyResolutionTest
           }
         """
     }
+
     def 'setting different version in resolutionStrategy will affect plugin choice'() {
         given:
         publishTestPlugin()
@@ -129,7 +130,7 @@ class ResolvingWithPluginManagementSpec extends AbstractDependencyResolutionTest
         useCustomRepository("""
             resolutionStrategy.eachPlugin {
                 if(requested.id.name == 'plugin') {
-                    useVersion("+")
+                    useVersion("x")
                 }
             }
         """)
@@ -138,7 +139,35 @@ class ResolvingWithPluginManagementSpec extends AbstractDependencyResolutionTest
         fails("pluginTask")
 
         then:
-        failure.assertHasDescription("Plugin [id: 'org.example.plugin', version: '+'] was not found")
+        failure.assertHasDescription("Plugin [id: 'org.example.plugin', version: 'x'] was not found")
+    }
+
+    def 'when version range is specified, resolution succeeds'() {
+        given:
+        publishTestPlugin()
+        buildScript """
+          plugins {
+              id "org.example.plugin" version '1.2'
+          }
+          plugins.withType(org.gradle.test.TestPlugin) {
+            println "I'm here"
+          }
+        """
+
+        and:
+        useCustomRepository("""
+            resolutionStrategy.eachPlugin {
+                if(requested.id.name == 'plugin') {
+                    useVersion("1.+")
+                }
+            }
+        """)
+
+        when:
+        succeeds("pluginTask")
+
+        then:
+        output.contains("I'm here")
     }
 
     def 'when invalid artifact version is specified, resolution fails'() {
@@ -157,7 +186,7 @@ class ResolvingWithPluginManagementSpec extends AbstractDependencyResolutionTest
         useCustomRepository("""
             resolutionStrategy.eachPlugin {
                 if(requested.id.name == 'plugin') {
-                    useModule("org.example.plugin:plugin:+")
+                    useModule("org.example.plugin:plugin:x")
                 }
             }
         """)
@@ -166,7 +195,35 @@ class ResolvingWithPluginManagementSpec extends AbstractDependencyResolutionTest
         fails("pluginTask")
 
         then:
-        failure.assertHasDescription("Plugin [id: 'org.example.plugin', version: '1.2', artifact: 'org.example.plugin:plugin:+'] was not found")
+        failure.assertHasDescription("Plugin [id: 'org.example.plugin', version: '1.2', artifact: 'org.example.plugin:plugin:x'] was not found")
+    }
+
+    def 'when artifact version range is specified, resolution succeeds'() {
+        given:
+        publishTestPlugin()
+        buildScript """
+          plugins {
+              id "org.example.plugin" version '1.2'
+          }
+          plugins.withType(org.gradle.test.TestPlugin) {
+            println "I'm here"
+          }
+        """
+
+        and:
+        useCustomRepository("""
+            resolutionStrategy.eachPlugin {
+                if(requested.id.name == 'plugin') {
+                    useModule("org.example.plugin:plugin:1.+")
+                }
+            }
+        """)
+
+        when:
+        succeeds("pluginTask")
+
+        then:
+        output.contains("I'm here")
     }
 
     def 'can specify an artifact to use'() {
@@ -294,7 +351,7 @@ class ResolvingWithPluginManagementSpec extends AbstractDependencyResolutionTest
           settingsEvaluated { settings ->
               mySettings = settings
           }
-          projectsLoaded { 
+          projectsLoaded {
             mySettings.pluginManagement.resolutionStrategy.eachPlugin {}
           }
         """

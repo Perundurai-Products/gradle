@@ -25,6 +25,7 @@ import org.gradle.api.file.FileCollection;
 import org.gradle.api.internal.CollectionCallbackActionDecorator;
 import org.gradle.api.internal.project.IsolatedAntBuilder;
 import org.gradle.api.specs.Spec;
+import org.gradle.api.tasks.Classpath;
 import org.gradle.api.tasks.InputFiles;
 import org.gradle.api.tasks.Internal;
 import org.gradle.api.tasks.Optional;
@@ -34,9 +35,8 @@ import org.gradle.api.tasks.SourceSet;
 import org.gradle.api.tasks.TaskCollection;
 import org.gradle.internal.reflect.Instantiator;
 import org.gradle.testing.jacoco.plugins.JacocoTaskExtension;
-import org.gradle.util.DeprecationLogger;
+import org.gradle.work.DisableCachingByDefault;
 
-import javax.annotation.Nullable;
 import javax.inject.Inject;
 import java.io.File;
 import java.util.Arrays;
@@ -48,6 +48,7 @@ import java.util.concurrent.Callable;
  *
  * @since 3.4
  */
+@DisableCachingByDefault(because = "Abstract super-class, not to be instantiated directly")
 public abstract class JacocoReportBase extends JacocoBase {
 
     private final ConfigurableFileCollection executionData = getProject().files();
@@ -100,17 +101,6 @@ public abstract class JacocoReportBase extends JacocoBase {
     }
 
     /**
-     * Collection of execution data files to analyze.
-     *
-     * @deprecated Use {@code getExecutionData().setFrom(...)}
-     */
-    @Deprecated
-    public void setExecutionData(FileCollection executionData) {
-        DeprecationLogger.nagUserOfDiscontinuedMethod("JacocoReportBase.setExecutionData(FileCollection)", "Use getExecutionData().from(...)");
-        this.executionData.setFrom(executionData);
-    }
-
-    /**
      * Source sets that coverage should be reported for.
      */
     @PathSensitive(PathSensitivity.RELATIVE)
@@ -121,31 +111,10 @@ public abstract class JacocoReportBase extends JacocoBase {
 
     /**
      * Source sets that coverage should be reported for.
-     * @deprecated Use {@code getSourceDirectories().setFrom(...)}
      */
-    @Deprecated
-    public void setSourceDirectories(FileCollection sourceDirectories) {
-        DeprecationLogger.nagUserOfDiscontinuedMethod("JacocoReportBase.setSourceDirectories(FileCollection)", "Use getSourceDirectories().from(...)");
-        this.sourceDirectories.setFrom(sourceDirectories);
-    }
-
-    /**
-     * Source sets that coverage should be reported for.
-     */
-    @PathSensitive(PathSensitivity.RELATIVE)
-    @InputFiles
+    @Classpath
     public ConfigurableFileCollection getClassDirectories() {
         return classDirectories;
-    }
-
-    /**
-     * Classes that coverage should be reported for.
-     * @deprecated Use {@code getClassDirectories().setFrom(...)}
-     */
-    @Deprecated
-    public void setClassDirectories(FileCollection classDirectories) {
-        DeprecationLogger.nagUserOfDiscontinuedMethod("JacocoReportBase.setClassDirectories(FileCollection)", "Use getClassDirectories().from(...)");
-        this.classDirectories.setFrom(classDirectories);
     }
 
     /**
@@ -159,21 +128,6 @@ public abstract class JacocoReportBase extends JacocoBase {
     }
 
     /**
-     * Additional class dirs that coverage data should be reported for.
-     *
-     * @deprecated Use {@code getAdditionalClassDirs().setFrom(...)}
-     */
-    @Deprecated
-    public void setAdditionalClassDirs(@Nullable FileCollection additionalClassDirs) {
-        DeprecationLogger.nagUserOfDiscontinuedMethod("JacocoReportBase.setAdditionalClassDirs(FileCollection)", "Use getAdditionalClassDirs().from(...)");
-        if (additionalClassDirs!=null) {
-            this.additionalClassDirs.setFrom(additionalClassDirs);
-        } else {
-            this.additionalClassDirs.setFrom();
-        }
-    }
-
-    /**
      * Additional source dirs for the classes coverage data is being reported for.
      */
     @Optional
@@ -181,21 +135,6 @@ public abstract class JacocoReportBase extends JacocoBase {
     @InputFiles
     public ConfigurableFileCollection getAdditionalSourceDirs() {
         return additionalSourceDirs;
-    }
-
-    /**
-     * Additional source dirs for the classes coverage data is being reported for.
-     *
-     * @deprecated Use {@code getAdditionalSourceDirs().setFrom(...)}
-     */
-    @Deprecated
-    public void setAdditionalSourceDirs(@Nullable FileCollection additionalSourceDirs) {
-        DeprecationLogger.nagUserOfDiscontinuedMethod("JacocoReportBase.setAdditionalSourceDirs(FileCollection)", "Use getAdditionalSourceDirs().from(...)");
-        if (additionalSourceDirs!=null) {
-            this.additionalSourceDirs.setFrom(additionalSourceDirs);
-        } else {
-            this.additionalSourceDirs.setFrom();
-        }
     }
 
     /**
@@ -232,13 +171,9 @@ public abstract class JacocoReportBase extends JacocoBase {
      *
      * @param tasks one or more tasks to add
      */
+    @SuppressWarnings("unchecked")
     public void executionData(TaskCollection tasks) {
-        tasks.all(new Action<Task>() {
-            @Override
-            public void execute(Task task) {
-                executionData(task);
-            }
-        });
+        tasks.all((Action<Task>) this::executionData);
     }
 
     /**

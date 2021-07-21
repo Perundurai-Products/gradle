@@ -33,7 +33,7 @@ import org.gradle.internal.component.model.ForcingDependencyMetadata;
 
 import java.util.List;
 
-public abstract class AbstractDependencyMetadataAdapter<T extends DependencyMetadata> implements DependencyMetadata<T> {
+public abstract class AbstractDependencyMetadataAdapter<T extends DependencyMetadata<T>> implements DependencyMetadata<T> {
     private final List<ModuleDependencyMetadata> container;
     private final int originalIndex;
     private final ImmutableAttributesFactory attributesFactory;
@@ -44,11 +44,11 @@ public abstract class AbstractDependencyMetadataAdapter<T extends DependencyMeta
         this.originalIndex = originalIndex;
     }
 
-    private ModuleDependencyMetadata getOriginalMetadata() {
+    protected ModuleDependencyMetadata getOriginalMetadata() {
         return container.get(originalIndex);
     }
 
-    private void updateMetadata(ModuleDependencyMetadata modifiedMetadata) {
+    protected void updateMetadata(ModuleDependencyMetadata modifiedMetadata) {
         container.set(originalIndex, modifiedMetadata);
     }
 
@@ -107,7 +107,7 @@ public abstract class AbstractDependencyMetadataAdapter<T extends DependencyMeta
         ModuleComponentSelector selector = getOriginalMetadata().getSelector();
         AttributeContainerInternal attributes = attributesFactory.mutable((AttributeContainerInternal) selector.getAttributes());
         configureAction.execute(attributes);
-        ModuleComponentSelector target = DefaultModuleComponentSelector.newSelector(selector.getModuleIdentifier(), selector.getVersionConstraint(), attributes.asImmutable());
+        ModuleComponentSelector target = DefaultModuleComponentSelector.newSelector(selector.getModuleIdentifier(), selector.getVersionConstraint(), attributes.asImmutable(), selector.getRequestedCapabilities());
         ModuleDependencyMetadata metadata = (ModuleDependencyMetadata) getOriginalMetadata().withTarget(target);
         updateMetadata(metadata);
         return Cast.uncheckedCast(this);
@@ -119,4 +119,5 @@ public abstract class AbstractDependencyMetadataAdapter<T extends DependencyMeta
             updateMetadata((ModuleDependencyMetadata) ((ForcingDependencyMetadata) originalMetadata).forced());
         }
     }
+
 }

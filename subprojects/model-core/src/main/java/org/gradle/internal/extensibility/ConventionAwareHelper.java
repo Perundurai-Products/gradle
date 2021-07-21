@@ -20,30 +20,38 @@ import groovy.lang.Closure;
 import groovy.lang.MissingPropertyException;
 import org.gradle.api.InvalidUserDataException;
 import org.gradle.api.internal.ConventionMapping;
-import org.gradle.api.internal.HasConvention;
 import org.gradle.api.internal.IConventionAware;
 import org.gradle.api.plugins.Convention;
-import org.gradle.internal.reflect.JavaReflectionUtil;
+import org.gradle.internal.Cast;
+import org.gradle.internal.deprecation.DeprecationLogger;
+import org.gradle.internal.reflect.JavaPropertyReflectionUtil;
 
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
 
-import static org.gradle.util.GUtil.uncheckedCall;
+import static org.gradle.util.internal.GUtil.uncheckedCall;
 
-public class ConventionAwareHelper implements ConventionMapping, HasConvention {
+@SuppressWarnings("deprecation")
+public class ConventionAwareHelper implements ConventionMapping, org.gradle.api.internal.HasConvention {
     //prefix internal fields with _ so that they don't get into the way of propertyMissing()
     private final Convention _convention;
     private final IConventionAware _source;
+    // These are properties that could have convention mapping applied to them
     private final Set<String> _propertyNames;
+    // These are properties that should not be allowed to use convention mapping
+    private final Set<String> _ineligiblePropertyNames;
+
     private final Map<String, MappedPropertyImpl> _mappings = new HashMap<String, MappedPropertyImpl>();
 
     public ConventionAwareHelper(IConventionAware source, Convention convention) {
         this._source = source;
         this._convention = convention;
-        this._propertyNames = JavaReflectionUtil.propertyNames(source);
+        this._propertyNames = JavaPropertyReflectionUtil.propertyNames(source);
+        this._ineligiblePropertyNames = new HashSet<>();
     }
 
     private MappedProperty map(String propertyName, MappedPropertyImpl mapping) {
@@ -52,12 +60,21 @@ public class ConventionAwareHelper implements ConventionMapping, HasConvention {
                 "You can't map a property that does not exist: propertyName=" + propertyName);
         }
 
+        if (_ineligiblePropertyNames.contains(propertyName)) {
+            DeprecationLogger.deprecateBehaviour("Using internal convention mapping with a Provider backed property.")
+                    .willBecomeAnErrorInGradle8()
+                    .withUpgradeGuideSection(7, "convention_mapping")
+                    .nagUser();
+        }
+
         _mappings.put(propertyName, mapping);
         return mapping;
     }
 
+    @Override
     public MappedProperty map(String propertyName, final Closure<?> value) {
         return map(propertyName, new MappedPropertyImpl() {
+            @Override
             public Object doGetValue(Convention convention, IConventionAware conventionAwareObject) {
                 switch (value.getMaximumNumberOfParameters()) {
                     case 0:
@@ -71,8 +88,10 @@ public class ConventionAwareHelper implements ConventionMapping, HasConvention {
         });
     }
 
+    @Override
     public MappedProperty map(String propertyName, final Callable<?> value) {
         return map(propertyName, new MappedPropertyImpl() {
+            @Override
             public Object doGetValue(Convention convention, IConventionAware conventionAwareObject) {
                 return uncheckedCall(value);
             }
@@ -81,12 +100,18 @@ public class ConventionAwareHelper implements ConventionMapping, HasConvention {
 
     public void propertyMissing(String name, Object value) {
         if (value instanceof Closure) {
-            map(name, (Closure) value);
+            map(name, Cast.<Closure<?>>uncheckedNonnullCast(value));
         } else {
             throw new MissingPropertyException(name, getClass());
         }
     }
 
+    @Override
+    public void ineligible(String propertyName) {
+        _ineligiblePropertyNames.add(propertyName);
+    }
+
+    @Override
     public <T> T getConventionValue(T actualValue, String propertyName, boolean isExplicitValue) {
         if (isExplicitValue) {
             return actualValue;
@@ -101,12 +126,13 @@ public class ConventionAwareHelper implements ConventionMapping, HasConvention {
                 useMapping = false;
             }
             if (useMapping) {
-                returnValue = (T) _mappings.get(propertyName).getValue(_convention, _source);
+                returnValue = Cast.uncheckedNonnullCast(_mappings.get(propertyName).getValue(_convention, _source));
             }
         }
         return returnValue;
     }
 
+    @Override
     public Convention getConvention() {
         return _convention;
     }

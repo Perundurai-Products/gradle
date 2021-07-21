@@ -20,65 +20,66 @@ import org.gradle.integtests.fixtures.timeout.IntegrationTestTimeout
 import org.gradle.integtests.tooling.fixture.ProgressEvents
 import org.gradle.integtests.tooling.fixture.TargetGradleVersion
 import org.gradle.integtests.tooling.fixture.TextUtil
-import org.gradle.integtests.tooling.fixture.ToolingApiSpecification
 import org.gradle.test.fixtures.maven.MavenFileRepository
 import org.gradle.test.fixtures.server.http.MavenHttpRepository
 import org.gradle.test.fixtures.server.http.RepositoryHttpServer
 import org.gradle.tooling.ProjectConnection
-import org.gradle.util.Requires
-import org.junit.Rule
-
-import static org.gradle.util.TestPrecondition.KOTLIN_SCRIPT
+import org.gradle.util.GradleVersion
 
 @IntegrationTestTimeout(300)
-@TargetGradleVersion('>=4.0 <5.1')
-class ProjectConfigurationChildrenProgressCrossVersionSpec extends ToolingApiSpecification {
+@TargetGradleVersion('>=4.0')
+class ProjectConfigurationChildrenProgressCrossVersionSpec extends AbstractProgressCrossVersionSpec {
 
-    @Rule
-    public final RepositoryHttpServer server = new RepositoryHttpServer(temporaryFolder, targetDist.version.version)
+    private RepositoryHttpServer server
+
+    def setup() {
+        server = new RepositoryHttpServer(temporaryFolder, targetDist.version.version)
+        server.before()
+    }
+
+    def cleanup() {
+        server.after()
+    }
+
+    private String expectedDisplayName(String name, String extension, String version) {
+        getTargetVersion() < GradleVersion.version("6.0") ? "$name.$extension" : "$name-$version.$extension"
+    }
+
+    private String workerActionClass(String name) {
+        if (getTargetVersion() < GradleVersion.version("6.0")) {
+            "class ${name}WorkAction implements Runnable { public void run() { } }"
+        } else {
+            "abstract class ${name}WorkAction implements WorkAction<WorkParameters.None> { public void execute() { } }"
+        }
+    }
+
+    private String workerSubmit(String actionName) {
+        if (getTargetVersion() < GradleVersion.version("6.0")) {
+            "workerExecutor.submit(${actionName}WorkAction) { c -> c.isolationMode = IsolationMode.${actionName == 'Forked' ? 'PROCESS' : 'NONE'} }"
+        } else {
+            "workerExecutor.${actionName == 'Forked' ? 'process' : 'no'}Isolation().submit(${actionName}WorkAction) { }"
+        }
+    }
 
     def "generates events for worker actions executed in-process and forked"() {
         given:
         settingsFile << "rootProject.name = 'single'"
         buildFile << """
-            import  org.gradle.workers.*
-            import java.net.URLClassLoader
-            import java.net.URL
-            import org.gradle.internal.classloader.ClasspathUtil
-            
-            class TestRunnable implements Runnable {
-                @Override public void run() {
-                    // Do nothing
-                }
-            }
-            
-            // Set up a simpler classloader that only contains what TestRunnable needs.
-            // This can be removed when the issues with long classpaths have been resolved.
-            // See https://github.com/gradle/gradle-private/issues/1486
-            ClassLoader cl = new URLClassLoader(
-                ClasspathUtil.getClasspath(TestRunnable.class.classLoader).asURLs.findAll { url ->
-                    ["scripts-remapped", "groovy-all"].any { url.toString().contains(it) }
-                } as URL[]
-            )
-            
-            def testRunnable = cl.loadClass("TestRunnable")
-            
+            import org.gradle.workers.*
+
+            ${workerActionClass('InProcess')}
+            ${workerActionClass('Forked')}
+
             task runInProcess {
                 doLast {
                     def workerExecutor = services.get(WorkerExecutor)
-                    workerExecutor.submit(testRunnable) { config ->
-                        config.isolationMode = IsolationMode.NONE
-                        config.displayName = 'My in-process worker action'
-                    }
+                    ${workerSubmit('InProcess')}
                 }
             }
             task runForked {
                 doLast {
                     def workerExecutor = services.get(WorkerExecutor)
-                    workerExecutor.submit(testRunnable) { config ->
-                        config.isolationMode = IsolationMode.PROCESS
-                        config.displayName = 'My forked worker action'
-                    }
+                    ${workerSubmit('Forked')}
                 }
             }
         """.stripIndent()
@@ -98,8 +99,8 @@ class ProjectConfigurationChildrenProgressCrossVersionSpec extends ToolingApiSpe
         events.assertIsABuild()
 
         and:
-        events.operation('Task :runInProcess').descendant('My in-process worker action')
-        events.operation('Task :runForked').descendant('My forked worker action')
+        events.operation('Task :runInProcess').descendant('InProcessWorkAction')
+        events.operation('Task :runForked').descendant('ForkedWorkAction')
     }
 
     def "does not generate events for non-existing build scripts"() {
@@ -116,7 +117,9 @@ class ProjectConfigurationChildrenProgressCrossVersionSpec extends ToolingApiSpe
         events.assertIsABuild()
 
         and:
-        events.operation('Configure project :').children.size() <= 5 //only 'Apply plugin org.gradle.help-tasks', maybe before/afterEvaluated and 2 delayed task registrations
+        events.operation('Configure project :').descendants {
+            it.descriptor.displayName.contains("Apply script")
+        }.isEmpty()
     }
 
     def "generates events for applied build scripts"() {
@@ -143,10 +146,10 @@ class ProjectConfigurationChildrenProgressCrossVersionSpec extends ToolingApiSpe
         events.assertIsABuild()
 
         and:
-        events.operation('Configure project :buildSrc').child "Apply script build.gradle to project ':buildSrc'"
-        events.operation('Configure project :').child "Apply script build.gradle to root project 'multi'"
-        events.operation('Configure project :a').child "Apply script build.gradle to project ':a'"
-        events.operation('Configure project :b').child "Apply script build.gradle to project ':b'"
+        events.operation('Configure project :buildSrc').child applyBuildScript(buildSrcFile, ':buildSrc')
+        events.operation('Configure project :').child applyBuildScriptRootProject("multi")
+        events.operation('Configure project :a').child applyBuildScript(aBuildFile, ':a')
+        events.operation('Configure project :b').child applyBuildScript(bBuildFile, ':b')
     }
 
     def "generates events for applied script plugins"() {
@@ -187,34 +190,34 @@ class ProjectConfigurationChildrenProgressCrossVersionSpec extends ToolingApiSpe
         and:
         println events.describeOperationsTree()
 
-        events.operation("Apply script ${initScript.name} to build").with { applyInitScript ->
-            applyInitScript.child "Apply script ${scriptPlugin1.name} to build"
-            applyInitScript.child "Apply script ${scriptPlugin2.name} to build"
+        events.operation(applyInitScript(initScript)).with { operation ->
+            operation.child applyInitScriptPlugin(scriptPlugin1)
+            operation.child applyInitScriptPlugin(scriptPlugin2)
         }
 
-        events.operation("Apply script ${buildSrcScript.name} to project ':buildSrc'").with { applyBuildSrc ->
-            applyBuildSrc.child "Apply script ${scriptPlugin1.name} to project ':buildSrc'"
-            applyBuildSrc.child "Apply script ${scriptPlugin2.name} to project ':buildSrc'"
+        events.operation(applyBuildScript(buildSrcScript, ':buildSrc')).with { applyBuildSrc ->
+            applyBuildSrc.child applyBuildScriptPlugin(scriptPlugin1, ':buildSrc')
+            applyBuildSrc.child applyBuildScriptPlugin(scriptPlugin2, ':buildSrc')
         }
 
-        events.operation("Apply script ${settingsFile.name} to settings '${settingsFile.parentFile.name}'").with { applySettings ->
-            applySettings.child "Apply script ${scriptPlugin1.name} to settings 'multi'"
-            applySettings.child "Apply script ${scriptPlugin2.name} to settings 'multi'"
+        events.operation(applySettingsFile()).with { applySettings ->
+            applySettings.child applySettingsScriptPlugin(scriptPlugin1, "multi")
+            applySettings.child applySettingsScriptPlugin(scriptPlugin2, "multi")
         }
 
-        events.operation("Apply script ${buildFile.name} to root project 'multi'").with { applyRootProject ->
-            applyRootProject.child "Apply script ${scriptPlugin1.name} to root project 'multi'"
-            applyRootProject.child "Apply script ${scriptPlugin2.name} to root project 'multi'"
+        events.operation(applyBuildScriptRootProject("multi")).with { applyRootProject ->
+            applyRootProject.child applyBuildScriptPluginRootProject(scriptPlugin1, "multi")
+            applyRootProject.child applyBuildScriptPluginRootProject(scriptPlugin2, "multi")
         }
 
-        events.operation("Apply script ${aBuildFile.name} to project ':a'").with { applyProjectA ->
-            applyProjectA.child "Apply script ${scriptPlugin1.name} to project ':a'"
-            applyProjectA.child "Apply script ${scriptPlugin2.name} to project ':a'"
+        events.operation(applyBuildScript(aBuildFile, ':a')).with { applyProjectA ->
+            applyProjectA.child applyBuildScriptPlugin(scriptPlugin1, ':a')
+            applyProjectA.child applyBuildScriptPlugin(scriptPlugin2, ':a')
         }
 
-        events.operation("Apply script ${bBuildFile.name} to project ':b'").with { applyProjectB ->
-            applyProjectB.child "Apply script ${scriptPlugin1.name} to project ':b'"
-            applyProjectB.child "Apply script ${scriptPlugin2.name} to project ':b'"
+        events.operation(applyBuildScript(bBuildFile, ':b')).with { applyProjectB ->
+            applyProjectB.child applyBuildScriptPlugin(scriptPlugin1, ':b')
+            applyProjectB.child applyBuildScriptPlugin(scriptPlugin1, ':b')
         }
     }
 
@@ -237,14 +240,14 @@ class ProjectConfigurationChildrenProgressCrossVersionSpec extends ToolingApiSpe
             repositories {
                maven { url '${mavenHttpRepo.uri}' }
             }
-            
+
             dependencies {
-                compile project(':a')
-                compile "group:projectB:1.0"
-                compile "group:projectC:1.+"
-                compile "group:projectD:2.0-SNAPSHOT"
+                implementation project(':a')
+                implementation "group:projectB:1.0"
+                implementation "group:projectC:1.+"
+                implementation "group:projectD:2.0-SNAPSHOT"
             }
-            configurations.compile.each { println it }
+            configurations.compileClasspath.each { println it }
         """.stripIndent()
         when:
         projectB.pom.expectGet()
@@ -268,27 +271,27 @@ class ProjectConfigurationChildrenProgressCrossVersionSpec extends ToolingApiSpe
         then:
         events.assertIsABuild()
 
-        def applyBuildScript = events.operation "Apply script build.gradle to root project 'root'"
+        def applyBuildScript = events.operation applyBuildScriptRootProject("root")
 
-        applyBuildScript.child("Resolve dependencies of :compile").with {
+        applyBuildScript.child("Resolve dependencies of :compileClasspath").with {
             it.child "Configure project :a"
-            it.descendant "Download http://localhost:${server.port}${projectB.pomPath}"
-            it.descendant "Download http://localhost:${server.port}/repo/group/projectC/maven-metadata.xml"
-            it.descendant "Download http://localhost:${server.port}${projectC.pomPath}"
-            it.descendant "Download http://localhost:${server.port}${projectD.metaDataPath}"
-            it.descendant "Download http://localhost:${server.port}${projectD.pomPath}"
+            it.descendant "Download ${server.uri}${projectB.pomPath}"
+            it.descendant "Download ${server.uri}/repo/group/projectC/maven-metadata.xml"
+            it.descendant "Download ${server.uri}${projectC.pomPath}"
+            it.descendant "Download ${server.uri}${projectD.metaDataPath}"
+            it.descendant "Download ${server.uri}${projectD.pomPath}"
         }
 
-        def resolveArtifacts = applyBuildScript.child("Resolve files of :compile")
+        def resolveArtifacts = applyBuildScript.child("Resolve files of :compileClasspath")
 
-        resolveArtifacts.child("Resolve projectB.jar (group:projectB:1.0)")
-            .child "Download http://localhost:${server.port}${projectB.artifactPath}"
+        resolveArtifacts.child("Resolve ${expectedDisplayName('projectB', 'jar', '1.0')} (group:projectB:1.0)")
+            .child "Download ${server.uri}${projectB.artifactPath}"
 
-        resolveArtifacts.child("Resolve projectC.jar (group:projectC:1.5)")
-            .child "Download http://localhost:${server.port}${projectC.artifactPath}"
+        resolveArtifacts.child("Resolve ${expectedDisplayName('projectC', 'jar', '1.5')} (group:projectC:1.5)")
+            .child "Download ${server.uri}${projectC.artifactPath}"
 
-        resolveArtifacts.child("Resolve projectD.jar (group:projectD:2.0-SNAPSHOT)", "Resolve projectD.jar (group:projectD:2.0-SNAPSHOT:${projectD.uniqueSnapshotVersion})")
-            .child "Download http://localhost:${server.port}${projectD.artifactPath}"
+        resolveArtifacts.child("Resolve ${expectedDisplayName('projectD', 'jar', '2.0-SNAPSHOT')} (group:projectD:2.0-SNAPSHOT)", "Resolve ${expectedDisplayName('projectD', 'jar', '2.0-SNAPSHOT')} (group:projectD:2.0-SNAPSHOT:${projectD.uniqueSnapshotVersion})")
+            .child "Download ${server.uri}${projectD.artifactPath}"
     }
 
     def "generates events for interleaved project configuration and dependency resolution"() {
@@ -300,17 +303,17 @@ class ProjectConfigurationChildrenProgressCrossVersionSpec extends ToolingApiSpe
         buildFile << """
             allprojects { apply plugin: 'java' }
             dependencies {
-                compile project(':a')
+                implementation project(':a')
             }
             // Triggers configuration of a due to the dependency
-            configurations.compile.each { println it }
+            configurations.compileClasspath.each { println it }
 """
-        file("a/build.gradle") << """
+        def aBuildfile = file("a/build.gradle") << """
             dependencies {
-                compile project(':b')
+                implementation project(':b')
             }
             // Triggers configuration of a due to the dependency
-            configurations.compile.each { println it }
+            configurations.compileClasspath.each { println it }
 """
 
         when:
@@ -327,19 +330,17 @@ class ProjectConfigurationChildrenProgressCrossVersionSpec extends ToolingApiSpe
 
         def configureRoot = events.operation("Configure project :")
 
-        def applyRootBuildScript = configureRoot.child("Apply script build.gradle to root project 'multi'")
-        def resolveCompile = applyRootBuildScript.child("Resolve dependencies of :compile")
-        applyRootBuildScript.child("Resolve files of :compile")
+        def applyRootBuildScript = configureRoot.child(applyBuildScriptRootProject("multi"))
+        def resolveCompile = applyRootBuildScript.child("Resolve dependencies of :compileClasspath")
+        applyRootBuildScript.child("Resolve files of :compileClasspath")
 
-        def applyProjectABuildScript = resolveCompile.child("Configure project :a").child("Apply script build.gradle to project ':a'")
-        def resolveCompileA = applyProjectABuildScript.child("Resolve dependencies of :a:compile")
-        applyProjectABuildScript.child("Resolve files of :a:compile")
+        def applyProjectABuildScript = resolveCompile.child("Configure project :a").child(applyBuildScript(aBuildfile, ':a'))
+        def resolveCompileA = applyProjectABuildScript.child("Resolve dependencies of :a:compileClasspath")
+        applyProjectABuildScript.child("Resolve files of :a:compileClasspath")
 
         resolveCompileA.child("Configure project :b")
     }
 
-
-    @Requires([KOTLIN_SCRIPT])
     def "generates events for nested script plugin applications of different types"() {
         given:
         def scriptPluginGroovy1 = file('scriptPluginGroovy1.gradle')
@@ -365,10 +366,10 @@ class ProjectConfigurationChildrenProgressCrossVersionSpec extends ToolingApiSpe
         then:
         events.assertIsABuild()
 
-        events.operation("Apply script ${buildFile.name} to root project 'root'").with { applyRoot ->
-            applyRoot.child("Apply script ${scriptPluginGroovy1.name} to root project 'root'").with { applyGroovy1 ->
-                applyGroovy1.child("Apply script ${scriptPluginKotlin.name} to root project 'root'").with { applyKotlin ->
-                    applyKotlin.child("Apply script ${scriptPluginGroovy2.name} to root project 'root'")
+        events.operation(applyBuildScriptRootProject('root')).with { applyRoot ->
+            applyRoot.child(applyBuildScriptPluginRootProject(scriptPluginGroovy1, 'root')).with { applyGroovy1 ->
+                applyGroovy1.child(applyBuildScriptPluginRootProject(scriptPluginKotlin, 'root')).with { applyKotlin ->
+                    applyKotlin.child(applyBuildScriptPluginRootProject(scriptPluginGroovy2, 'root'))
                 }
             }
         }

@@ -18,6 +18,7 @@ package org.gradle.internal.component.local.model;
 
 import org.gradle.api.artifacts.Dependency;
 import org.gradle.api.artifacts.component.ComponentSelector;
+import org.gradle.api.capabilities.Capability;
 import org.gradle.api.internal.attributes.AttributesSchemaInternal;
 import org.gradle.api.internal.attributes.ImmutableAttributes;
 import org.gradle.internal.component.model.ComponentResolveMetadata;
@@ -27,17 +28,27 @@ import org.gradle.internal.component.model.ExcludeMetadata;
 import org.gradle.internal.component.model.IvyArtifactName;
 import org.gradle.internal.component.model.LocalOriginDependencyMetadata;
 
+import java.util.Collection;
 import java.util.List;
 
 public class DslOriginDependencyMetadataWrapper implements DslOriginDependencyMetadata, LocalOriginDependencyMetadata {
     private final LocalOriginDependencyMetadata delegate;
     private final Dependency source;
     private final boolean isTransitive;
+    private List<IvyArtifactName> artifacts;
 
     public DslOriginDependencyMetadataWrapper(LocalOriginDependencyMetadata delegate, Dependency source) {
         this.delegate = delegate;
         this.source = source;
         this.isTransitive = delegate.isTransitive();
+        this.artifacts = delegate.getArtifacts();
+    }
+
+    private DslOriginDependencyMetadataWrapper(LocalOriginDependencyMetadata delegate, Dependency source, List<IvyArtifactName> artifacts) {
+        this.delegate = delegate;
+        this.source = source;
+        this.isTransitive = delegate.isTransitive();
+        this.artifacts = artifacts;
     }
 
     @Override
@@ -56,8 +67,8 @@ public class DslOriginDependencyMetadataWrapper implements DslOriginDependencyMe
     }
 
     @Override
-    public List<ConfigurationMetadata> selectConfigurations(ImmutableAttributes consumerAttributes, ComponentResolveMetadata targetComponent, AttributesSchemaInternal consumerSchema) {
-        return delegate.selectConfigurations(consumerAttributes, targetComponent, consumerSchema);
+    public List<ConfigurationMetadata> selectConfigurations(ImmutableAttributes consumerAttributes, ComponentResolveMetadata targetComponent, AttributesSchemaInternal consumerSchema, Collection<? extends Capability> explicitRequestedCapabilities) {
+        return delegate.selectConfigurations(consumerAttributes, targetComponent, consumerSchema, explicitRequestedCapabilities);
     }
 
     @Override
@@ -91,6 +102,15 @@ public class DslOriginDependencyMetadataWrapper implements DslOriginDependencyMe
     }
 
     @Override
+    public boolean isEndorsingStrictVersions() {
+        return delegate.isEndorsingStrictVersions();
+    }
+
+    private boolean isExternalVariant() {
+        return false;
+    }
+
+    @Override
     public boolean isFromLock() {
         return delegate.isFromLock();
     }
@@ -102,12 +122,17 @@ public class DslOriginDependencyMetadataWrapper implements DslOriginDependencyMe
 
     @Override
     public List<IvyArtifactName> getArtifacts() {
-        return delegate.getArtifacts();
+        return artifacts;
     }
 
     @Override
     public LocalOriginDependencyMetadata withTarget(ComponentSelector target) {
         return new DslOriginDependencyMetadataWrapper(delegate.withTarget(target), source);
+    }
+
+    @Override
+    public LocalOriginDependencyMetadata withTargetAndArtifacts(ComponentSelector target, List<IvyArtifactName> artifacts) {
+        return new DslOriginDependencyMetadataWrapper(delegate.withTarget(target), source, artifacts);
     }
 
     @Override

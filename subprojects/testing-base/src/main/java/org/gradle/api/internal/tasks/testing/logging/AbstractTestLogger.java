@@ -23,7 +23,7 @@ import org.gradle.api.tasks.testing.TestDescriptor;
 import org.gradle.api.tasks.testing.logging.TestLogEvent;
 import org.gradle.internal.logging.text.StyledTextOutput;
 import org.gradle.internal.logging.text.StyledTextOutputFactory;
-import org.gradle.util.TextUtil;
+import org.gradle.util.internal.TextUtil;
 
 import javax.annotation.Nullable;
 import java.util.List;
@@ -72,7 +72,7 @@ public abstract class AbstractTestLogger {
                 // level. This matters when configuring granularity.
                 names.add(current.getClassName() + "." + current.getName());
             } else {
-                names.add(current.getName());
+                names.add(current.getDisplayName());
             }
             current = current.getParent();
         }

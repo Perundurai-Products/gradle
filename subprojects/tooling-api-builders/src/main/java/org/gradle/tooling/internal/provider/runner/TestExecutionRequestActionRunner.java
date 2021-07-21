@@ -19,30 +19,36 @@ package org.gradle.tooling.internal.provider.runner;
 import org.gradle.api.tasks.testing.TestExecutionException;
 import org.gradle.execution.BuildConfigurationActionExecuter;
 import org.gradle.internal.invocation.BuildAction;
-import org.gradle.internal.invocation.BuildActionRunner;
-import org.gradle.internal.invocation.BuildController;
+import org.gradle.internal.buildtree.BuildActionRunner;
+import org.gradle.internal.buildtree.BuildTreeLifecycleController;
+import org.gradle.internal.operations.BuildOperationAncestryTracker;
 import org.gradle.internal.operations.BuildOperationListenerManager;
 import org.gradle.tooling.internal.protocol.test.InternalTestExecutionException;
-import org.gradle.tooling.internal.provider.TestExecutionRequestAction;
+import org.gradle.tooling.internal.provider.action.TestExecutionRequestAction;
 
 import java.util.Collections;
 
 public class TestExecutionRequestActionRunner implements BuildActionRunner {
+    private final BuildOperationAncestryTracker ancestryTracker;
     private final BuildOperationListenerManager buildOperationListenerManager;
 
-    public TestExecutionRequestActionRunner(BuildOperationListenerManager buildOperationListenerManager) {
+    public TestExecutionRequestActionRunner(
+        BuildOperationAncestryTracker ancestryTracker,
+        BuildOperationListenerManager buildOperationListenerManager
+    ) {
+        this.ancestryTracker = ancestryTracker;
         this.buildOperationListenerManager = buildOperationListenerManager;
     }
 
     @Override
-    public Result run(BuildAction action, BuildController buildController) {
+    public Result run(BuildAction action, BuildTreeLifecycleController buildController) {
         if (!(action instanceof TestExecutionRequestAction)) {
             return Result.nothing();
         }
 
         try {
             TestExecutionRequestAction testExecutionRequestAction = (TestExecutionRequestAction) action;
-            TestExecutionResultEvaluator testExecutionResultEvaluator = new TestExecutionResultEvaluator(testExecutionRequestAction);
+            TestExecutionResultEvaluator testExecutionResultEvaluator = new TestExecutionResultEvaluator(ancestryTracker, testExecutionRequestAction);
             buildOperationListenerManager.addListener(testExecutionResultEvaluator);
             try {
                 doRun(testExecutionRequestAction, buildController);
@@ -62,10 +68,10 @@ public class TestExecutionRequestActionRunner implements BuildActionRunner {
         return Result.of(null);
     }
 
-    private void doRun(TestExecutionRequestAction action, BuildController buildController) {
+    private void doRun(TestExecutionRequestAction action, BuildTreeLifecycleController buildController) {
         TestExecutionBuildConfigurationAction testTasksConfigurationAction = new TestExecutionBuildConfigurationAction(action, buildController.getGradle());
         buildController.getGradle().getServices().get(BuildConfigurationActionExecuter.class).setTaskSelectors(Collections.singletonList(testTasksConfigurationAction));
-        buildController.run();
+        buildController.scheduleAndRunTasks();
     }
 
     private Throwable findRootCause(Exception tex) {

@@ -22,6 +22,8 @@ import org.gradle.tooling.internal.consumer.parameters.ConsumerOperationParamete
 import org.gradle.tooling.internal.consumer.versioning.VersionDetails;
 import org.gradle.tooling.model.internal.Exceptions;
 
+import java.util.List;
+
 public class ParameterValidatingConsumerConnection implements ConsumerConnection {
     private final VersionDetails targetVersionDetails;
     private final ConsumerConnection delegate;
@@ -64,6 +66,16 @@ public class ParameterValidatingConsumerConnection implements ConsumerConnection
     public void runTests(TestExecutionRequest testExecutionRequest, ConsumerOperationParameters operationParameters) {
         validateParameters(operationParameters);
         delegate.runTests(testExecutionRequest, operationParameters);
+    }
+
+    @Override
+    public void notifyDaemonsAboutChangedPaths(List<String> changedPaths, ConsumerOperationParameters operationParameters) {
+        delegate.notifyDaemonsAboutChangedPaths(changedPaths, operationParameters);
+    }
+
+    @Override
+    public void stopWhenIdle(ConsumerOperationParameters operationParameters) {
+        delegate.stopWhenIdle(operationParameters);
     }
 
     private void validateParameters(ConsumerOperationParameters operationParameters) {

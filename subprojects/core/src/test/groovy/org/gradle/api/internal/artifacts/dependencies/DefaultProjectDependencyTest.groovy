@@ -27,7 +27,7 @@ import org.gradle.test.fixtures.AbstractProjectBuilderSpec
 
 import static org.gradle.api.internal.artifacts.dependencies.AbstractModuleDependencySpec.assertDeepCopy
 import static org.gradle.util.Matchers.strictlyEqual
-import static org.junit.Assert.assertThat
+import static org.hamcrest.MatcherAssert.assertThat
 
 class DefaultProjectDependencyTest extends AbstractProjectBuilderSpec {
 
@@ -117,7 +117,7 @@ class DefaultProjectDependencyTest extends AbstractProjectBuilderSpec {
     void "doesn't allow selection of configuration is not consumable"() {
         def context = Mock(TaskDependencyResolveContext)
 
-        def conf = project.configurations.create('conf') {
+        project.configurations.create('conf') {
             canBeConsumed = false
         }
         def listener = Mock(ProjectAccessListener)
@@ -166,7 +166,7 @@ class DefaultProjectDependencyTest extends AbstractProjectBuilderSpec {
         d1.contentEquals(d2)
     }
 
-    void "knows when content is not euqal"() {
+    void "knows when content is not equal"() {
         def d1 = createProjectDependency()
         def d2 = createProjectDependency()
         d2.setTransitive(false)
@@ -185,7 +185,7 @@ class DefaultProjectDependencyTest extends AbstractProjectBuilderSpec {
     }
 
     private createProjectDependency() {
-        def out = new DefaultProjectDependency(project, "conf", listener, true)
+        def out = new DefaultProjectDependency(project, listener, true)
         out.addArtifact(new DefaultDependencyArtifact("name", "type", "ext", "classifier", "url"))
         out
     }

@@ -18,8 +18,10 @@ package org.gradle.api.internal.artifacts.ivyservice.resolveengine;
 import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.strategy.Version;
 import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.strategy.VersionComparator;
 import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.strategy.VersionParser;
+import org.gradle.internal.component.external.model.maven.MavenModuleResolveMetadata;
 import org.gradle.internal.component.model.ComponentResolveMetadata;
 
+import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -27,7 +29,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-class LatestModuleConflictResolver implements ModuleConflictResolver {
+class LatestModuleConflictResolver<T extends ComponentResolutionState> implements ModuleConflictResolver<T> {
     private final Comparator<Version> versionComparator;
     private final VersionParser versionParser;
 
@@ -37,10 +39,10 @@ class LatestModuleConflictResolver implements ModuleConflictResolver {
     }
 
     @Override
-    public <T extends ComponentResolutionState> void select(ConflictResolverDetails<T> details) {
+    public void select(ConflictResolverDetails<T> details) {
         // Find the candidates with the highest base version
         Version baseVersion = null;
-        Map<Version, T> matches = new LinkedHashMap<Version, T>();
+        Map<Version, T> matches = new LinkedHashMap<>();
         for (T candidate : details.getCandidates()) {
             Version version = versionParser.transform(candidate.getVersion());
             if (baseVersion == null || versionComparator.compare(version.getBaseVersion(), baseVersion) > 0) {
@@ -58,22 +60,56 @@ class LatestModuleConflictResolver implements ModuleConflictResolver {
         }
 
         // Work backwards from highest version, return the first candidate with qualified version and release status, or candidate with unqualified version
-        List<Version> sorted = new ArrayList<Version>(matches.keySet());
-        Collections.sort(sorted, Collections.reverseOrder(versionComparator));
+        List<Version> sorted = new ArrayList<>(matches.keySet());
+        sorted.sort(Collections.reverseOrder(versionComparator));
+        T bestComponent = null;
+        T unqalifiedComponent = null;
         for (Version version : sorted) {
             T component = matches.get(version);
             if (!version.isQualified()) {
-                details.select(component);
-                return;
+                if (bestComponent == null) {
+                    details.select(component);
+                    return;
+                } else if (unqalifiedComponent == null) {
+                    unqalifiedComponent = component;
+                }
             }
-            ComponentResolveMetadata metaData = component.getMetadata();
-            if (metaData != null && "release".equals(metaData.getStatus())) {
-                details.select(component);
-                return;
+            // Only care about the first qualified version that matches
+            if (bestComponent == null) {
+                ComponentResolveMetadata metaData = component.getMetadata();
+                if (hasReleaseStatus(metaData)) {
+                    details.select(component);
+                    return;
+                }
+                // Special case Maven snapshots
+                if (isMavenSnapshot(metaData)) {
+                    bestComponent = component;
+                }
             }
         }
 
-        // Nothing - just return the highest version
+        if (unqalifiedComponent != null) {
+            // SNAPSHOT seen but there is an unqualified release present - prefer the release
+            details.select(unqalifiedComponent);
+            return;
+        }
+        if (bestComponent != null) {
+            // Found a snapshot and no unqualified release present
+            details.select(bestComponent);
+        }
+
+        // Only non releases and no unqualified version or snapshot - just return the highest version
         details.select(matches.get(sorted.get(0)));
+    }
+
+    private boolean hasReleaseStatus(@Nullable ComponentResolveMetadata metadata) {
+        return metadata != null && "release".equals(metadata.getStatus());
+    }
+
+    private boolean isMavenSnapshot(@Nullable ComponentResolveMetadata metadata) {
+        if (metadata instanceof MavenModuleResolveMetadata) {
+            return ((MavenModuleResolveMetadata) metadata).getSnapshotTimestamp() != null || metadata.getModuleVersionId().getVersion().endsWith("-SNAPSHOT");
+        }
+        return false;
     }
 }

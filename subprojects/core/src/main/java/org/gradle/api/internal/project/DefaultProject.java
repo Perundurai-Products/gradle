@@ -23,6 +23,7 @@ import groovy.lang.MissingPropertyException;
 import org.gradle.api.Action;
 import org.gradle.api.AntBuilder;
 import org.gradle.api.CircularReferenceException;
+import org.gradle.api.InvalidUserCodeException;
 import org.gradle.api.InvalidUserDataException;
 import org.gradle.api.NamedDomainObjectContainer;
 import org.gradle.api.NamedDomainObjectFactory;
@@ -42,27 +43,26 @@ import org.gradle.api.file.ConfigurableFileCollection;
 import org.gradle.api.file.ConfigurableFileTree;
 import org.gradle.api.file.CopySpec;
 import org.gradle.api.file.DeleteSpec;
-import org.gradle.api.file.FileCollection;
 import org.gradle.api.file.FileTree;
-import org.gradle.api.initialization.dsl.ScriptHandler;
+import org.gradle.api.file.ProjectLayout;
 import org.gradle.api.internal.CollectionCallbackActionDecorator;
+import org.gradle.api.internal.DomainObjectContext;
 import org.gradle.api.internal.DynamicObjectAware;
-import org.gradle.api.internal.DynamicPropertyNamer;
-import org.gradle.internal.extensibility.ExtensibleDynamicObject;
-import org.gradle.api.internal.FactoryNamedDomainObjectContainer;
 import org.gradle.api.internal.GradleInternal;
-import org.gradle.internal.instantiation.InstantiatorFactory;
 import org.gradle.api.internal.MutationGuards;
-import org.gradle.internal.extensibility.NoConventionMapping;
 import org.gradle.api.internal.ProcessOperations;
-import org.gradle.api.internal.ReflectiveNamedDomainObjectFactory;
-import org.gradle.api.internal.artifacts.Module;
+import org.gradle.api.internal.artifacts.DependencyManagementServices;
+import org.gradle.api.internal.artifacts.DependencyResolutionServices;
 import org.gradle.api.internal.artifacts.configurations.DependencyMetaDataProvider;
+import org.gradle.api.internal.artifacts.dsl.dependencies.UnknownProjectFinder;
+import org.gradle.api.internal.collections.DomainObjectCollectionFactory;
 import org.gradle.api.internal.file.DefaultProjectLayout;
+import org.gradle.api.internal.file.FileCollectionFactory;
 import org.gradle.api.internal.file.FileOperations;
 import org.gradle.api.internal.file.FileResolver;
 import org.gradle.api.internal.initialization.ClassLoaderScope;
 import org.gradle.api.internal.initialization.ScriptHandlerFactory;
+import org.gradle.api.internal.initialization.ScriptHandlerInternal;
 import org.gradle.api.internal.plugins.DefaultObjectConfigurationAction;
 import org.gradle.api.internal.plugins.ExtensionContainerInternal;
 import org.gradle.api.internal.plugins.PluginManagerInternal;
@@ -73,6 +73,7 @@ import org.gradle.api.logging.Logging;
 import org.gradle.api.model.ObjectFactory;
 import org.gradle.api.plugins.Convention;
 import org.gradle.api.plugins.ExtensionContainer;
+import org.gradle.api.provider.Property;
 import org.gradle.api.provider.Provider;
 import org.gradle.api.provider.ProviderFactory;
 import org.gradle.api.resources.ResourceHandler;
@@ -83,16 +84,23 @@ import org.gradle.configuration.project.ProjectConfigurationActionContainer;
 import org.gradle.configuration.project.ProjectEvaluator;
 import org.gradle.groovy.scripts.ScriptSource;
 import org.gradle.internal.Actions;
+import org.gradle.internal.Cast;
 import org.gradle.internal.Factories;
 import org.gradle.internal.Factory;
+import org.gradle.internal.deprecation.DeprecationLogger;
 import org.gradle.internal.event.ListenerBroadcast;
+import org.gradle.internal.extensibility.ExtensibleDynamicObject;
+import org.gradle.internal.extensibility.NoConventionMapping;
+import org.gradle.internal.instantiation.InstantiatorFactory;
 import org.gradle.internal.logging.LoggingManagerInternal;
 import org.gradle.internal.logging.StandardOutputCapture;
 import org.gradle.internal.metaobject.BeanDynamicObject;
 import org.gradle.internal.metaobject.DynamicObject;
+import org.gradle.internal.model.ModelContainer;
 import org.gradle.internal.model.RuleBasedPluginListener;
 import org.gradle.internal.reflect.Instantiator;
-import org.gradle.internal.resource.TextResourceLoader;
+import org.gradle.internal.resource.TextUriResourceLoader;
+import org.gradle.internal.service.DefaultServiceRegistry;
 import org.gradle.internal.service.ServiceRegistry;
 import org.gradle.internal.service.scopes.ServiceRegistryFactory;
 import org.gradle.internal.typeconversion.TypeConverter;
@@ -116,11 +124,10 @@ import org.gradle.normalization.InputNormalizationHandler;
 import org.gradle.process.ExecResult;
 import org.gradle.process.ExecSpec;
 import org.gradle.process.JavaExecSpec;
-import org.gradle.util.ClosureBackedAction;
 import org.gradle.util.Configurable;
-import org.gradle.util.ConfigureUtil;
-import org.gradle.util.DeprecationLogger;
 import org.gradle.util.Path;
+import org.gradle.util.internal.ClosureBackedAction;
+import org.gradle.util.internal.ConfigureUtil;
 
 import javax.annotation.Nullable;
 import javax.inject.Inject;
@@ -137,20 +144,18 @@ import java.util.concurrent.Callable;
 
 import static com.google.common.base.Strings.isNullOrEmpty;
 import static java.util.Collections.singletonMap;
-import static org.gradle.util.ConfigureUtil.configureUsing;
-import static org.gradle.util.GUtil.addMaps;
+import static org.gradle.util.internal.ConfigureUtil.configureUsing;
+import static org.gradle.util.internal.GUtil.addMaps;
 
 @NoConventionMapping
-public class DefaultProject extends AbstractPluginAware implements ProjectInternal, DynamicObjectAware,
-    // These two are here to work around https://github.com/gradle/gradle/issues/6027
-    FileOperations, ProcessOperations {
-
+public abstract class DefaultProject extends AbstractPluginAware implements ProjectInternal, DynamicObjectAware {
     private static final ModelType<ServiceRegistry> SERVICE_REGISTRY_MODEL_TYPE = ModelType.of(ServiceRegistry.class);
     private static final ModelType<File> FILE_MODEL_TYPE = ModelType.of(File.class);
     private static final ModelType<ProjectIdentifier> PROJECT_IDENTIFIER_MODEL_TYPE = ModelType.of(ProjectIdentifier.class);
     private static final ModelType<ExtensionContainer> EXTENSION_CONTAINER_MODEL_TYPE = ModelType.of(ExtensionContainer.class);
     private static final Logger BUILD_LOGGER = Logging.getLogger(Project.class);
 
+    private final ProjectState owner;
     private final ClassLoaderScope classLoaderScope;
     private final ClassLoaderScope baseClassLoaderScope;
     private final ServiceRegistry services;
@@ -159,14 +164,13 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
 
     private final GradleInternal gradle;
 
-    private ProjectEvaluator projectEvaluator;
-
-    private ScriptSource buildScriptSource;
+    private final ScriptSource buildScriptSource;
 
     private final File projectDir;
 
     private final File buildFile;
 
+    @Nullable
     private final ProjectInternal parent;
 
     private final String name;
@@ -175,13 +179,13 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
 
     private Object version;
 
-    private Object status;
+    private Property<Object> status;
 
     private final Map<String, Project> childProjects = Maps.newTreeMap();
 
-    private List<String> defaultTasks = new ArrayList<String>();
+    private List<String> defaultTasks = new ArrayList<>();
 
-    private ProjectStateInternal state;
+    private final ProjectStateInternal state;
 
     private FileResolver fileResolver;
 
@@ -191,7 +195,7 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
 
     private final int depth;
 
-    private TaskContainerInternal taskContainer;
+    private final TaskContainerInternal taskContainer;
 
     private DependencyHandler dependencyHandler;
 
@@ -203,13 +207,10 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
 
     private final ListenerBroadcast<RuleBasedPluginListener> ruleBasedPluginListenerBroadcast = new ListenerBroadcast<RuleBasedPluginListener>(RuleBasedPluginListener.class);
 
-    private ExtensibleDynamicObject extensibleDynamicObject;
+    private final ExtensibleDynamicObject extensibleDynamicObject;
 
     private String description;
 
-    private final Path path;
-
-    private Path identityPath;
     private boolean preparedForRuleBasedPlugins;
 
     public DefaultProject(String name,
@@ -218,9 +219,11 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
                           File buildFile,
                           ScriptSource buildScriptSource,
                           GradleInternal gradle,
+                          ProjectState owner,
                           ServiceRegistryFactory serviceRegistryFactory,
                           ClassLoaderScope selfClassLoaderScope,
                           ClassLoaderScope baseClassLoaderScope) {
+        this.owner = owner;
         this.classLoaderScope = selfClassLoaderScope;
         this.baseClassLoaderScope = baseClassLoaderScope;
         this.rootProject = parent != null ? parent.getRootProject() : this;
@@ -233,17 +236,15 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
         this.gradle = gradle;
 
         if (parent == null) {
-            path = Path.ROOT;
             depth = 0;
         } else {
-            path = parent.getProjectPath().child(name);
             depth = parent.getDepth() + 1;
         }
 
         services = serviceRegistryFactory.createFor(this);
-        taskContainer = services.newInstance(TaskContainerInternal.class);
+        taskContainer = services.get(TaskContainerInternal.class);
 
-        extensibleDynamicObject = new ExtensibleDynamicObject(this, Project.class, services.get(InstantiatorFactory.class).injectAndDecorateLenient(services));
+        extensibleDynamicObject = new ExtensibleDynamicObject(this, Project.class, services.get(InstantiatorFactory.class).decorateLenient(services));
         if (parent != null) {
             extensibleDynamicObject.setParent(parent.getInheritedScope());
         }
@@ -261,52 +262,68 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
 
     @SuppressWarnings("unused")
     static class BasicServicesRules extends RuleSource {
-        @Hidden @Model
+        @Hidden
+        @Model
+        ProjectLayout projectLayoutService(ServiceRegistry serviceRegistry) {
+            return serviceRegistry.get(ProjectLayout.class);
+        }
+
+        @Hidden
+        @Model
         ObjectFactory objectFactory(ServiceRegistry serviceRegistry) {
             return serviceRegistry.get(ObjectFactory.class);
         }
 
-        @Hidden @Model
+        @Hidden
+        @Model
         NamedEntityInstantiator<Task> taskFactory(ServiceRegistry serviceRegistry) {
             return serviceRegistry.get(TaskInstantiator.class);
         }
 
-        @Hidden @Model
+        @Hidden
+        @Model
         CollectionCallbackActionDecorator collectionCallbackActionDecorator(ServiceRegistry serviceRegistry) {
             return serviceRegistry.get(CollectionCallbackActionDecorator.class);
         }
 
-        @Hidden @Model
+        @Hidden
+        @Model
         Instantiator instantiator(ServiceRegistry serviceRegistry) {
             return serviceRegistry.get(Instantiator.class);
         }
 
-        @Hidden @Model
+        @Hidden
+        @Model
         ModelSchemaStore schemaStore(ServiceRegistry serviceRegistry) {
             return serviceRegistry.get(ModelSchemaStore.class);
         }
 
-        @Hidden @Model
+        @Hidden
+        @Model
         ManagedProxyFactory proxyFactory(ServiceRegistry serviceRegistry) {
             return serviceRegistry.get(ManagedProxyFactory.class);
         }
 
-        @Hidden @Model
+        @Hidden
+        @Model
         StructBindingsStore structBindingsStore(ServiceRegistry serviceRegistry) {
             return serviceRegistry.get(StructBindingsStore.class);
         }
 
-        @Hidden @Model
+        @Hidden
+        @Model
         NodeInitializerRegistry nodeInitializerRegistry(ModelSchemaStore schemaStore, StructBindingsStore structBindingsStore) {
             return new DefaultNodeInitializerRegistry(schemaStore, structBindingsStore);
         }
 
-        @Hidden @Model
+        @Hidden
+        @Model
         TypeConverter typeConverter(ServiceRegistry serviceRegistry) {
             return serviceRegistry.get(TypeConverter.class);
         }
 
-        @Hidden @Model
+        @Hidden
+        @Model
         FileOperations fileOperations(ServiceRegistry serviceRegistry) {
             return serviceRegistry.get(FileOperations.class);
         }
@@ -363,23 +380,12 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
         return gradle;
     }
 
-    public ProjectEvaluator getProjectEvaluator() {
-        if (projectEvaluator == null) {
-            projectEvaluator = services.get(ProjectEvaluator.class);
-        }
-        return projectEvaluator;
-    }
-
-    public void setProjectEvaluator(ProjectEvaluator projectEvaluator) {
-        this.projectEvaluator = projectEvaluator;
-    }
+    @Inject
+    protected abstract ProjectEvaluator getProjectEvaluator();
 
     @Inject
     @Override
-    public ScriptHandler getBuildscript() {
-        // Decoration takes care of the implementation
-        throw new UnsupportedOperationException();
-    }
+    public abstract ScriptHandlerInternal getBuildscript();
 
     @Override
     public File getBuildFile() {
@@ -465,12 +471,20 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
 
     @Override
     public Object getStatus() {
-        return status == null ? DEFAULT_STATUS : status;
+        return getInternalStatus().get();
     }
 
     @Override
-    public void setStatus(Object status) {
-        this.status = status;
+    public void setStatus(Object s) {
+        getInternalStatus().set(s);
+    }
+
+    @Override
+    public Property<Object> getInternalStatus() {
+        if (status == null) {
+            status = getObjects().property(Object.class).convention(DEFAULT_STATUS);
+        }
+        return status;
     }
 
     @Override
@@ -523,10 +537,7 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
 
     @Inject
     @Override
-    public RepositoryHandler getRepositories() {
-        // Decoration takes care of the implementation
-        throw new UnsupportedOperationException();
-    }
+    public abstract RepositoryHandler getRepositories();
 
     @Override
     public ConfigurationContainer getConfigurations() {
@@ -540,26 +551,21 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
         this.configurationContainer = configurationContainer;
     }
 
+    @Deprecated
     @Override
     public Convention getConvention() {
+        // TODO (donat) deprecate after all internal usages have been eliminated
         return extensibleDynamicObject.getConvention();
     }
 
     @Override
     public String getPath() {
-        return path.toString();
+        return owner.getProjectPath().toString();
     }
 
     @Override
     public Path getIdentityPath() {
-        if (identityPath == null) {
-            if (parent == null) {
-                identityPath = gradle.getIdentityPath();
-            } else {
-                identityPath = parent.getIdentityPath().child(name);
-            }
-        }
-        return identityPath;
+        return owner.getIdentityPath();
     }
 
     @Override
@@ -568,11 +574,7 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
     }
 
     @Inject
-    @Override
-    public ProjectRegistry<ProjectInternal> getProjectRegistry() {
-        // Decoration takes care of the implementation
-        throw new UnsupportedOperationException();
-    }
+    protected abstract CrossProjectModelAccess getCrossProjectModelAccess();
 
     @Override
     public int depthCompare(Project otherProject) {
@@ -591,7 +593,7 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
 
     @Override
     public String absoluteProjectPath(String path) {
-        return this.path.absolutePath(path);
+        return getProjectPath().absolutePath(path);
     }
 
     @Override
@@ -601,7 +603,12 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
 
     @Override
     public Path getProjectPath() {
-        return path;
+        return owner.getProjectPath();
+    }
+
+    @Override
+    public ModelContainer<ProjectInternal> getModel() {
+        return getOwner();
     }
 
     @Override
@@ -611,7 +618,7 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
 
     @Override
     public Path projectPath(String name) {
-        return path.child(name);
+        return getProjectPath().child(name);
     }
 
     @Override
@@ -620,13 +627,28 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
     }
 
     @Override
+    public boolean isRootScript() {
+        return false;
+    }
+
+    @Override
+    public boolean isPluginContext() {
+        return false;
+    }
+
+    @Override
     public String relativeProjectPath(String path) {
-        return this.path.relativePath(path);
+        return getProjectPath().relativePath(path);
     }
 
     @Override
     public ProjectInternal project(String path) {
-        ProjectInternal project = findProject(path);
+        return project(this, path);
+    }
+
+    @Override
+    public ProjectInternal project(ProjectInternal referrer, String path) throws UnknownProjectException {
+        ProjectInternal project = getCrossProjectModelAccess().findProject(referrer, this, path);
         if (project == null) {
             throw new UnknownProjectException(String.format("Project with path '%s' could not be found in %s.", path, this));
         }
@@ -635,30 +657,63 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
 
     @Override
     public ProjectInternal findProject(String path) {
-        if (isNullOrEmpty(path)) {
-            throw new InvalidUserDataException("A path must be specified!");
-        }
-        return getProjectRegistry().getProject(absoluteProjectPath(path));
+        return findProject(this, path);
+    }
+
+    @Nullable
+    @Override
+    public ProjectInternal findProject(ProjectInternal referrer, String path) {
+        return getCrossProjectModelAccess().findProject(referrer, this, path);
     }
 
     @Override
     public Set<Project> getAllprojects() {
-        return new TreeSet<Project>(getProjectRegistry().getAllProjects(getPath()));
+        return Cast.uncheckedCast(getAllprojects(this));
     }
 
     @Override
-    public Set<Project> getSubprojects() {
-        return new TreeSet<Project>(getProjectRegistry().getSubProjects(getPath()));
+    public Set<? extends ProjectInternal> getAllprojects(ProjectInternal referrer) {
+        return getCrossProjectModelAccess().getAllprojects(referrer, this);
     }
 
     @Override
-    public void subprojects(Action<? super Project> action) {
-        getProjectConfigurator().subprojects(getSubprojects(), action);
+    public void allprojects(Closure configureClosure) {
+        allprojects(this, ConfigureUtil.configureUsing(configureClosure));
     }
 
     @Override
     public void allprojects(Action<? super Project> action) {
-        getProjectConfigurator().allprojects(getAllprojects(), action);
+        allprojects(this, action);
+    }
+
+    @Override
+    public void allprojects(ProjectInternal referrer, Action<? super Project> action) {
+        getProjectConfigurator().allprojects(getCrossProjectModelAccess().getAllprojects(referrer, this), action);
+    }
+
+    @Override
+    public Set<Project> getSubprojects() {
+        return Cast.uncheckedCast(getSubprojects(this));
+    }
+
+    @Override
+    public Set<? extends ProjectInternal> getSubprojects(ProjectInternal referrer) {
+        return getCrossProjectModelAccess().getSubprojects(referrer, this);
+    }
+
+    @Override
+    public void subprojects(Closure configureClosure) {
+        subprojects(this, ConfigureUtil.configureUsing(configureClosure));
+    }
+
+    @Override
+    public void subprojects(Action<? super Project> action) {
+        subprojects(this, action);
+    }
+
+    @Override
+    public void subprojects(ProjectInternal referrer, Action<? super Project> configureAction) {
+        getProjectConfigurator().subprojects(getCrossProjectModelAccess().getSubprojects(referrer, this), configureAction);
     }
 
     @Override
@@ -686,7 +741,7 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
      * This method is used when scripts access the project via project.x
      */
     @Override
-    public Project getProject() {
+    public ProjectInternal getProject() {
         return this;
     }
 
@@ -763,22 +818,23 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
         if (isNullOrEmpty(path)) {
             throw new InvalidUserDataException("You must specify a project!");
         }
-        DefaultProject projectToEvaluate = (DefaultProject) project(path);
+        ProjectInternal projectToEvaluate = project(path);
         return evaluationDependsOn(projectToEvaluate);
     }
 
-    private Project evaluationDependsOn(DefaultProject projectToEvaluate) {
+    private Project evaluationDependsOn(ProjectInternal projectToEvaluate) {
         if (projectToEvaluate.getState().isConfiguring()) {
             throw new CircularReferenceException(String.format("Circular referencing during evaluation for %s.",
                 projectToEvaluate));
         }
-        return projectToEvaluate.evaluate();
+        projectToEvaluate.getOwner().ensureConfigured();
+        return projectToEvaluate;
     }
 
     @Override
     public String getDisplayName() {
         StringBuilder builder = new StringBuilder();
-        if (parent == null && gradle.getParent() == null) {
+        if (parent == null && gradle.isRootBuild()) {
             builder.append("root project '");
             builder.append(name);
             builder.append('\'');
@@ -799,7 +855,11 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
     public Map<Project, Set<Task>> getAllTasks(boolean recursive) {
         final Map<Project, Set<Task>> foundTargets = new TreeMap<Project, Set<Task>>();
         Action<Project> action = new Action<Project>() {
+            @Override
             public void execute(Project project) {
+                // Don't force evaluation of rules here, let the task container do what it needs to
+                ((ProjectInternal) project).getOwner().ensureTasksDiscovered();
+
                 foundTargets.put(project, new TreeSet<Task>(project.getTasks()));
             }
         };
@@ -818,9 +878,10 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
         }
         final Set<Task> foundTasks = new HashSet<Task>();
         Action<Project> action = new Action<Project>() {
+            @Override
             public void execute(Project project) {
                 // Don't force evaluation of rules here, let the task container do what it needs to
-                ((ProjectInternal) project).evaluate();
+                ((ProjectInternal) project).getOwner().ensureTasksDiscovered();
 
                 Task task = project.getTasks().findByName(name);
                 if (task != null) {
@@ -838,31 +899,19 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
 
     @Override
     @Inject
-    public FileOperations getFileOperations() {
-        // Decoration takes care of the implementation
-        throw new UnsupportedOperationException();
-    }
+    public abstract FileOperations getFileOperations();
 
     @Override
     @Inject
-    public ProviderFactory getProviders() {
-        // Decoration takes care of the implementation
-        throw new UnsupportedOperationException();
-    }
+    public abstract ProviderFactory getProviders();
 
     @Override
     @Inject
-    public ObjectFactory getObjects() {
-        // Decoration takes care of the implementation
-        throw new UnsupportedOperationException();
-    }
+    public abstract ObjectFactory getObjects();
 
     @Override
     @Inject
-    public DefaultProjectLayout getLayout() {
-        // Decoration takes care of the implementation
-        throw new UnsupportedOperationException();
-    }
+    public abstract DefaultProjectLayout getLayout();
 
     @Override
     public File file(Object path) {
@@ -881,7 +930,7 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
 
     @Override
     public ConfigurableFileCollection files(Object... paths) {
-        return getLayout().configurableFiles(paths);
+        return getObjects().fileCollection().from(paths);
     }
 
     @Override
@@ -991,19 +1040,27 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
     @Override
     public void afterEvaluate(Action<? super Project> action) {
         assertMutatingMethodAllowed("afterEvaluate(Action)");
+        failAfterProjectIsEvaluated("afterEvaluate(Action)");
         evaluationListener.add("afterEvaluate", getListenerBuildOperationDecorator().decorate("Project.afterEvaluate", action));
     }
 
     @Override
     public void beforeEvaluate(Closure closure) {
         assertMutatingMethodAllowed("beforeEvaluate(Closure)");
-        evaluationListener.add(new ClosureBackedMethodInvocationDispatch("beforeEvaluate", getListenerBuildOperationDecorator().decorate("Project.beforeEvaluate", closure)));
+        evaluationListener.add(new ClosureBackedMethodInvocationDispatch("beforeEvaluate", getListenerBuildOperationDecorator().decorate("Project.beforeEvaluate", Cast.<Closure<?>>uncheckedNonnullCast(closure))));
     }
 
     @Override
     public void afterEvaluate(Closure closure) {
         assertMutatingMethodAllowed("afterEvaluate(Closure)");
-        evaluationListener.add(new ClosureBackedMethodInvocationDispatch("afterEvaluate", getListenerBuildOperationDecorator().decorate("Project.afterEvaluate", closure)));
+        failAfterProjectIsEvaluated("afterEvaluate(Closure)");
+        evaluationListener.add(new ClosureBackedMethodInvocationDispatch("afterEvaluate", getListenerBuildOperationDecorator().decorate("Project.afterEvaluate", Cast.<Closure<?>>uncheckedNonnullCast(closure))));
+    }
+
+    private void failAfterProjectIsEvaluated(String methodPrototype) {
+        if (!state.isUnconfigured() && !state.isConfiguring()) {
+            throw new InvalidUserCodeException("Cannot run Project." + methodPrototype + " when the project is already evaluated.");
+        }
     }
 
     @Override
@@ -1018,17 +1075,11 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
 
     @Inject
     @Override
-    public LoggingManagerInternal getLogging() {
-        // Decoration takes care of the implementation
-        throw new UnsupportedOperationException();
-    }
+    public abstract LoggingManagerInternal getLogging();
 
     @Inject
     @Override
-    public SoftwareComponentContainer getComponents() {
-        // Decoration takes care of the implementation
-        throw new UnsupportedOperationException();
-    }
+    public abstract SoftwareComponentContainer getComponents();
 
     @Override
     public Object property(String propertyName) throws MissingPropertyException {
@@ -1053,6 +1104,7 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
     @Override
     public Map<String, ?> getProperties() {
         return DeprecationLogger.whileDisabled(new Factory<Map<String, ?>>() {
+            @Override
             public Map<String, ?> create() {
                 return extensibleDynamicObject.getProperties();
             }
@@ -1089,11 +1141,9 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
         return getFileOperations().copySpec();
     }
 
+    @Override
     @Inject
-    protected ProcessOperations getProcessOperations() {
-        // Decoration takes care of the implementation
-        throw new UnsupportedOperationException();
-    }
+    public abstract ProcessOperations getProcessOperations();
 
     @Override
     public ExecResult javaexec(Closure closure) {
@@ -1126,9 +1176,8 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
     }
 
     @Override
-    public Module getModule() {
-        return services.get(DependencyMetaDataProvider.class).getModule();
-    }
+    @Inject
+    public abstract DependencyMetaDataProvider getDependencyMetaDataProvider();
 
     @Override
     public AntBuilder ant(Closure configureClosure) {
@@ -1143,23 +1192,20 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
     }
 
     @Override
-    public void subprojects(Closure configureClosure) {
-        getProjectConfigurator().subprojects(getSubprojects(), ConfigureUtil.<Project>configureUsing(configureClosure));
-    }
-
-    @Override
-    public void allprojects(Closure configureClosure) {
-        getProjectConfigurator().allprojects(getAllprojects(), ConfigureUtil.<Project>configureUsing(configureClosure));
-    }
-
-    @Override
     public Project project(String path, Closure configureClosure) {
-        return getProjectConfigurator().project(project(path), ConfigureUtil.<Project>configureUsing(configureClosure));
+        return project(this, path, ConfigureUtil.configureUsing(configureClosure));
     }
 
     @Override
     public Project project(String path, Action<? super Project> configureAction) {
-        return getProjectConfigurator().project(project(path), configureAction);
+        return project(this, path, configureAction);
+    }
+
+    @Override
+    public ProjectInternal project(ProjectInternal referrer, String path, Action<? super Project> configureAction) {
+        ProjectInternal project = project(referrer, path);
+        getProjectConfigurator().project(project, configureAction);
+        return project;
     }
 
     @Override
@@ -1230,7 +1276,7 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
 
     @Override
     public Task task(Map options, String task) {
-        return taskContainer.create(addMaps(options, singletonMap(Task.TASK_NAME, task)));
+        return taskContainer.create(addMaps(Cast.uncheckedNonnullCast(options), singletonMap(Task.TASK_NAME, task)));
     }
 
     public Task task(Map options, Object task) {
@@ -1239,7 +1285,7 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
 
     @Override
     public Task task(Map options, String task, Closure configureClosure) {
-        return taskContainer.create(addMaps(options, singletonMap(Task.TASK_NAME, task))).configure(configureClosure);
+        return taskContainer.create(addMaps(Cast.uncheckedNonnullCast(options), singletonMap(Task.TASK_NAME, task))).configure(configureClosure);
     }
 
     public Task task(Map options, Object task, Closure configureClosure) {
@@ -1248,52 +1294,27 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
 
     @Inject
     @Override
-    public ProjectConfigurationActionContainer getConfigurationActions() {
-        // Decoration takes care of the implementation
-        throw new UnsupportedOperationException();
-    }
+    public abstract ProjectConfigurationActionContainer getConfigurationActions();
 
     @Inject
     @Override
-    public ModelRegistry getModelRegistry() {
-        // Decoration takes care of the implementation
-        throw new UnsupportedOperationException();
-    }
-
-    @Inject
-    protected ModelSchemaStore getModelSchemaStore() {
-        // Decoration takes care of the implementation
-        throw new UnsupportedOperationException();
-    }
+    public abstract ModelRegistry getModelRegistry();
 
     @Override
     protected DefaultObjectConfigurationAction createObjectConfigurationAction() {
-        return new DefaultObjectConfigurationAction(getFileResolver(), getScriptPluginFactory(), getScriptHandlerFactory(), getBaseClassLoaderScope(), getResourceLoader(), this);
-    }
-
-    @Inject
-    protected TextResourceLoader getResourceLoader() {
-        throw new UnsupportedOperationException();
+        TextUriResourceLoader.Factory textUriResourceLoaderFactory = services.get(TextUriResourceLoader.Factory.class);
+        return new DefaultObjectConfigurationAction(getFileResolver(), getScriptPluginFactory(), getScriptHandlerFactory(), getBaseClassLoaderScope(), textUriResourceLoaderFactory, this);
     }
 
     @Inject
     @Override
-    public PluginManagerInternal getPluginManager() {
-        // Decoration takes care of the implementation
-        throw new UnsupportedOperationException();
-    }
+    public abstract PluginManagerInternal getPluginManager();
 
     @Inject
-    protected ScriptPluginFactory getScriptPluginFactory() {
-        // Decoration takes care of the implementation
-        throw new UnsupportedOperationException();
-    }
+    protected abstract ScriptPluginFactory getScriptPluginFactory();
 
     @Inject
-    protected ScriptHandlerFactory getScriptHandlerFactory() {
-        // Decoration takes care of the implementation
-        throw new UnsupportedOperationException();
-    }
+    protected abstract ScriptHandlerFactory getScriptHandlerFactory();
 
     @Override
     public ClassLoaderScope getClassLoaderScope() {
@@ -1314,23 +1335,17 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
 
     @Override
     public <T> NamedDomainObjectContainer<T> container(Class<T> type) {
-        InstantiatorFactory instantiatorFactory = getServices().get(InstantiatorFactory.class);
-        // TODO - this should also be using the decorating instantiator but cannot for backwards compatibility
-        ReflectiveNamedDomainObjectFactory<T> objectFactory = new ReflectiveNamedDomainObjectFactory<T>(type, instantiatorFactory.injectLenient(getServices()));
-        Instantiator instantiator = instantiatorFactory.decorateLenient();
-        return instantiator.newInstance(FactoryNamedDomainObjectContainer.class, type, instantiator, new DynamicPropertyNamer(), objectFactory, MutationGuards.of(getProjectConfigurator()), services.get(CollectionCallbackActionDecorator.class));
+        return getServices().get(DomainObjectCollectionFactory.class).newNamedDomainObjectContainerUndecorated(type);
     }
 
     @Override
     public <T> NamedDomainObjectContainer<T> container(Class<T> type, NamedDomainObjectFactory<T> factory) {
-        Instantiator instantiator = getServices().get(InstantiatorFactory.class).decorateLenient();
-        return instantiator.newInstance(FactoryNamedDomainObjectContainer.class, type, instantiator, new DynamicPropertyNamer(), factory, MutationGuards.of(getProjectConfigurator()), services.get(CollectionCallbackActionDecorator.class));
+        return getServices().get(DomainObjectCollectionFactory.class).newNamedDomainObjectContainer(type, factory);
     }
 
     @Override
     public <T> NamedDomainObjectContainer<T> container(Class<T> type, Closure factoryClosure) {
-        Instantiator instantiator = getServices().get(InstantiatorFactory.class).decorateLenient();
-        return instantiator.newInstance(FactoryNamedDomainObjectContainer.class, type, instantiator, new DynamicPropertyNamer(), factoryClosure, MutationGuards.of(getProjectConfigurator()), services.get(CollectionCallbackActionDecorator.class));
+        return getServices().get(DomainObjectCollectionFactory.class).newNamedDomainObjectContainer(type, factoryClosure);
     }
 
     @Override
@@ -1350,20 +1365,13 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
     }
 
     @Inject
-    protected DeferredProjectConfiguration getDeferredProjectConfiguration() {
-        // Decoration takes care of the implementation
-        throw new UnsupportedOperationException();
-    }
+    protected abstract DeferredProjectConfiguration getDeferredProjectConfiguration();
 
     @Inject
-    protected CrossProjectConfigurator getProjectConfigurator() {
-        throw new UnsupportedOperationException();
-    }
+    protected abstract CrossProjectConfigurator getProjectConfigurator();
 
     @Inject
-    protected ListenerBuildOperationDecorator getListenerBuildOperationDecorator() {
-        throw new UnsupportedOperationException();
-    }
+    protected abstract ListenerBuildOperationDecorator getListenerBuildOperationDecorator();
 
     @Override
     public void addDeferredConfiguration(Runnable configuration) {
@@ -1395,9 +1403,7 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
 
     @Inject
     @Override
-    public InputNormalizationHandler getNormalization() {
-        throw new UnsupportedOperationException();
-    }
+    public abstract InputNormalizationHandler getNormalization();
 
     @Override
     public void normalization(Action<? super InputNormalizationHandler> configuration) {
@@ -1406,9 +1412,7 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
 
     @Inject
     @Override
-    public DependencyLockingHandler getDependencyLocking() {
-        throw new UnsupportedOperationException();
-    }
+    public abstract DependencyLockingHandler getDependencyLocking();
 
     @Override
     public void dependencyLocking(Action<? super DependencyLockingHandler> configuration) {
@@ -1434,28 +1438,113 @@ public class DefaultProject extends AbstractPluginAware implements ProjectIntern
         MutationGuards.of(getProjectConfigurator()).assertMutationAllowed(methodName, this, Project.class);
     }
 
-    // These are here just so that ProjectInternal can implement FileOperations to work around https://github.com/gradle/gradle/issues/6027
-
     @Override
-    @Deprecated
-    public ConfigurableFileCollection configurableFiles() {
-        throw new UnsupportedOperationException();
+    public ProjectState getOwner() {
+        return owner;
     }
 
     @Override
-    @Deprecated
-    public ConfigurableFileCollection configurableFiles(Object... paths) {
-        throw new UnsupportedOperationException();
+    public DetachedResolver newDetachedResolver() {
+        DependencyManagementServices dms = getServices().get(DependencyManagementServices.class);
+        InstantiatorFactory instantiatorFactory = services.get(InstantiatorFactory.class);
+        DefaultServiceRegistry lookup = new DefaultServiceRegistry(services);
+        lookup.addProvider(new Object() {
+            public DependencyResolutionServices createServices() {
+                return dms.create(
+                    services.get(FileResolver.class),
+                    services.get(FileCollectionFactory.class),
+                    services.get(DependencyMetaDataProvider.class),
+                    new UnknownProjectFinder("Detached resolvers do not support resolving projects"),
+                    new DetachedDependencyResolutionDomainObjectContext(services.get(DomainObjectContext.class))
+                );
+            }
+        });
+        return instantiatorFactory.decorate(lookup).newInstance(
+            LocalDetachedResolver.class
+        );
     }
 
-    @Override
-    @Deprecated
-    public FileCollection immutableFiles(Object... paths) {
-        throw new UnsupportedOperationException();
+    public static class LocalDetachedResolver implements DetachedResolver {
+        private final DependencyResolutionServices resolutionServices;
+
+        @Inject
+        public LocalDetachedResolver(DependencyResolutionServices resolutionServices) {
+            this.resolutionServices = resolutionServices;
+        }
+
+        @Override
+        public RepositoryHandler getRepositories() {
+            return resolutionServices.getResolveRepositoryHandler();
+        }
+
+        @Override
+        public DependencyHandler getDependencies() {
+            return resolutionServices.getDependencyHandler();
+        }
+
+        @Override
+        public ConfigurationContainer getConfigurations() {
+            return resolutionServices.getConfigurationContainer();
+        }
     }
 
-    @Override
-    public ProjectState getMutationState() {
-        return services.get(ProjectStateRegistry.class).stateFor(this);
+    private static class DetachedDependencyResolutionDomainObjectContext implements DomainObjectContext {
+        private final DomainObjectContext delegate;
+
+        private DetachedDependencyResolutionDomainObjectContext(DomainObjectContext delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public Path identityPath(String name) {
+            return delegate.identityPath(name);
+        }
+
+        @Override
+        public Path projectPath(String name) {
+            return delegate.projectPath(name);
+        }
+
+        @Override
+        @Nullable
+        public Path getProjectPath() {
+            return delegate.getProjectPath();
+        }
+
+        @Override
+        @Nullable
+        public ProjectInternal getProject() {
+            return delegate.getProject();
+        }
+
+        @Override
+        public ModelContainer<?> getModel() {
+            return delegate.getModel();
+        }
+
+        @Override
+        public Path getBuildPath() {
+            return delegate.getBuildPath();
+        }
+
+        @Override
+        public boolean isRootScript() {
+            return delegate.isRootScript();
+        }
+
+        @Override
+        public boolean isPluginContext() {
+            return delegate.isPluginContext();
+        }
+
+        @Override
+        public boolean isScript() {
+            return delegate.isScript();
+        }
+
+        @Override
+        public boolean isDetachedState() {
+            return true;
+        }
     }
 }

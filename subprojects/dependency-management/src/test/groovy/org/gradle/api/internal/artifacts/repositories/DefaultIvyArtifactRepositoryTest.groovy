@@ -15,34 +15,34 @@
  */
 package org.gradle.api.internal.artifacts.repositories
 
+import org.gradle.api.Action
 import org.gradle.api.InvalidUserDataException
 import org.gradle.api.artifacts.ComponentMetadataListerDetails
 import org.gradle.api.artifacts.ComponentMetadataSupplier
 import org.gradle.api.artifacts.ComponentMetadataSupplierDetails
 import org.gradle.api.artifacts.ComponentMetadataVersionLister
 import org.gradle.api.artifacts.repositories.AuthenticationContainer
-import org.gradle.api.internal.artifacts.DefaultImmutableModuleIdentifierFactory
+import org.gradle.api.artifacts.repositories.IvyArtifactRepository
+import org.gradle.api.internal.artifacts.DependencyManagementTestUtil
 import org.gradle.api.internal.artifacts.ImmutableModuleIdentifierFactory
 import org.gradle.api.internal.artifacts.ivyservice.IvyContextManager
-import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.parser.ModuleMetadataParser
+import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.parser.GradleModuleMetadataParser
 import org.gradle.api.internal.artifacts.repositories.metadata.IvyMutableModuleMetadataFactory
 import org.gradle.api.internal.artifacts.repositories.resolver.IvyResolver
 import org.gradle.api.internal.artifacts.repositories.transport.RepositoryTransport
 import org.gradle.api.internal.artifacts.repositories.transport.RepositoryTransportFactory
 import org.gradle.api.internal.attributes.ImmutableAttributesFactory
 import org.gradle.api.internal.file.FileResolver
-import org.gradle.api.internal.filestore.ivy.ArtifactIdentifierFileStore
+import org.gradle.api.internal.filestore.DefaultArtifactIdentifierFileStore
 import org.gradle.api.internal.model.NamedObjectInstantiator
-import org.gradle.api.model.ObjectFactory
-import org.gradle.internal.logging.progress.ProgressLoggerFactory
+import org.gradle.api.provider.ProviderFactory
 import org.gradle.internal.resource.ExternalResourceRepository
-import org.gradle.internal.resource.cached.ExternalResourceFileStore
+import org.gradle.internal.resource.cached.DefaultExternalResourceFileStore
 import org.gradle.internal.resource.local.FileResourceRepository
 import org.gradle.internal.resource.local.LocallyAvailableResourceFinder
-import org.gradle.testing.internal.util.Specification
-import org.gradle.util.AttributeTestUtil
 import org.gradle.util.SnapshotTestUtil
 import org.gradle.util.TestUtil
+import spock.lang.Specification
 
 import javax.inject.Inject
 
@@ -52,16 +52,22 @@ class DefaultIvyArtifactRepositoryTest extends Specification {
     final RepositoryTransportFactory transportFactory = Mock()
     final LocallyAvailableResourceFinder locallyAvailableResourceFinder = Mock()
     final ExternalResourceRepository resourceRepository = Mock()
-    final ProgressLoggerFactory progressLoggerFactory = Mock()
-    final ArtifactIdentifierFileStore artifactIdentifierFileStore = Stub()
-    final ExternalResourceFileStore externalResourceFileStore = Stub()
+    final DefaultArtifactIdentifierFileStore artifactIdentifierFileStore = Stub()
+    final DefaultExternalResourceFileStore externalResourceFileStore = Stub()
     final AuthenticationContainer authenticationContainer = Stub()
     final ivyContextManager = Mock(IvyContextManager)
     final ImmutableModuleIdentifierFactory moduleIdentifierFactory = Mock()
-    final ModuleMetadataParser moduleMetadataParser = new ModuleMetadataParser(Mock(ImmutableAttributesFactory), moduleIdentifierFactory, Mock(NamedObjectInstantiator))
-    final IvyMutableModuleMetadataFactory metadataFactory = new IvyMutableModuleMetadataFactory(new DefaultImmutableModuleIdentifierFactory(), AttributeTestUtil.attributesFactory())
+    final GradleModuleMetadataParser moduleMetadataParser = new GradleModuleMetadataParser(Mock(ImmutableAttributesFactory), moduleIdentifierFactory, Mock(NamedObjectInstantiator))
+    final IvyMutableModuleMetadataFactory metadataFactory = DependencyManagementTestUtil.ivyMetadataFactory()
+    final DefaultUrlArtifactRepository.Factory urlArtifactRepositoryFactory = new DefaultUrlArtifactRepository.Factory(fileResolver)
+    final ProviderFactory providerFactory = Mock()
 
-    final DefaultIvyArtifactRepository repository = instantiator.newInstance(DefaultIvyArtifactRepository.class, fileResolver, transportFactory, locallyAvailableResourceFinder, artifactIdentifierFileStore, externalResourceFileStore, authenticationContainer, ivyContextManager, moduleIdentifierFactory, TestUtil.instantiatorFactory(), Mock(FileResourceRepository), moduleMetadataParser, TestUtil.featurePreviews(), metadataFactory, SnapshotTestUtil.valueSnapshotter(), Mock(ObjectFactory))
+    final DefaultIvyArtifactRepository repository = instantiator.newInstance(DefaultIvyArtifactRepository.class, fileResolver, transportFactory, locallyAvailableResourceFinder,
+        artifactIdentifierFileStore, externalResourceFileStore, authenticationContainer, ivyContextManager,
+        moduleIdentifierFactory, TestUtil.instantiatorFactory(), Mock(FileResourceRepository), moduleMetadataParser,
+        metadataFactory, SnapshotTestUtil.valueSnapshotter(), TestUtil.objectFactory(), urlArtifactRepositoryFactory,
+        TestUtil.checksumService, providerFactory
+    )
 
     def "default values"() {
         expect:
@@ -71,15 +77,14 @@ class DefaultIvyArtifactRepositoryTest extends Specification {
 
     def "creates a resolver for HTTP patterns"() {
         repository.name = 'name'
-        repository.artifactPattern 'http://host/[organisation]/[artifact]-[revision].[ext]'
-        repository.artifactPattern 'http://other/[module]/[artifact]-[revision].[ext]'
-        repository.ivyPattern 'http://host/[module]/ivy-[revision].xml'
+        repository.artifactPattern 'https://host/[organisation]/[artifact]-[revision].[ext]'
+        repository.artifactPattern 'https://other/[module]/[artifact]-[revision].[ext]'
+        repository.ivyPattern 'https://host/[module]/ivy-[revision].xml'
 
         given:
-        fileResolver.resolveUri('http://host/') >> new URI('http://host/')
-        fileResolver.resolveUri('http://other/') >> new URI('http://other/')
-        transportFactory.createTransport({ it == ['http'] as Set }, 'name', _) >> transport()
-
+        fileResolver.resolveUri('https://host/') >> new URI('https://host/')
+        fileResolver.resolveUri('https://other/') >> new URI('https://other/')
+        standardMockHttpTransport()
 
         when:
         def resolver = repository.createResolver()
@@ -89,8 +94,8 @@ class DefaultIvyArtifactRepositoryTest extends Specification {
             it instanceof IvyResolver
             repository == resourceRepository
             name == 'name'
-            artifactPatterns == ['http://host/[organisation]/[artifact]-[revision].[ext]', 'http://other/[module]/[artifact]-[revision].[ext]']
-            ivyPatterns == ['http://host/[module]/ivy-[revision].xml']
+            artifactPatterns == ['https://host/[organisation]/[artifact]-[revision].[ext]', 'https://other/[module]/[artifact]-[revision].[ext]']
+            ivyPatterns == ['https://host/[module]/ivy-[revision].xml']
         }
     }
 
@@ -104,7 +109,7 @@ class DefaultIvyArtifactRepositoryTest extends Specification {
 
         given:
         fileResolver.resolveUri('repo/') >> fileUri
-        transportFactory.createTransport({ it == ['file'] as Set }, 'name', _) >> transport()
+        standardMockFileTransport()
 
         when:
         def resolver = repository.createResolver()
@@ -120,12 +125,12 @@ class DefaultIvyArtifactRepositoryTest extends Specification {
 
     def "uses ivy patterns with specified url and default layout"() {
         repository.name = 'name'
-        repository.url = 'http://host'
+        repository.url = 'https://host'
         repository.layout 'ivy'
 
         given:
-        fileResolver.resolveUri('http://host') >> new URI('http://host/')
-        transportFactory.createTransport({ it == ['http'] as Set }, 'name', _) >> transport()
+        fileResolver.resolveUri('https://host') >> new URI('https://host/')
+        standardMockHttpTransport()
 
         when:
         def resolver = repository.createResolver()
@@ -135,18 +140,18 @@ class DefaultIvyArtifactRepositoryTest extends Specification {
             it instanceof IvyResolver
             repository instanceof ExternalResourceRepository
             name == 'name'
-            artifactPatterns == ['http://host/[organisation]/[module]/[revision]/[type]s/[artifact](.[ext])']
-            ivyPatterns == ["http://host/[organisation]/[module]/[revision]/[type]s/[artifact](.[ext])"]
+            artifactPatterns == ['https://host/[organisation]/[module]/[revision]/[type]s/[artifact](.[ext])']
+            ivyPatterns == ["https://host/[organisation]/[module]/[revision]/[type]s/[artifact](.[ext])"]
         }
     }
 
     def "uses gradle patterns with specified url and default layout"() {
         repository.name = 'name'
-        repository.url = 'http://host'
+        repository.url = 'https://host'
 
         given:
-        fileResolver.resolveUri('http://host') >> new URI('http://host/')
-        transportFactory.createTransport({ it == ['http'] as Set }, 'name', _) >> transport()
+        fileResolver.resolveUri('https://host') >> new URI('https://host/')
+        standardMockHttpTransport()
 
         when:
         def resolver = repository.createResolver()
@@ -156,19 +161,19 @@ class DefaultIvyArtifactRepositoryTest extends Specification {
             it instanceof IvyResolver
             repository instanceof ExternalResourceRepository
             name == 'name'
-            artifactPatterns == ['http://host/[organisation]/[module]/[revision]/[artifact]-[revision](-[classifier])(.[ext])']
-            ivyPatterns == ["http://host/[organisation]/[module]/[revision]/ivy-[revision].xml"]
+            artifactPatterns == ['https://host/[organisation]/[module]/[revision]/[artifact]-[revision](-[classifier])(.[ext])']
+            ivyPatterns == ["https://host/[organisation]/[module]/[revision]/ivy-[revision].xml"]
         }
     }
 
     def "uses maven patterns with specified url and maven layout"() {
         repository.name = 'name'
-        repository.url = 'http://host'
+        repository.url = 'https://host'
         repository.layout 'maven'
 
         given:
-        fileResolver.resolveUri('http://host') >> new URI('http://host/')
-        transportFactory.createTransport({ it == ['http'] as Set }, 'name', _) >> transport()
+        fileResolver.resolveUri('https://host') >> new URI('https://host/')
+        standardMockHttpTransport()
 
         when:
         def resolver = repository.createResolver()
@@ -178,23 +183,23 @@ class DefaultIvyArtifactRepositoryTest extends Specification {
             it instanceof IvyResolver
             repository instanceof ExternalResourceRepository
             name == 'name'
-            artifactPatterns == ['http://host/[organisation]/[module]/[revision]/[artifact]-[revision](-[classifier])(.[ext])']
-            ivyPatterns == ["http://host/[organisation]/[module]/[revision]/ivy-[revision].xml"]
+            artifactPatterns == ['https://host/[organisation]/[module]/[revision]/[artifact]-[revision](-[classifier])(.[ext])']
+            ivyPatterns == ["https://host/[organisation]/[module]/[revision]/ivy-[revision].xml"]
             m2compatible
         }
     }
 
     def "uses specified base url with configured pattern layout"() {
         repository.name = 'name'
-        repository.url = 'http://host'
+        repository.url = 'https://host'
         repository.patternLayout {
             artifact '[module]/[revision]/[artifact](.[ext])'
             ivy '[module]/[revision]/ivy.xml'
         }
 
         given:
-        fileResolver.resolveUri('http://host') >> new URI('http://host/')
-        transportFactory.createTransport({ it == ['http'] as Set }, 'name', _) >> transport()
+        fileResolver.resolveUri('https://host') >> new URI('https://host/')
+        standardMockHttpTransport()
 
         when:
         def resolver = repository.createResolver()
@@ -204,15 +209,15 @@ class DefaultIvyArtifactRepositoryTest extends Specification {
             it instanceof IvyResolver
             repository instanceof ExternalResourceRepository
             name == 'name'
-            artifactPatterns == ['http://host/[module]/[revision]/[artifact](.[ext])']
-            ivyPatterns == ["http://host/[module]/[revision]/ivy.xml"]
+            artifactPatterns == ['https://host/[module]/[revision]/[artifact](.[ext])']
+            ivyPatterns == ["https://host/[module]/[revision]/ivy.xml"]
             !resolver.m2compatible
         }
     }
 
     def "when requested uses maven patterns with configured pattern layout"() {
         repository.name = 'name'
-        repository.url = 'http://host'
+        repository.url = 'https://host'
         repository.patternLayout {
             artifact '[module]/[revision]/[artifact](.[ext])'
             ivy '[module]/[revision]/ivy.xml'
@@ -220,8 +225,8 @@ class DefaultIvyArtifactRepositoryTest extends Specification {
         }
 
         given:
-        fileResolver.resolveUri('http://host') >> new URI('http://host/')
-        transportFactory.createTransport({ it == ['http'] as Set }, 'name', _) >> transport()
+        fileResolver.resolveUri('https://host') >> new URI('https://host/')
+        standardMockHttpTransport()
 
         when:
         def resolver = repository.createResolver()
@@ -231,21 +236,21 @@ class DefaultIvyArtifactRepositoryTest extends Specification {
             it instanceof IvyResolver
             repository instanceof ExternalResourceRepository
             name == 'name'
-            artifactPatterns == ['http://host/[module]/[revision]/[artifact](.[ext])']
-            ivyPatterns == ["http://host/[module]/[revision]/ivy.xml"]
+            artifactPatterns == ['https://host/[module]/[revision]/[artifact](.[ext])']
+            ivyPatterns == ["https://host/[module]/[revision]/ivy.xml"]
             m2compatible
         }
     }
 
     def "combines layout patterns with additionally specified patterns"() {
         repository.name = 'name'
-        repository.url = 'http://host/'
-        repository.artifactPattern 'http://host/[other]/artifact'
-        repository.ivyPattern 'http://host/[other]/ivy'
+        repository.url = 'https://host/'
+        repository.artifactPattern 'https://host/[other]/artifact'
+        repository.ivyPattern 'https://host/[other]/ivy'
 
         given:
-        fileResolver.resolveUri('http://host/') >> new URI('http://host/')
-        transportFactory.createTransport({ it == ['http'] as Set }, 'name', _) >> transport()
+        fileResolver.resolveUri('https://host/') >> new URI('https://host/')
+        standardMockHttpTransport()
 
         when:
         def resolver = repository.createResolver()
@@ -255,29 +260,29 @@ class DefaultIvyArtifactRepositoryTest extends Specification {
             it instanceof IvyResolver
             repository instanceof ExternalResourceRepository
             name == 'name'
-            artifactPatterns == ['http://host/[organisation]/[module]/[revision]/[artifact]-[revision](-[classifier])(.[ext])', 'http://host/[other]/artifact']
-            ivyPatterns == ["http://host/[organisation]/[module]/[revision]/ivy-[revision].xml", 'http://host/[other]/ivy']
+            artifactPatterns == ['https://host/[organisation]/[module]/[revision]/[artifact]-[revision](-[classifier])(.[ext])', 'https://host/[other]/artifact']
+            ivyPatterns == ["https://host/[organisation]/[module]/[revision]/ivy-[revision].xml", 'https://host/[other]/ivy']
         }
     }
 
     def "uses artifact pattern for ivy files when no ivy pattern provided"() {
         repository.name = 'name'
-        repository.url = 'http://host'
+        repository.url = 'https://host'
         repository.patternLayout {
             artifact '[layoutPattern]'
         }
-        repository.artifactPattern 'http://other/[additionalPattern]'
-        transportFactory.createTransport({ it == ['http'] as Set }, 'name', _) >> transport()
+        repository.artifactPattern 'https://other/[additionalPattern]'
+        standardMockHttpTransport()
 
         given:
-        fileResolver.resolveUri('http://host') >> new URI('http://host')
-        fileResolver.resolveUri('http://other/') >> new URI('http://other/')
+        fileResolver.resolveUri('https://host') >> new URI('https://host')
+        fileResolver.resolveUri('https://other/') >> new URI('https://other/')
 
         when:
         def resolver = repository.createResolver()
 
         then:
-        resolver.artifactPatterns == ['http://host/[layoutPattern]', 'http://other/[additionalPattern]']
+        resolver.artifactPatterns == ['https://host/[layoutPattern]', 'https://other/[additionalPattern]']
         resolver.ivyPatterns == resolver.artifactPatterns
     }
 
@@ -290,14 +295,14 @@ class DefaultIvyArtifactRepositoryTest extends Specification {
 
         then:
         InvalidUserDataException e = thrown()
-        e.message == 'You must specify a base url or at least one artifact pattern for an Ivy repository.'
+        e.message == "You must specify a base url or at least one artifact pattern for the Ivy repository 'null'."
     }
 
     def "can set a custom metadata rule"() {
         repository.name = 'name'
-        repository.url = 'http://host'
-        fileResolver.resolveUri('http://host') >> new URI('http://host/')
-        transportFactory.createTransport({ it == ['http'] as Set }, 'name', _) >> transport()
+        repository.url = 'https://host'
+        fileResolver.resolveUri('https://host') >> new URI('https://host/')
+        standardMockHttpTransport()
 
         given:
         repository.setMetadataSupplier(CustomMetadataSupplier)
@@ -312,9 +317,9 @@ class DefaultIvyArtifactRepositoryTest extends Specification {
 
     def "can inject configuration into a custom metadata rule"() {
         repository.name = 'name'
-        repository.url = 'http://host'
-        fileResolver.resolveUri('http://host') >> new URI('http://host/')
-        transportFactory.createTransport({ it == ['http'] as Set }, 'name', _) >> transport()
+        repository.url = 'https://host'
+        fileResolver.resolveUri('https://host') >> new URI('https://host/')
+        standardMockHttpTransport()
 
         given:
         repository.setMetadataSupplier(CustomMetadataSupplierWithParams) { it.params("a", 12, [1, 2, 3]) }
@@ -330,9 +335,9 @@ class DefaultIvyArtifactRepositoryTest extends Specification {
 
     def "can set a custom version lister"() {
         repository.name = 'name'
-        repository.url = 'http://host'
-        fileResolver.resolveUri('http://host') >> new URI('http://host/')
-        transportFactory.createTransport({ it == ['http'] as Set }, 'name', _) >> transport()
+        repository.url = 'https://host'
+        fileResolver.resolveUri('https://host') >> new URI('https://host/')
+        standardMockHttpTransport()
 
         given:
         repository.setComponentVersionsLister(CustomVersionLister)
@@ -347,9 +352,9 @@ class DefaultIvyArtifactRepositoryTest extends Specification {
 
     def "can inject configuration into a custom version lister"() {
         repository.name = 'name'
-        repository.url = 'http://host'
-        fileResolver.resolveUri('http://host') >> new URI('http://host/')
-        transportFactory.createTransport({ it == ['http'] as Set }, 'name', _) >> transport()
+        repository.url = 'https://host'
+        fileResolver.resolveUri('https://host') >> new URI('https://host/')
+        standardMockHttpTransport()
 
         given:
         repository.setComponentVersionsLister(CustomVersionListerWithParams) { it.params("a", 12, [1, 2, 3]) }
@@ -360,6 +365,41 @@ class DefaultIvyArtifactRepositoryTest extends Specification {
         then:
         lister.rules.configurableRules[0].ruleClass == CustomVersionListerWithParams
         lister.rules.configurableRules[0].ruleParams.isolate() == ["a", 12, [1,2,3]] as Object[]
+    }
+
+    def "can retrieve metadataSources"() {
+        repository.name = 'name'
+        repository.url = 'https://host'
+        fileResolver.resolveUri('https://host') >> new URI('https://host/')
+        standardMockHttpTransport()
+
+        given:
+        repository.metadataSources(new Action<IvyArtifactRepository.MetadataSources>() {
+            @Override
+            void execute(IvyArtifactRepository.MetadataSources metadataSources) {
+                metadataSources.ivyDescriptor()
+                metadataSources.artifact()
+                metadataSources.gradleMetadata()
+                metadataSources.ignoreGradleMetadataRedirection()
+            }
+        })
+
+        when:
+        IvyArtifactRepository.MetadataSources metadataSources = repository.getMetadataSources()
+
+        then:
+        metadataSources.isIvyDescriptorEnabled()
+        metadataSources.isArtifactEnabled()
+        metadataSources.isGradleMetadataEnabled()
+        metadataSources.isIgnoreGradleMetadataRedirectionEnabled()
+    }
+
+    private void standardMockFileTransport() {
+        transportFactory.createTransport({ it == ['file'] as Set }, 'name', _, _) >> transport()
+    }
+
+    private void standardMockHttpTransport() {
+        transportFactory.createTransport({ it == ['https'] as Set }, 'name', _, _) >> transport()
     }
 
     static class CustomVersionLister implements ComponentMetadataVersionLister {

@@ -46,13 +46,12 @@ import org.gradle.internal.serialize.Encoder;
 import org.gradle.internal.serialize.HashCodeSerializer;
 import org.gradle.internal.serialize.Serializer;
 import org.gradle.internal.snapshot.ValueSnapshotter;
-import org.gradle.util.BuildCommencedTimeProvider;
+import org.gradle.util.internal.BuildCommencedTimeProvider;
 
 import javax.annotation.Nullable;
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
-import java.io.Serializable;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -61,7 +60,7 @@ public class CrossBuildCachingRuleExecutor<KEY, DETAILS, RESULT> implements Cach
     private final static Logger LOGGER = Logging.getLogger(CrossBuildCachingRuleExecutor.class);
 
     private final ValueSnapshotter snapshotter;
-    private final Transformer<Serializable, KEY> ketToSnapshottable;
+    private final Transformer<?, KEY> keyToSnapshottable;
     private final PersistentCache cache;
     private final PersistentIndexedCache<HashCode, CachedEntry<RESULT>> store;
     private final BuildCommencedTimeProvider timeProvider;
@@ -73,15 +72,15 @@ public class CrossBuildCachingRuleExecutor<KEY, DETAILS, RESULT> implements Cach
                                          ValueSnapshotter snapshotter,
                                          BuildCommencedTimeProvider timeProvider,
                                          EntryValidator<RESULT> validator,
-                                         Transformer<Serializable, KEY> ketToSnapshottable,
+                                         Transformer<?, KEY> keyToSnapshottable,
                                          Serializer<RESULT> resultSerializer) {
         this.snapshotter = snapshotter;
         this.validator = validator;
-        this.ketToSnapshottable = ketToSnapshottable;
+        this.keyToSnapshottable = keyToSnapshottable;
         this.timeProvider = timeProvider;
         this.cache = cacheRepository
             .cache(name)
-            .withLockOptions(LockOptionsBuilder.mode(FileLockManager.LockMode.None))
+            .withLockOptions(LockOptionsBuilder.mode(FileLockManager.LockMode.OnDemand))
             .open();
         PersistentIndexedCacheParameters<HashCode, CachedEntry<RESULT>> cacheParams = createCacheConfiguration(name, resultSerializer, cacheDecoratorFactory);
         this.store = this.cache.createCache(cacheParams);
@@ -98,7 +97,7 @@ public class CrossBuildCachingRuleExecutor<KEY, DETAILS, RESULT> implements Cach
     }
 
     private Serializer<CachedEntry<RESULT>> createEntrySerializer(final Serializer<RESULT> resultSerializer) {
-        return new CacheEntrySerializer<RESULT>(resultSerializer);
+        return new CacheEntrySerializer<>(resultSerializer);
     }
 
     @Override
@@ -122,7 +121,7 @@ public class CrossBuildCachingRuleExecutor<KEY, DETAILS, RESULT> implements Cach
             action = action.withInstantiator(instantiator.capturing(registrar));
         }
         // First step is to find an entry with the explicit inputs in the cache
-        CachedEntry<RESULT> entry = store.get(keyHash);
+        CachedEntry<RESULT> entry = store.getIfPresent(keyHash);
         if (entry != null) {
             if (LOGGER.isDebugEnabled()) {
                 LOGGER.debug("Found result for rule {} and key {} in cache", rules, key);
@@ -138,7 +137,7 @@ public class CrossBuildCachingRuleExecutor<KEY, DETAILS, RESULT> implements Cach
         }
 
         RESULT result = executeRule(key, action, detailsToResult, onCacheMiss);
-        store.put(keyHash, new CachedEntry<RESULT>(timeProvider.getCurrentTime(), registrar.implicits, result));
+        store.put(keyHash, new CachedEntry<>(timeProvider.getCurrentTime(), registrar.implicits, result));
         return result;
     }
 
@@ -151,7 +150,7 @@ public class CrossBuildCachingRuleExecutor<KEY, DETAILS, RESULT> implements Cach
      */
     private HashCode computeExplicitInputsSnapshot(KEY key, ConfigurableRules<DETAILS> rules) {
         List<Object> toBeSnapshotted = Lists.newArrayListWithExpectedSize(2 + 2 * rules.getConfigurableRules().size());
-        toBeSnapshotted.add(ketToSnapshottable.transform(key));
+        toBeSnapshotted.add(keyToSnapshottable.transform(key));
         for (ConfigurableRule<DETAILS> rule : rules.getConfigurableRules()) {
             Class<? extends Action<DETAILS>> ruleClass = rule.getRuleClass();
             Isolatable<Object[]> ruleParams = rule.getRuleParams();
@@ -244,7 +243,7 @@ public class CrossBuildCachingRuleExecutor<KEY, DETAILS, RESULT> implements Cach
 
         @Override
         public CachedEntry<RESULT> read(Decoder decoder) throws Exception {
-            return new CachedEntry<RESULT>(decoder.readLong(), readImplicits(decoder), resultSerializer.read(decoder));
+            return new CachedEntry<>(decoder.readLong(), readImplicits(decoder), resultSerializer.read(decoder));
         }
 
         private Multimap<String, ImplicitInputRecord<?, ?>> readImplicits(Decoder decoder) throws Exception {
@@ -325,7 +324,7 @@ public class CrossBuildCachingRuleExecutor<KEY, DETAILS, RESULT> implements Cach
     private static class AnySerializer implements Serializer<Object> {
         private static final BaseSerializerFactory SERIALIZER_FACTORY = new BaseSerializerFactory();
 
-        private static final Class<?>[] USUAL_TYPES = new Class[] {
+        private static final Class<?>[] USUAL_TYPES = new Class<?>[] {
             String.class,
             Boolean.class,
             Long.class,

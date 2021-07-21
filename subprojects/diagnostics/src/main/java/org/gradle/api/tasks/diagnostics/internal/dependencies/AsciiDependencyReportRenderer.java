@@ -16,10 +16,11 @@
 package org.gradle.api.tasks.diagnostics.internal.dependencies;
 
 import org.gradle.api.Action;
-import org.gradle.api.Project;
+import org.gradle.api.NonNullApi;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.artifacts.result.ResolutionResult;
 import org.gradle.api.tasks.diagnostics.internal.DependencyReportRenderer;
+import org.gradle.api.tasks.diagnostics.internal.ProjectDetails;
 import org.gradle.api.tasks.diagnostics.internal.TextReportRenderer;
 import org.gradle.api.tasks.diagnostics.internal.graph.DependencyGraphsRenderer;
 import org.gradle.api.tasks.diagnostics.internal.graph.NodeRenderer;
@@ -28,11 +29,11 @@ import org.gradle.api.tasks.diagnostics.internal.graph.nodes.RenderableDependenc
 import org.gradle.api.tasks.diagnostics.internal.graph.nodes.RenderableModuleResult;
 import org.gradle.api.tasks.diagnostics.internal.graph.nodes.UnresolvableConfigurationResult;
 import org.gradle.initialization.StartParameterBuildOptions;
+import org.gradle.internal.deprecation.DeprecatableConfiguration;
 import org.gradle.internal.graph.GraphRenderer;
 import org.gradle.internal.logging.text.StyledTextOutput;
-import org.gradle.util.GUtil;
+import org.gradle.util.internal.GUtil;
 
-import java.io.IOException;
 import java.util.Collections;
 
 import static org.gradle.internal.logging.text.StyledTextOutput.Style.Description;
@@ -43,6 +44,7 @@ import static org.gradle.internal.logging.text.StyledTextOutput.Style.UserInput;
 /**
  * Simple dependency graph renderer that emits an ASCII tree.
  */
+@NonNullApi
 public class AsciiDependencyReportRenderer extends TextReportRenderer implements DependencyReportRenderer {
     private final ConfigurationAction configurationAction = new ConfigurationAction();
     private boolean hasConfigs;
@@ -51,7 +53,7 @@ public class AsciiDependencyReportRenderer extends TextReportRenderer implements
     DependencyGraphsRenderer dependencyGraphRenderer;
 
     @Override
-    public void startProject(Project project) {
+    public void startProject(ProjectDetails project) {
         super.startProject(project);
         prepareVisit();
     }
@@ -63,7 +65,7 @@ public class AsciiDependencyReportRenderer extends TextReportRenderer implements
     }
 
     @Override
-    public void completeProject(Project project) {
+    public void completeProject(ProjectDetails project) {
         if (!hasConfigs) {
             getTextOutput().withStyle(Info).println("No configurations");
         }
@@ -89,14 +91,19 @@ public class AsciiDependencyReportRenderer extends TextReportRenderer implements
     public void completeConfiguration(Configuration configuration) {}
 
     @Override
-    public void render(Configuration configuration) throws IOException {
-        if (configuration.isCanBeResolved()) {
+    public void render(Configuration configuration) {
+        if (canBeResolved(configuration)) {
             ResolutionResult result = configuration.getIncoming().getResolutionResult();
             RenderableDependency root = new RenderableModuleResult(result.getRoot());
             renderNow(root);
         } else {
             renderNow(new UnresolvableConfigurationResult(configuration));
         }
+    }
+
+    private boolean canBeResolved(Configuration configuration) {
+        boolean isDeprecatedForResolving = ((DeprecatableConfiguration) configuration).getResolutionAlternatives() != null;
+        return configuration.isCanBeResolved() && !isDeprecatedForResolving;
     }
 
     void renderNow(RenderableDependency root) {
@@ -126,10 +133,11 @@ public class AsciiDependencyReportRenderer extends TextReportRenderer implements
     private class ConfigurationAction implements Action<StyledTextOutput> {
         private Configuration configuration;
 
+        @Override
         public void execute(StyledTextOutput styledTextOutput) {
             getTextOutput().withStyle(Identifier).text(configuration.getName());
             getTextOutput().withStyle(Description).text(getDescription(configuration));
-            if (!configuration.isCanBeResolved()) {
+            if (!canBeResolved(configuration)) {
                 getTextOutput().withStyle(Info).text(" (n)");
             }
         }

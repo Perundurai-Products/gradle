@@ -16,26 +16,11 @@
 
 package org.gradle.internal.logging.console.taskgrouping
 
+
 import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
 import spock.lang.IgnoreIf
 
 abstract class AbstractConsoleVerboseRenderingFunctionalTest extends AbstractConsoleVerboseBasicFunctionalTest {
-    def 'failed task result can be rendered'() {
-        given:
-        buildFile << '''
-            task myFailure {
-                doLast {
-                    assert false
-                }
-            }
-        '''
-
-        when:
-        fails('myFailure')
-
-        then:
-        result.groupedOutput.task(':myFailure').outcome == 'FAILED'
-    }
 
     def 'up-to-date task result can be rendered'() {
         given:
@@ -69,7 +54,7 @@ abstract class AbstractConsoleVerboseRenderingFunctionalTest extends AbstractCon
         """
         buildFile << """
             task allTasks
-            
+
             12.times { i ->
                 project(":project\${i}") {
                     task "slowTask\${i}" {
@@ -77,7 +62,7 @@ abstract class AbstractConsoleVerboseRenderingFunctionalTest extends AbstractCon
                             sleep 2000 + (1000*(i%2))
                         }
                     }
-                    
+
                     rootProject.allTasks.dependsOn ":project\${i}:slowTask\${i}"
                 }
             }

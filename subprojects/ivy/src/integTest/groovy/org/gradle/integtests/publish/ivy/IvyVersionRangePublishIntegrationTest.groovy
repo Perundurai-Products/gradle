@@ -16,12 +16,18 @@
 
 package org.gradle.integtests.publish.ivy
 
-import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 
-class IvyVersionRangePublishIntegrationTest extends AbstractIntegrationSpec {
+class IvyVersionRangePublishIntegrationTest extends AbstractLegacyIvyPublishTest {
     def ivyModule = ivyRepo.module("org.gradle.test", "publishTest", "1.9")
 
-    public void "version range is mapped to ivy syntax in published ivy file"() {
+    def setup() {
+        // the OLD publish plugins work with the OLD deprecated Java plugin configuration (compile/runtime)
+        executer.noDeprecationChecks()
+    }
+
+    @ToBeFixedForConfigurationCache
+    void "version range is mapped to ivy syntax in published ivy file"() {
         given:
         settingsFile << "rootProject.name = 'publishTest' "
         and:
@@ -32,11 +38,11 @@ group = 'org.gradle.test'
 version = '1.9'
 
 dependencies {
-    compile "group:projectA:latest.release"
-    compile "group:projectB:latest.integration"
-    compile "group:projectC:1.+"
-    compile "group:projectD:[1.0,2.0)"
-    compile "group:projectE:[1.0]"
+    implementation "group:projectA:latest.release"
+    implementation "group:projectB:latest.integration"
+    implementation "group:projectC:1.+"
+    implementation "group:projectD:[1.0,2.0)"
+    implementation "group:projectE:[1.0]"
 }
 
 uploadArchives {
@@ -49,19 +55,21 @@ uploadArchives {
 """
 
         when:
+        expectUploadTaskDeprecationWarning("uploadArchives")
         run "uploadArchives"
 
         then:
         ivyModule.assertPublished()
         ivyModule.parsedIvy.assertDependsOn(
-                "group:projectA:latest.release@compile",
-                "group:projectB:latest.integration@compile",
-                "group:projectC:1.+@compile",
-                "group:projectD:[1.0,2.0)@compile",
-                "group:projectE:1.0@compile"
+                "group:projectA:latest.release@implementation",
+                "group:projectB:latest.integration@implementation",
+                "group:projectC:1.+@implementation",
+                "group:projectD:[1.0,2.0)@implementation",
+                "group:projectE:1.0@implementation"
         )
     }
 
+    @ToBeFixedForConfigurationCache
     def "publishes Ivy dependency version for Gradle dependency with no version"() {
         given:
         settingsFile << "rootProject.name = 'publishTest' "
@@ -73,8 +81,8 @@ group = 'org.gradle.test'
 version = '1.9'
 
 dependencies {
-    compile "group:projectA"
-    compile group:"group", name:"projectB", version:null
+    implementation "group:projectA"
+    implementation group:"group", name:"projectB", version:null
 }
 
 uploadArchives {
@@ -87,9 +95,10 @@ uploadArchives {
 """
 
         when:
+        expectUploadTaskDeprecationWarning("uploadArchives")
         run "uploadArchives"
 
         then:
-        ivyModule.parsedIvy.assertDependsOn("group:projectA:@compile", "group:projectB:@compile")
+        ivyModule.parsedIvy.assertDependsOn("group:projectA:@implementation", "group:projectB:@implementation")
     }
 }

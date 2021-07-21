@@ -16,7 +16,6 @@
 
 package org.gradle.api.artifacts.result;
 
-import org.gradle.api.Incubating;
 import org.gradle.internal.HasInternalProtocol;
 import org.gradle.internal.scan.UsedByScanPlugin;
 
@@ -63,7 +62,6 @@ public interface ComponentSelectionReason {
      *
      * @since 4.5
      */
-    @Incubating
     boolean isCompositeSubstitution();
 
     /**
@@ -76,20 +74,11 @@ public interface ComponentSelectionReason {
     boolean isConstrained();
 
     /**
-     * Returns a human-consumable description of this selection reason.
-     *
-     * @deprecated Use {@link #getDescriptions()} instead
-     */
-    @Deprecated
-    String getDescription();
-
-    /**
      * Returns a list of descriptions of the causes that led to the selection of this component.
      *
      * @return the list of descriptions.
      *
      * @since 4.6
      */
-    @Incubating
     List<ComponentSelectionDescriptor> getDescriptions();
 }

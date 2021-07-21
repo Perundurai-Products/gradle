@@ -17,6 +17,7 @@
 package org.gradle.language.cpp
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.nativeplatform.fixtures.AvailableToolChains
 import org.gradle.nativeplatform.fixtures.AvailableToolChains.InstalledToolChain
 import org.gradle.nativeplatform.fixtures.app.CppHelloWorldApp
@@ -28,7 +29,7 @@ class CppToolChainChangesIntegrationTest extends AbstractIntegrationSpec {
     def setup() {
         def app = new CppHelloWorldApp()
 
-        buildFile << """    
+        buildFile << """
             project(':library') {
                 apply plugin: 'cpp-library'
                 library {
@@ -55,8 +56,17 @@ class CppToolChainChangesIntegrationTest extends AbstractIntegrationSpec {
     }
 
     @Unroll
+    @ToBeFixedForConfigurationCache
     def "recompiles binary when toolchain changes from #toolChainBefore to #toolChainAfter"() {
         buildFile.text = buildScriptForToolChains(toolChainBefore, toolChainAfter)
+        def useAlternateToolChain = false
+        executer.beforeExecute({
+            if (useAlternateToolChain) {
+                toolChainAfter.configureExecuter(it)
+            } else {
+                toolChainBefore.configureExecuter(it)
+            }
+        })
 
         when:
         run ':app:compileDebugCpp'
@@ -65,6 +75,7 @@ class CppToolChainChangesIntegrationTest extends AbstractIntegrationSpec {
         executedAndNotSkipped ':app:compileDebugCpp'
 
         when:
+        useAlternateToolChain = true
         run ':app:compileDebugCpp', '-PuseAlternativeToolChain=true', "--info"
 
         then:
@@ -78,11 +89,11 @@ class CppToolChainChangesIntegrationTest extends AbstractIntegrationSpec {
     }
 
     private static GString buildScriptForToolChains(InstalledToolChain before, InstalledToolChain after) {
-        """ 
+        """
             allprojects {
                 apply plugin: ${before.pluginClass}
                 apply plugin: ${after.pluginClass}
-                
+
                 model {
                     toolChains {
                         if (findProperty('useAlternativeToolChain')) {
@@ -91,7 +102,7 @@ class CppToolChainChangesIntegrationTest extends AbstractIntegrationSpec {
                             ${before.buildScriptConfig}
                         }
                     }
-                }                                    
+                }
             }
             project(':library') {
                 apply plugin: 'cpp-library'
@@ -118,11 +129,12 @@ class CppToolChainChangesIntegrationTest extends AbstractIntegrationSpec {
         }
         int numberOfToolChains = availableToolChains.size()
         Assume.assumeTrue('2 or more tool chains are required for this test', numberOfToolChains >= 2)
-        (0..<(numberOfToolChains - 1)).collectMany { first ->
-            ((first+1)..<numberOfToolChains).collect { second ->
+        List<List<InstalledToolChain>> result = (0..<(numberOfToolChains - 1)).collectMany { first ->
+            ((first + 1)..<numberOfToolChains).collect { second ->
                 [availableToolChains[first], availableToolChains[second]]
             }
         }
+        // To avoid [gcc, g++] pair because they have same display name
+        return result.findAll { it[0].displayName != it[1].displayName }
     }
-
 }

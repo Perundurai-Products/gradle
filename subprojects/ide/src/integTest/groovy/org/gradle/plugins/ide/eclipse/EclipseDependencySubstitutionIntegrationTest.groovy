@@ -15,6 +15,7 @@
  */
 package org.gradle.plugins.ide.eclipse
 
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.integtests.fixtures.TestResources
 import org.junit.Rule
 import org.junit.Test
@@ -24,6 +25,7 @@ class EclipseDependencySubstitutionIntegrationTest extends AbstractEclipseIntegr
     public final TestResources testResources = new TestResources(testDirectoryProvider)
 
     @Test
+    @ToBeFixedForConfigurationCache
     void "external dependency substituted with project dependency"() {
         runEclipseTask("include 'project1', 'project2'", """
 allprojects {
@@ -33,12 +35,12 @@ allprojects {
 
 project(":project2") {
     dependencies {
-        compile group: "junit", name: "junit", version: "4.7"
+        implementation group: "junit", name: "junit", version: "4.7"
     }
 
     configurations.all {
         resolutionStrategy.dependencySubstitution {
-            substitute module("junit:junit:4.7") with project(":project1")
+            substitute module("junit:junit:4.7") using project(":project1")
         }
     }
 }
@@ -50,6 +52,7 @@ project(":project2") {
     }
 
     @Test
+    @ToBeFixedForConfigurationCache
     void "transitive external dependency substituted with project dependency"() {
         mavenRepo.module("org.gradle", "module1").dependsOnModules("module2").publish()
         mavenRepo.module("org.gradle", "module2").publish()
@@ -66,12 +69,12 @@ project(":project2") {
     }
 
     dependencies {
-        compile "org.gradle:module1:1.0"
+        implementation "org.gradle:module1:1.0"
     }
 
     configurations.all {
         resolutionStrategy.dependencySubstitution {
-            substitute module("org.gradle:module2:1.0") with project(":project1")
+            substitute module("org.gradle:module2:1.0") using project(":project1")
         }
     }
 }
@@ -84,6 +87,7 @@ project(":project2") {
 
 
     @Test
+    @ToBeFixedForConfigurationCache
     void "project dependency substituted with external dependency"() {
         runEclipseTask("include 'project1', 'project2'", """
  allprojects {
@@ -95,12 +99,12 @@ project(":project2") {
     ${mavenCentralRepository()}
 
     dependencies {
-        compile project(":project1")
+        implementation project(":project1")
     }
 
     configurations.all {
         resolutionStrategy.dependencySubstitution {
-            substitute project(":project1") with module("junit:junit:4.7")
+            substitute project(":project1") using module("junit:junit:4.7")
         }
     }
 }

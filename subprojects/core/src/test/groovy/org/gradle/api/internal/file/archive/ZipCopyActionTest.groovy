@@ -28,16 +28,15 @@ import org.gradle.test.fixtures.archive.ZipTestFixture
 import org.gradle.test.fixtures.file.TestFile
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.junit.Rule
-import org.junit.Test
 import spock.lang.Specification
 
 import static org.gradle.api.internal.file.copy.CopyActionExecuterUtil.visit
-import static org.hamcrest.Matchers.equalTo
+import static org.hamcrest.CoreMatchers.equalTo
 
 class ZipCopyActionTest extends Specification {
 
     @Rule
-    public final TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
+    public final TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider(getClass())
 
     ZipCopyAction visitor
     TestFile zipFile
@@ -129,7 +128,6 @@ class ZipCopyActionTest extends Specification {
         e.message == "xyz\n\nTo build this archive, please enable the zip64 extension.\nSee: doc url"
     }
 
-    @Test
     void wrapsFailureToAddElement() {
         given:
         Throwable failure = new RuntimeException("broken")

@@ -21,14 +21,21 @@ import groovy.lang.Closure;
 import org.gradle.api.Action;
 import org.gradle.api.InvalidActionClosureException;
 
+
 /**
- * NOTE: You should use {@link ConfigureUtil} instead of this class when adding a closure backed method to the DSL, whether statically or dynamically added. {@link ConfigureUtil} is much more efficient and takes care of applying consistent DSL behaviour when closures are nested.
+ * This class is only here to maintain binary compatibility with existing plugins.
+ * <p>
+ * To apply a configuration (represented by a Groovy closure) on an object, use {@link org.gradle.api.Project#configure(Object, Closure)}.
+ *
+ * @deprecated Will be removed in Gradle 8.0.
+ * @param <T> The action type.
  */
+@Deprecated
 public class ClosureBackedAction<T> implements Action<T> {
 
     private final Closure closure;
     private final int resolveStrategy;
-    private final boolean configureableAware;
+    private final boolean configurableAware;
 
     public static <T> ClosureBackedAction<T> of(Closure<?> closure) {
         return new ClosureBackedAction<T>(closure);
@@ -42,23 +49,24 @@ public class ClosureBackedAction<T> implements Action<T> {
         this(closure, resolveStrategy, false);
     }
 
-    public ClosureBackedAction(Closure closure, int resolveStrategy, boolean configureableAware) {
+    public ClosureBackedAction(Closure closure, int resolveStrategy, boolean configurableAware) {
         this.closure = closure;
         this.resolveStrategy = resolveStrategy;
-        this.configureableAware = configureableAware;
+        this.configurableAware = configurableAware;
     }
 
     public static <T> void execute(T delegate, Closure<?> closure) {
         new ClosureBackedAction<T>(closure).execute(delegate);
     }
 
+    @Override
     public void execute(T delegate) {
         if (closure == null) {
             return;
         }
 
         try {
-            if (configureableAware && delegate instanceof Configurable) {
+            if (configurableAware && delegate instanceof Configurable) {
                 ((Configurable) delegate).configure(closure);
             } else {
                 Closure copy = (Closure) closure.clone();
@@ -92,7 +100,7 @@ public class ClosureBackedAction<T> implements Action<T> {
         }
 
         ClosureBackedAction that = (ClosureBackedAction) o;
-        return configureableAware == that.configureableAware
+        return configurableAware == that.configurableAware
             && resolveStrategy == that.resolveStrategy
             && closure.equals(that.closure);
     }
@@ -100,7 +108,7 @@ public class ClosureBackedAction<T> implements Action<T> {
     @Override
     public int hashCode() {
         int result = closure.hashCode();
-        result = 31 * result + (configureableAware ? 1 : 0);
+        result = 31 * result + (configurableAware ? 1 : 0);
         result = 31 * result + resolveStrategy;
         return result;
     }

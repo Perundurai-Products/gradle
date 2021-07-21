@@ -17,7 +17,9 @@
 package org.gradle.api.reporting.model
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.integtests.fixtures.UnsupportedWithConfigurationCache
 
+@UnsupportedWithConfigurationCache(because = "software model")
 class ModelReportTaskIntegrationTest extends AbstractIntegrationSpec {
 
     def "should display the model report task options"() {
@@ -25,7 +27,7 @@ class ModelReportTaskIntegrationTest extends AbstractIntegrationSpec {
         run "help", "--task", "model"
 
         then:
-        output.contains("Displays the configuration model of root project '${getTestDirectory().name}'. [incubating]")
+        output.contains("Displays the configuration model of root project '${getTestDirectory().name}'. [deprecated]")
     }
 
 }

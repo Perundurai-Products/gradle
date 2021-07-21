@@ -23,7 +23,7 @@ import org.gradle.api.tasks.testing.TestResult
 import org.slf4j.Logger
 
 import spock.lang.Specification
-import org.gradle.util.TextUtil
+import org.gradle.util.internal.TextUtil
 
 class TestCountLoggerTest extends Specification {
     private final ProgressLoggerFactory factory = Mock()
@@ -115,20 +115,26 @@ class TestCountLoggerTest extends Specification {
         1 * progressLogger.completed()
     }
 
-    def "remembers whether root suite reported failure"() {
+    def "remembers whether any root suite reported failure and sums up total tests"() {
         when:
         logger.beforeSuite(rootSuite)
+        logger.beforeTest(test())
+        logger.afterTest(test(), result())
         logger.afterSuite(rootSuite, result())
 
         then:
         !logger.hadFailures()
+        logger.totalTests == 1
 
         when:
         logger.beforeSuite(rootSuite)
+        logger.beforeTest(test())
+        logger.afterTest(test(), result())
         logger.afterSuite(rootSuite, result(true))
 
         then:
         logger.hadFailures()
+        logger.totalTests == 2
     }
 
     private test() {

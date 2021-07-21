@@ -54,6 +54,10 @@ class MavenHttpModule extends DelegatingMavenModule<MavenHttpModule> implements 
         return getArtifact(options)
     }
 
+    HttpArtifact undeclaredArtifact(Map<String, ?> options = [:]) {
+        return artifact(options)
+    }
+
     MavenHttpModule withSourceAndJavadoc() {
         artifact(classifier: "sources")
         artifact(classifier: "javadoc")
@@ -80,13 +84,6 @@ class MavenHttpModule extends DelegatingMavenModule<MavenHttpModule> implements 
 
     MavenHttpModule allowAll() {
         server.allowGetOrHead(uriPath, backingModule.moduleDir)
-        return this
-    }
-
-    MavenHttpModule revalidate() {
-        server.allowGetOrHeadMissing(pomPath)
-        server.allowGetOrHeadMissing(metaDataPath)
-        server.allowGetOrHeadWithRevalidate(artifactPath, artifactFile)
         return this
     }
 

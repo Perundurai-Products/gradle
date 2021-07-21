@@ -31,10 +31,11 @@ public class MultipleBuildFailuresExceptionAnalyser implements ExceptionAnalyser
         this.collector = collector;
     }
 
-    public RuntimeException transform(Throwable exception) {
+    @Override
+    public RuntimeException transform(Throwable failure) {
         List<Throwable> failures = new ArrayList<Throwable>();
-        if (exception instanceof MultipleBuildFailures) {
-            MultipleBuildFailures multipleBuildFailures = (MultipleBuildFailures) exception;
+        if (failure instanceof MultipleBuildFailures) {
+            MultipleBuildFailures multipleBuildFailures = (MultipleBuildFailures) failure;
             for (Throwable cause : multipleBuildFailures.getCauses()) {
                 collector.collectFailures(cause, failures);
             }
@@ -44,7 +45,7 @@ public class MultipleBuildFailuresExceptionAnalyser implements ExceptionAnalyser
             multipleBuildFailures.replaceCauses(failures);
             return multipleBuildFailures;
         } else {
-            collector.collectFailures(exception, failures);
+            collector.collectFailures(failure, failures);
             if (failures.size() == 1 && failures.get(0) instanceof RuntimeException) {
                 return (RuntimeException) failures.get(0);
             }

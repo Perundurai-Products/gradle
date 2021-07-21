@@ -40,21 +40,29 @@ public interface CopySpecResolver {
 
     RelativePath getDestPath();
 
+    /**
+     * Returns the source files of this copy spec.
+     */
     FileTree getSource();
 
+    /**
+     * Returns the source files of this copy spec and all of its children.
+     */
     FileTree getAllSource();
 
     Collection<? extends Action<? super FileCopyDetails>> getAllCopyActions();
 
-    public List<String> getAllIncludes();
+    List<String> getAllIncludes();
 
-    public List<String> getAllExcludes();
+    List<String> getAllExcludes();
 
-    public List<Spec<FileTreeElement>> getAllIncludeSpecs();
+    List<Spec<FileTreeElement>> getAllIncludeSpecs();
 
-    public List<Spec<FileTreeElement>> getAllExcludeSpecs();
+    List<Spec<FileTreeElement>> getAllExcludeSpecs();
 
     DuplicatesStrategy getDuplicatesStrategy();
+
+    boolean isDefaultDuplicateStrategy();
 
     void walk(Action<? super CopySpecResolver> action);
 

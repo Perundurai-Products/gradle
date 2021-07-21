@@ -18,8 +18,7 @@ package org.gradle.api.internal.tasks.testing.junit.result
 
 import org.gradle.api.Action
 import org.gradle.internal.concurrent.DefaultExecutorFactory
-import org.gradle.internal.concurrent.ParallelismConfigurationManager
-import org.gradle.internal.concurrent.ParallelismConfigurationManagerFixture
+import org.gradle.internal.concurrent.DefaultParallelismConfiguration
 import org.gradle.internal.operations.BuildOperationExecutor
 import org.gradle.internal.operations.BuildOperationListener
 import org.gradle.internal.operations.DefaultBuildOperationExecutor
@@ -37,18 +36,19 @@ import spock.lang.Unroll
 
 class Binary2JUnitXmlReportGeneratorSpec extends Specification {
 
-    @Rule private TestNameTestDirectoryProvider temp = new TestNameTestDirectoryProvider()
+    @Rule
+    private TestNameTestDirectoryProvider temp = new TestNameTestDirectoryProvider(getClass())
     private resultsProvider = Mock(TestResultsProvider)
     BuildOperationExecutor buildOperationExecutor
     Binary2JUnitXmlReportGenerator generator
     final WorkerLeaseService workerLeaseService = new TestWorkerLeaseService()
 
     def generatorWithMaxThreads(int numThreads) {
-        ParallelismConfigurationManager parallelExecutionManager = new ParallelismConfigurationManagerFixture(false, numThreads)
+        def parallelismConfiguration = new DefaultParallelismConfiguration(false, numThreads)
         buildOperationExecutor = new DefaultBuildOperationExecutor(
             Mock(BuildOperationListener), Mock(Clock), new NoOpProgressLoggerFactory(),
-            new DefaultBuildOperationQueueFactory(workerLeaseService), new DefaultExecutorFactory(), parallelExecutionManager, new DefaultBuildOperationIdFactory())
-        Binary2JUnitXmlReportGenerator reportGenerator = new Binary2JUnitXmlReportGenerator(temp.testDirectory, resultsProvider, TestOutputAssociation.WITH_SUITE, buildOperationExecutor, "localhost")
+            new DefaultBuildOperationQueueFactory(workerLeaseService), new DefaultExecutorFactory(), parallelismConfiguration, new DefaultBuildOperationIdFactory())
+        Binary2JUnitXmlReportGenerator reportGenerator = new Binary2JUnitXmlReportGenerator(temp.testDirectory, resultsProvider, new JUnitXmlResultOptions(false, false), buildOperationExecutor, "localhost")
         reportGenerator.xmlWriter = Mock(JUnitXmlResultWriter)
         return reportGenerator
     }
@@ -78,14 +78,14 @@ class Binary2JUnitXmlReportGeneratorSpec extends Specification {
         0 * generator.xmlWriter._
 
         where:
-        numThreads << [ 1, 4 ]
+        numThreads << [1, 4]
     }
 
     def "adds context information to the failure if something goes wrong"() {
         generator = generatorWithMaxThreads(1)
 
         def fooTest = new TestClassResult(1, 'FooTest', 100)
-                .add(new TestMethodResult(1, "foo"))
+            .add(new TestMethodResult(1, "foo"))
 
         resultsProvider.visitClasses(_) >> { Action action ->
             action.execute(fooTest)

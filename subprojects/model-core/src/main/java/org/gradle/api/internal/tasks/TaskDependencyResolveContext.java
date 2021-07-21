@@ -16,12 +16,18 @@
 
 package org.gradle.api.internal.tasks;
 
+import org.gradle.api.Action;
 import org.gradle.api.Task;
 import org.gradle.api.internal.artifacts.transform.TransformationDependency;
 
 import javax.annotation.Nullable;
 
-public interface TaskDependencyResolveContext {
+public interface TaskDependencyResolveContext extends Action<Task> {
+    @Override
+    default void execute(Task task) {
+        add(task);
+    }
+
     /**
      * Adds an object that can contribute tasks to the result. Supported types:
      *
@@ -44,13 +50,7 @@ public interface TaskDependencyResolveContext {
     void add(Object dependency);
 
     /**
-     * Adds an object that <em>may</em> be able to contribute tasks to the result.
-     */
-    void maybeAdd(Object dependency);
-
-    /**
      * Visits a failure to visit the dependencies of an object.
-     * @param failure
      */
     void visitFailure(Throwable failure);
 

@@ -24,9 +24,9 @@ import org.gradle.api.java.archives.Manifest;
 import org.gradle.api.java.archives.ManifestMergeDetails;
 import org.gradle.api.java.archives.ManifestMergeSpec;
 import org.gradle.internal.file.PathToFileResolver;
-import org.gradle.util.ConfigureUtil;
-import org.gradle.util.GUtil;
-import org.gradle.util.WrapUtil;
+import org.gradle.util.internal.ConfigureUtil;
+import org.gradle.util.internal.GUtil;
+import org.gradle.util.internal.WrapUtil;
 
 import java.nio.charset.Charset;
 import java.util.ArrayList;
@@ -92,8 +92,8 @@ public class DefaultManifestMergeSpec implements ManifestMergeSpec {
         Set<String> allSections = Sets.union(baseManifest.getSections().keySet(), toMergeManifest.getSections().keySet());
         for (String section : allSections) {
             mergeSection(section, mergedManifest,
-                    GUtil.elvis(baseManifest.getSections().get(section), new DefaultAttributes()),
-                    GUtil.elvis(toMergeManifest.getSections().get(section), new DefaultAttributes()));
+                    GUtil.getOrDefault(baseManifest.getSections().get(section), DefaultAttributes::new),
+                    GUtil.getOrDefault(toMergeManifest.getSections().get(section), DefaultAttributes::new));
         }
         return mergedManifest;
     }

@@ -28,7 +28,10 @@ import java.io.File;
 /**
  * Is mixed into the project when applying the {@link org.gradle.api.plugins.JavaBasePlugin} or the
  * {@link org.gradle.api.plugins.JavaPlugin}.
+ *
+ * @deprecated Replaced by {@link JavaPluginExtension}. This class is scheduled for removal in Gradle 8.0.
  */
+@Deprecated
 public abstract class JavaPluginConvention {
     /**
      * Configures the source sets of this project.
@@ -40,7 +43,9 @@ public abstract class JavaPluginConvention {
      * is configured to exclude some package from compilation.
      *
      * <pre class='autoTested'>
-     * apply plugin: 'java'
+     * plugins {
+     *     id 'java'
+     * }
      *
      * sourceSets {
      *   main {
@@ -157,4 +162,25 @@ public abstract class JavaPluginConvention {
     public abstract SourceSetContainer getSourceSets();
 
     public abstract ProjectInternal getProject();
+
+    /**
+     * If this method is called, Gradle will not automatically try to fetch
+     * dependencies which have a JVM version compatible with this module.
+     * This should be used whenever the default behavior is not
+     * applicable, in particular when for some reason it's not possible to split
+     * a module and that this module only has some classes which require dependencies
+     * on higher versions.
+     *
+     * @since 5.3
+     */
+    public abstract void disableAutoTargetJvm();
+
+    /**
+     * Tells if automatic JVM targeting is enabled. When disabled, Gradle
+     * will not automatically try to get dependencies corresponding to the
+     * same (or compatible) level as the target compatibility of this module.
+     *
+     * @since 5.3
+     */
+    public abstract boolean getAutoTargetJvmDisabled();
 }

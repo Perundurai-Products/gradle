@@ -18,17 +18,22 @@ package org.gradle.api.internal.project;
 import org.gradle.api.Project;
 import org.gradle.api.artifacts.component.BuildIdentifier;
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier;
+import org.gradle.initialization.DefaultProjectDescriptor;
 import org.gradle.internal.Factory;
+import org.gradle.internal.build.BuildProjectRegistry;
 import org.gradle.internal.build.BuildState;
-import org.gradle.util.Path;
+import org.gradle.internal.service.scopes.Scopes;
+import org.gradle.internal.service.scopes.ServiceScope;
 
 import javax.annotation.concurrent.ThreadSafe;
 import java.util.Collection;
+import java.util.function.Consumer;
 
 /**
- * A registry of all of the projects present in a build tree.
+ * A registry of all projects present in a build tree.
  */
 @ThreadSafe
+@ServiceScope(Scopes.BuildTree.class)
 public interface ProjectStateRegistry {
     /**
      * Returns all projects in the build tree.
@@ -36,24 +41,19 @@ public interface ProjectStateRegistry {
     Collection<? extends ProjectState> getAllProjects();
 
     /**
-     * Locates the state object that owns the given public project model.
+     * Locates the state object that owns the given public project model. Can use {@link ProjectInternal#getOwner()} instead.
      */
-    ProjectState stateFor(Project project);
+    ProjectState stateFor(Project project) throws IllegalArgumentException;
 
     /**
      * Locates the state object that owns the project with the given identifier.
      */
-    ProjectState stateFor(ProjectComponentIdentifier identifier);
+    ProjectState stateFor(ProjectComponentIdentifier identifier) throws IllegalArgumentException;
 
     /**
-     * Locates the state object for the given project.
+     * Locates the state objects for all projects of the given build.
      */
-    ProjectState stateFor(BuildIdentifier buildIdentifier, Path projectPath);
-
-    /**
-     * Registers a project.
-     */
-    void register(BuildState owner, ProjectInternal project);
+    BuildProjectRegistry projectsFor(BuildIdentifier buildIdentifier) throws IllegalArgumentException;
 
     /**
      * Registers the projects of a build.
@@ -61,30 +61,33 @@ public interface ProjectStateRegistry {
     void registerProjects(BuildState build);
 
     /**
-     * Allows a section of code to be run with state locking disabled.  This should be used to allow
-     * deprecated practices that we eventually want to retire.
+     * Registers a single project.
      */
-    void withLenientState(Runnable runnable);
+    ProjectState registerProject(BuildState owner, DefaultProjectDescriptor projectDescriptor);
 
     /**
-     * Creates the object with state locking disabled.  This should be used to allow
-     * deprecated practices that we eventually want to retire.
+     * Allows a section of code to run against the mutable state of all projects. No other thread will be able to access the state of any project while the given action is running.
+     *
+     * <p>Any attempt to lock a project by some other thread will fail while the given action is running. This includes calls to {@link ProjectState#applyToMutableState(Consumer)}.
      */
-    <T> T withLenientState(Factory<T> factory);
+    void withMutableStateOfAllProjects(Runnable runnable);
 
     /**
-     * Returns a {@link SafeExclusiveLock}.
+     * Allows a section of code to run against the mutable state of all projects. No other thread will be able to access the state of any project while the given action is running.
+     *
+     * <p>Any attempt to lock a project by some other thread will fail while the given action is running. This includes calls to {@link ProjectState#applyToMutableState(Consumer)}.
      */
-    SafeExclusiveLock newExclusiveOperationLock();
+    <T> T withMutableStateOfAllProjects(Factory<T> factory);
 
     /**
-     * Represents a lock that can be used to perform safe concurrent execution in light of the possibility that a project
-     * lock might be released during execution.  Specifically, it avoids blocking on the lock while holding the project lock.
+     * Allows the given code to access the mutable state of any project, regardless of which other threads may be accessing the project.
+     *
+     * DO NOT USE THIS METHOD. It is here to allow some very specific backwards compatibility.
      */
-    interface SafeExclusiveLock {
-        /**
-         * Safely waits for the lock before executing the given action.
-         */
-        void withLock(Runnable runnable);
-    }
+    <T> T allowUncontrolledAccessToAnyProject(Factory<T> factory);
+
+    /**
+     * Runs some action that may block waiting for work that requires access to the mutable state of one or more projects.
+     */
+    void blocking(Runnable runnable);
 }

@@ -17,58 +17,79 @@
 package org.gradle.initialization;
 
 import org.gradle.api.internal.project.ProjectStateRegistry;
-import org.gradle.initialization.buildsrc.BuildSourceBuilder;
+import org.gradle.initialization.layout.BuildLayoutFactory;
+import org.gradle.internal.build.BuildIncluder;
 import org.gradle.internal.build.BuildStateRegistry;
-import org.gradle.internal.build.PublicBuildPath;
 import org.gradle.internal.composite.ChildBuildRegisteringSettingsLoader;
 import org.gradle.internal.composite.CommandLineIncludedBuildSettingsLoader;
 import org.gradle.internal.composite.CompositeBuildSettingsLoader;
 
 public class DefaultSettingsLoaderFactory implements SettingsLoaderFactory {
-    private final ISettingsFinder settingsFinder;
     private final SettingsProcessor settingsProcessor;
-    private final BuildSourceBuilder buildSourceBuilder;
     private final BuildStateRegistry buildRegistry;
     private final ProjectStateRegistry projectRegistry;
-    private final PublicBuildPath publicBuildPath;
+    private final BuildLayoutFactory buildLayoutFactory;
+    private final GradlePropertiesController gradlePropertiesController;
+    private final BuildIncluder buildIncluder;
+    private final InitScriptHandler initScriptHandler;
 
-    public DefaultSettingsLoaderFactory(ISettingsFinder settingsFinder, SettingsProcessor settingsProcessor, BuildSourceBuilder buildSourceBuilder, BuildStateRegistry buildRegistry, ProjectStateRegistry projectRegistry, PublicBuildPath publicBuildPath) {
-        this.settingsFinder = settingsFinder;
+    public DefaultSettingsLoaderFactory(
+        SettingsProcessor settingsProcessor,
+        BuildStateRegistry buildRegistry,
+        ProjectStateRegistry projectRegistry,
+        BuildLayoutFactory buildLayoutFactory,
+        GradlePropertiesController gradlePropertiesController,
+        BuildIncluder buildIncluder,
+        InitScriptHandler initScriptHandler
+    ) {
         this.settingsProcessor = settingsProcessor;
-        this.buildSourceBuilder = buildSourceBuilder;
         this.buildRegistry = buildRegistry;
         this.projectRegistry = projectRegistry;
-        this.publicBuildPath = publicBuildPath;
+        this.buildLayoutFactory = buildLayoutFactory;
+        this.gradlePropertiesController = gradlePropertiesController;
+        this.buildIncluder = buildIncluder;
+        this.initScriptHandler = initScriptHandler;
     }
 
     @Override
     public SettingsLoader forTopLevelBuild() {
-        return new CompositeBuildSettingsLoader(
-            new ChildBuildRegisteringSettingsLoader(
-                new CommandLineIncludedBuildSettingsLoader(
-                    defaultSettingsLoader()
-                ),
-                buildRegistry,
-                publicBuildPath),
-            buildRegistry);
+        return new GradlePropertiesHandlingSettingsLoader(
+            new InitScriptHandlingSettingsLoader(
+                new CompositeBuildSettingsLoader(
+                    new ChildBuildRegisteringSettingsLoader(
+                        new CommandLineIncludedBuildSettingsLoader(
+                            defaultSettingsLoader()
+                        ),
+                        buildRegistry,
+                        buildIncluder),
+                    buildRegistry),
+                initScriptHandler),
+            buildLayoutFactory,
+            gradlePropertiesController
+        );
     }
 
     @Override
     public SettingsLoader forNestedBuild() {
-        return new ChildBuildRegisteringSettingsLoader(
-            defaultSettingsLoader(),
-            buildRegistry,
-            publicBuildPath
+        return new GradlePropertiesHandlingSettingsLoader(
+            new InitScriptHandlingSettingsLoader(
+                new ChildBuildRegisteringSettingsLoader(
+                    defaultSettingsLoader(),
+                    buildRegistry,
+                    buildIncluder),
+                initScriptHandler),
+            buildLayoutFactory,
+            gradlePropertiesController
         );
     }
 
     private SettingsLoader defaultSettingsLoader() {
         return new SettingsAttachingSettingsLoader(
             new DefaultSettingsLoader(
-                settingsFinder,
                 settingsProcessor,
-                buildSourceBuilder
+                buildLayoutFactory
             ),
-            projectRegistry);
+            projectRegistry
+        );
     }
 }

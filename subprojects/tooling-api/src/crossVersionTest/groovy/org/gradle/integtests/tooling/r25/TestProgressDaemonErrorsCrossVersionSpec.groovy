@@ -17,13 +17,15 @@
 package org.gradle.integtests.tooling.r25
 
 import org.gradle.integtests.tooling.fixture.ToolingApiSpecification
+import org.gradle.integtests.tooling.fixture.WithOldConfigurationsSupport
 import org.gradle.test.fixtures.server.http.BlockingHttpServer
+import org.gradle.tooling.GradleConnectionException
 import org.gradle.tooling.ProjectConnection
 import org.gradle.tooling.events.OperationType
 import org.gradle.tooling.events.ProgressEvent
 import org.junit.Rule
 
-class TestProgressDaemonErrorsCrossVersionSpec extends ToolingApiSpecification {
+class TestProgressDaemonErrorsCrossVersionSpec extends ToolingApiSpecification implements WithOldConfigurationsSupport {
     @Rule BlockingHttpServer server = new BlockingHttpServer()
     boolean killed = false
 
@@ -51,8 +53,8 @@ class TestProgressDaemonErrorsCrossVersionSpec extends ToolingApiSpecification {
         }
 
         then: "build fails with a DaemonDisappearedException"
-        caughtGradleConnectionException = thrown()
-        caughtGradleConnectionException.cause.message.contains('Gradle build daemon disappeared unexpectedly')
+        GradleConnectionException ex = thrown()
+        ex.cause.message.contains('Gradle build daemon disappeared unexpectedly')
 
         and:
         !result.empty
@@ -63,9 +65,9 @@ class TestProgressDaemonErrorsCrossVersionSpec extends ToolingApiSpecification {
         buildFile << """
             apply plugin: 'java'
             ${mavenCentralRepository()}
-            dependencies { testCompile 'junit:junit:4.12' }
-            test.doLast { 
-                ${server.callFromBuild('sync')} 
+            dependencies { ${testImplementationConfiguration} 'junit:junit:4.13' }
+            test.doLast {
+                ${server.callFromBuild('sync')}
                 Thread.sleep(120000)
             }
         """

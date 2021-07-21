@@ -18,23 +18,28 @@ package org.gradle.integtests.tooling
 
 import org.gradle.initialization.BuildCancellationToken
 import org.gradle.integtests.fixtures.daemon.DaemonsFixture
+import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
 import org.gradle.integtests.fixtures.executer.GradleDistribution
 import org.gradle.integtests.fixtures.executer.UnderDevelopmentGradleDistribution
 import org.gradle.integtests.fixtures.versions.ReleasedVersionDistributions
 import org.gradle.integtests.tooling.fixture.ConfigurableOperation
 import org.gradle.integtests.tooling.fixture.ToolingApi
 import org.gradle.internal.classpath.ClassPath
+import org.gradle.internal.jvm.Jvm
 import org.gradle.internal.logging.progress.ProgressLoggerFactory
 import org.gradle.test.fixtures.ConcurrentTestUtil
 import org.gradle.test.fixtures.file.TestFile
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.gradle.tooling.GradleConnector
 import org.gradle.tooling.ProjectConnection
+import org.gradle.tooling.internal.consumer.ConnectionParameters
 import org.gradle.tooling.internal.consumer.Distribution
 import org.gradle.tooling.internal.protocol.InternalBuildProgressListener
 import org.gradle.tooling.model.GradleProject
 import org.gradle.tooling.model.idea.IdeaProject
+import org.junit.Assume
 import org.junit.Rule
+import spock.lang.IgnoreIf
 import spock.lang.Issue
 import spock.lang.Retry
 import spock.lang.Specification
@@ -46,10 +51,11 @@ import static spock.lang.Retry.Mode.SETUP_FEATURE_CLEANUP
 
 @Issue("GRADLE-1933")
 @Retry(condition = { onWindowsSocketDisappearance(instance, failure) }, mode = SETUP_FEATURE_CLEANUP, count = 2)
+@IgnoreIf({ GradleContextualExecuter.embedded }) // concurrent tooling api is only supported for forked mode
 class ConcurrentToolingApiIntegrationSpec extends Specification {
 
     @Rule final ConcurrentTestUtil concurrent = new ConcurrentTestUtil()
-    @Rule final TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider()
+    @Rule final TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider(getClass())
     final GradleDistribution dist = new UnderDevelopmentGradleDistribution()
     final ToolingApi toolingApi = new ToolingApi(dist, temporaryFolder)
 
@@ -60,8 +66,6 @@ class ConcurrentToolingApiIntegrationSpec extends Specification {
     }
 
     def setup() {
-        //concurrent tooling api at the moment is only supported for forked mode
-        toolingApi.requireDaemons()
         concurrent.shortTimeout = 180000
     }
 
@@ -84,6 +88,8 @@ class ConcurrentToolingApiIntegrationSpec extends Specification {
     def "handles different target gradle versions concurrently"() {
         given:
         def last = new ReleasedVersionDistributions().getMostRecentRelease()
+        // When adding support for a new JDK version, the previous release might not work with it yet.
+        Assume.assumeTrue(last.worksWith(Jvm.current()))
         assert dist != last
         println "Combination of versions used: current - $dist, last - $last"
         def oldDistApi = new ToolingApi(last, temporaryFolder)
@@ -196,9 +202,8 @@ project.description = text
         def allProgress = new CopyOnWriteArrayList<String>()
 
         concurrent.start {
-            def connector = toolingApi.connector()
+            def connector = toolingApi.connector(file("build1"))
             distributionOperation(connector, { it.description = "download for 1"; Thread.sleep(500) } )
-            connector.forProjectDirectory(file("build1"))
 
             toolingApi.withConnection(connector) { connection ->
                 def build = connection.newBuild()
@@ -211,9 +216,8 @@ project.description = text
         }
 
         concurrent.start {
-            def connector = toolingApi.connector()
+            def connector = toolingApi.connector(file("build2"))
             distributionOperation(connector, { it.description = "download for 2"; Thread.sleep(500) } )
-            connector.forProjectDirectory(file("build2"))
 
             def connection = connector.connect()
 
@@ -284,12 +288,12 @@ project.description = text
             return 'mock'
         }
 
-        ClassPath getToolingImplementationClasspath(ProgressLoggerFactory progressLoggerFactory, InternalBuildProgressListener progressListener, File userHomeDir, BuildCancellationToken cancellationToken) {
+        ClassPath getToolingImplementationClasspath(ProgressLoggerFactory progressLoggerFactory, InternalBuildProgressListener progressListener, ConnectionParameters connectionParameters, BuildCancellationToken cancellationToken) {
             def o = progressLoggerFactory.newOperation("mock")
             operation(o)
             o.started()
             o.completed()
-            return delegate.getToolingImplementationClasspath(progressLoggerFactory, progressListener, userHomeDir, cancellationToken)
+            return delegate.getToolingImplementationClasspath(progressLoggerFactory, progressListener, connectionParameters, cancellationToken)
         }
     }
 
@@ -362,8 +366,7 @@ logger.lifecycle 'this is lifecycle: $idx'
     }
 
     def withConnectionInDir(String dir, Closure cl) {
-        GradleConnector connector = toolingApi.connector()
-        connector.forProjectDirectory(file(dir))
+        GradleConnector connector = toolingApi.connector(file(dir))
         toolingApi.withConnection(connector, cl)
     }
 }

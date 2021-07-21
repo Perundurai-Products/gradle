@@ -18,7 +18,7 @@ package org.gradle.api.internal.project;
 
 import org.gradle.api.ProjectConfigurationException;
 import org.gradle.api.ProjectState;
-import org.gradle.util.CollectionUtils;
+import org.gradle.util.internal.CollectionUtils;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -59,6 +59,10 @@ public class ProjectStateInternal implements ProjectState {
 
     public boolean isUnconfigured() {
         return state == State.UNCONFIGURED;
+    }
+
+    public boolean hasCompleted() {
+        return state == State.CONFIGURED;
     }
 
     public void toBeforeEvaluate() {

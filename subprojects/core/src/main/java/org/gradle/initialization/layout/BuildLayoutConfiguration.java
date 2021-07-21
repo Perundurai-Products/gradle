@@ -16,7 +16,7 @@
 package org.gradle.initialization.layout;
 
 import org.gradle.StartParameter;
-import org.gradle.TaskExecutionRequest;
+import org.gradle.api.internal.StartParameterInternal;
 import org.gradle.internal.scan.UsedByScanPlugin;
 
 import java.io.File;
@@ -26,28 +26,18 @@ import java.io.File;
  */
 @UsedByScanPlugin
 public class BuildLayoutConfiguration {
-    private File currentDir;
-    private boolean searchUpwards;
+    private final File currentDir;
+    private final boolean searchUpwards;
     private final File settingsFile;
     private final boolean useEmptySettings;
 
     public BuildLayoutConfiguration(StartParameter startParameter) {
         currentDir = startParameter.getCurrentDir();
-        searchUpwards = startParameter.isSearchUpwards() && !isInitTaskRequested(startParameter);
-        settingsFile = startParameter.getSettingsFile();
-        useEmptySettings = startParameter.isUseEmptySettings();
-    }
-
-    private boolean isInitTaskRequested(StartParameter startParameter) {
-        if (startParameter.getTaskNames().contains("init")) {
-            return true;
-        }
-        for (TaskExecutionRequest request : startParameter.getTaskRequests()) {
-            if (request.getArgs().contains("init")) {
-                return true;
-            }
-        }
-        return false;
+        searchUpwards = ((StartParameterInternal)startParameter).isSearchUpwards();
+        @SuppressWarnings("deprecation")
+        File customSettingsFile = startParameter.getSettingsFile();
+        this.settingsFile = customSettingsFile;
+        useEmptySettings = ((StartParameterInternal)startParameter).isUseEmptySettings();
     }
 
     public File getCurrentDir() {

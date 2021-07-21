@@ -22,7 +22,7 @@ import org.gradle.integtests.fixtures.executer.GradleHandle
 import org.gradle.integtests.fixtures.versions.ReleasedVersionDistributions
 import org.gradle.integtests.tooling.fixture.TextUtil
 import org.gradle.integtests.tooling.fixture.ToolingApi
-import org.gradle.internal.time.Clock
+import org.gradle.internal.jvm.Jvm
 import org.gradle.internal.time.CountdownTimer
 import org.gradle.internal.time.Time
 import org.gradle.test.fixtures.file.TestFile
@@ -30,18 +30,24 @@ import org.gradle.tooling.GradleConnector
 import org.gradle.tooling.ProjectConnection
 import org.gradle.tooling.model.GradleProject
 import org.gradle.util.GradleVersion
+import org.junit.Assume
 import spock.lang.Issue
+
+import java.time.ZoneOffset
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 
 class ToolingApiIntegrationTest extends AbstractIntegrationSpec {
 
     final ToolingApi toolingApi = new ToolingApi(distribution, temporaryFolder)
     final GradleDistribution otherVersion = new ReleasedVersionDistributions().mostRecentRelease
-    final Clock clock = Time.clock()
 
     TestFile projectDir
 
     def setup() {
         projectDir = temporaryFolder.testDirectory
+        // When adding support for a new JDK version, the previous release might not work with it yet.
+        Assume.assumeTrue(otherVersion.worksWith(Jvm.current()))
     }
 
     def "tooling api uses to the current version of gradle when none has been specified"() {
@@ -66,6 +72,28 @@ class ToolingApiIntegrationTest extends AbstractIntegrationSpec {
         then:
         stdOut.toString().contains("CONFIGURE SUCCESSFUL")
         !stdOut.toString().contains("BUILD SUCCESSFUL")
+    }
+
+    def "can configure Kotlin DSL project with gradleApi() dependency via tooling API"() {
+        given:
+        buildKotlinFile << """
+        plugins {
+            java
+        }
+
+        dependencies {
+            implementation(gradleApi())
+        }
+        """
+
+        when:
+        def stdOut = new ByteArrayOutputStream()
+        toolingApi.withConnection { ProjectConnection connection ->
+            connection.action(new KotlinIdeaModelBuildAction()).setStandardOutput(stdOut).run()
+        }
+
+        then:
+        stdOut.toString().contains("CONFIGURE SUCCESSFUL")
     }
 
     def "tooling api uses the wrapper properties to determine which version to use"() {
@@ -109,7 +137,6 @@ allprojects {
     }
 
     def "can specify a gradle installation to use"() {
-        toolingApi.requireDaemons()
         projectDir.file('build.gradle').text = "assert gradle.gradleVersion == '${otherVersion.version.version}'"
 
         when:
@@ -123,7 +150,6 @@ allprojects {
     }
 
     def "can specify a gradle distribution to use"() {
-        toolingApi.requireDaemons()
         projectDir.file('build.gradle').text = "assert gradle.gradleVersion == '${otherVersion.version.version}'"
 
         when:
@@ -137,7 +163,6 @@ allprojects {
     }
 
     def "can specify a gradle version to use"() {
-        toolingApi.requireDaemons()
         projectDir.file('build.gradle').text = "assert gradle.gradleVersion == '${otherVersion.version.version}'"
 
         when:
@@ -160,25 +185,23 @@ allprojects {
         def retryIntervalMs = 500
 
         def gradleUserHomeDirPath = executer.gradleUserHomeDir.absolutePath
-        def gradleHomeDirPath = distribution.gradleHomeDir.absolutePath
+        def gradleHomeDirPath = otherVersion.gradleHomeDir.absolutePath
 
         buildFile << """
             apply plugin: 'java'
             apply plugin: 'application'
 
             repositories {
-                maven { url "${buildContext.libsRepo.toURI()}" }
-                ${RepoScriptBlockUtil.gradleRepositoryDefintion()}
+                maven { url "${buildContext.localRepository.toURI()}" }
+                ${RepoScriptBlockUtil.gradleRepositoryDefinition()}
             }
 
             dependencies {
-                // If this test fails due to a missing tooling API jar 
-                // re-run `gradle prepareVersionsInfo toolingApi:intTestImage publishLocalArchives` 
-                compile "org.gradle:gradle-tooling-api:${distribution.version.version}"
-                runtime 'org.slf4j:slf4j-simple:1.7.10'
+                implementation "org.gradle:gradle-tooling-api:${distribution.version.baseVersion.version}"
+                runtimeOnly 'org.slf4j:slf4j-simple:1.7.10'
             }
 
-            mainClassName = 'Main'
+            application.mainClass = 'Main'
 
             run {
                 args = ["${TextUtil.escapeString(gradleHomeDirPath)}", "${TextUtil.escapeString(gradleUserHomeDirPath)}"]
@@ -300,6 +323,13 @@ allprojects {
         }
 
         handle.waitForFinish()
+
+        // https://github.com/gradle/gradle-private/issues/3005
+        println "Waiting for daemon exit, start: ${ZonedDateTime.now(ZoneOffset.UTC).format(DateTimeFormatter.ISO_INSTANT)}"
+
+        Thread.sleep(stopTimeoutMs)
+
+        println "Waiting for daemon exit, end: ${ZonedDateTime.now(ZoneOffset.UTC).format(DateTimeFormatter.ISO_INSTANT)}"
 
         where:
         withColor << [true, false]

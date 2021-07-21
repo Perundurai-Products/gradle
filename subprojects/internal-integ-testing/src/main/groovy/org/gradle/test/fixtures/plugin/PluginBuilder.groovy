@@ -20,6 +20,7 @@ import com.google.common.base.Splitter
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.Task
+import org.gradle.api.initialization.Settings
 import org.gradle.integtests.fixtures.executer.GradleExecuter
 import org.gradle.model.ModelMap
 import org.gradle.model.Mutate
@@ -30,14 +31,14 @@ import org.gradle.test.fixtures.file.TestFile
 import org.gradle.test.fixtures.ivy.IvyRepository
 import org.gradle.test.fixtures.maven.MavenRepository
 import org.gradle.test.fixtures.server.http.MavenHttpPluginRepository
-import org.gradle.util.TextUtil
+import org.gradle.util.internal.TextUtil
 
 class PluginBuilder {
     static final String PLUGIN_MARKER_SUFFIX = ".gradle.plugin";
 
     final TestFile projectDir
 
-    static String packageName = "org.gradle.test"
+    String packageName = "org.gradle.test"
 
     final Map<String, String> pluginIds = [:]
 
@@ -45,39 +46,54 @@ class PluginBuilder {
         this.projectDir = projectDir
     }
 
+    TestFile getBuildFile() {
+        file("build.gradle")
+    }
+
     TestFile file(String path) {
         projectDir.file(path)
     }
 
     TestFile groovy(String path) {
-        file("src/main/groovy/${packageName.replaceAll("\\.", "/")}/$path")
+        file("src/main/groovy/${sourceFilePath(path)}")
+    }
+
+    TestFile java(String path) {
+        file("src/main/java/${sourceFilePath(path)}")
+    }
+
+    private String sourceFilePath(String path) {
+        packageName ? "${packageName.replaceAll("\\.", "/")}/$path" : path
     }
 
     @SuppressWarnings("GrMethodMayBeStatic")
     String generateManagedBuildScript() {
         """
+            apply plugin: "java-gradle-plugin"
             apply plugin: "groovy"
             dependencies {
-              compile localGroovy()
-              compile gradleApi()
+              implementation localGroovy()
             }
+            group = "${packageName}"
+            version = "1.0"
         """
     }
 
-    String generateBuildScript(String additions = "") {
-        file("build.gradle").text = (generateManagedBuildScript() + additions)
+    void prepareToExecute() {
+        buildFile << generateManagedBuildScript()
+        buildFile << getPluginDescriptors(pluginIds)
+        projectDir.file('settings.gradle').write("")
     }
 
-    void publishTo(GradleExecuter executer, TestFile testFile) {
-        generateBuildScript """
+    void publishTo(GradleExecuter executer, TestFile testFile, String buildScript = "") {
+        prepareToExecute()
+        buildFile << buildScript
+        buildFile << """
             jar {
-                archiveName = "$testFile.name"
-                destinationDir = file("${TextUtil.escapeString(testFile.parentFile.absolutePath)}")
+                archiveFileName = "$testFile.name"
+                destinationDirectory = file("${TextUtil.escapeString(testFile.parentFile.absolutePath)}")
             }
         """
-
-        writePluginDescriptors(pluginIds)
-        projectDir.file('settings.gradle').write('')
         executer.inDirectory(projectDir).withTasks("jar").run()
     }
 
@@ -135,30 +151,35 @@ class PluginBuilder {
     }
 
     void generateForBuildSrc() {
-        generateBuildScript()
-        writePluginDescriptors(pluginIds)
+        prepareToExecute()
     }
 
-    protected void writePluginDescriptors(Map<String, String> pluginIds) {
-        descriptorsDir.deleteDir()
-        pluginIds.each { id, className ->
-            descriptorsDir.file("${id}.properties") << "implementation-class=${packageName}.${className}"
-        }
+    protected String getPluginDescriptors(Map<String, String> pluginIds) {
+        return """
+            gradlePlugin {
+                plugins {
+                    ${pluginIds.collect { id, className ->
+                        "'${id}' { id='${id}'; implementationClass='${packageName}.${className}' }"
+                    }.join("\n")}
+                }
+            }
+        """
     }
 
-    TestFile getDescriptorsDir() {
-        file("src/main/resources/META-INF/gradle-plugins")
-    }
-
-    private addPluginSource(String id, String className, String impl) {
-        pluginIds[id] = className
-
+    PluginBuilder addPluginSource(String id, String className, String impl) {
+        addPluginId(id, className)
         groovy("${className}.groovy") << impl
+        this
+    }
+
+    PluginBuilder addPluginId(String id, String className) {
+        pluginIds[id] = className
+        this
     }
 
     PluginBuilder addPlugin(String impl, String id = "test-plugin", String className = "TestPlugin") {
         addPluginSource(id, className, """
-            package $packageName
+            ${packageName ? "package $packageName" : ""}
 
             class $className implements $Plugin.name<$Project.name> {
                 void apply($Project.name project) {
@@ -169,9 +190,22 @@ class PluginBuilder {
         this
     }
 
+    PluginBuilder addSettingsPlugin(String impl, String id = "test-settings-plugin", String className = "TestSettingsPlugin") {
+        addPluginSource(id, className, """
+            ${packageName ? "package $packageName" : ""}
+
+            class $className implements $Plugin.name<$Settings.name> {
+                void apply($Settings.name settings) {
+                    $impl
+                }
+            }
+        """)
+        this
+    }
+
     PluginBuilder addUnloadablePlugin(String id = "test-plugin", String className = "TestPlugin") {
         addPluginSource(id, className, """
-            package $packageName
+            ${packageName ? "package $packageName" : ""}
 
             class $className implements $Plugin.name<$Project.name> {
                 static { throw new Exception("unloadable plugin class") }
@@ -182,9 +216,9 @@ class PluginBuilder {
         this
     }
 
-    PluginBuilder addNonConstructablePlugin(String id = "test-plugin", String className = "TestPlugin") {
+    PluginBuilder addNonConstructiblePlugin(String id = "test-plugin", String className = "TestPlugin") {
         addPluginSource(id, className, """
-            package $packageName
+            ${packageName ? "package $packageName" : ""}
 
             class $className implements $Plugin.name<$Project.name> {
                 $className() { throw new RuntimeException("broken plugin") }
@@ -203,7 +237,7 @@ class PluginBuilder {
     PluginBuilder addRuleSource(String pluginId) {
         String className = "TestRuleSource"
         addPluginSource(pluginId, className, """
-            package $packageName
+            ${packageName ? "package $packageName" : ""}
 
             class $className extends $RuleSource.name {
                 @$Mutate.name

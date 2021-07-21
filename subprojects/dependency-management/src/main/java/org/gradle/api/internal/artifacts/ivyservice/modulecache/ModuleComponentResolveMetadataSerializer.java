@@ -17,6 +17,7 @@
 package org.gradle.api.internal.artifacts.ivyservice.modulecache;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Maps;
 import org.gradle.api.artifacts.ModuleIdentifier;
 import org.gradle.api.artifacts.component.ComponentIdentifier;
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier;
@@ -24,8 +25,8 @@ import org.gradle.api.internal.artifacts.DefaultModuleIdentifier;
 import org.gradle.api.internal.artifacts.ImmutableModuleIdentifierFactory;
 import org.gradle.internal.component.external.model.AbstractLazyModuleComponentResolveMetadata;
 import org.gradle.internal.component.external.model.AbstractRealisedModuleComponentResolveMetadata;
-import org.gradle.internal.component.external.model.DefaultModuleComponentIdentifier;
 import org.gradle.internal.component.external.model.DefaultVirtualModuleComponentIdentifier;
+import org.gradle.internal.component.external.model.ExternalDependencyDescriptor;
 import org.gradle.internal.component.external.model.ModuleComponentResolveMetadata;
 import org.gradle.internal.component.external.model.MutableModuleComponentResolveMetadata;
 import org.gradle.internal.component.external.model.VirtualComponentIdentifier;
@@ -33,6 +34,7 @@ import org.gradle.internal.component.external.model.ivy.DefaultIvyModuleResolveM
 import org.gradle.internal.component.external.model.ivy.RealisedIvyModuleResolveMetadata;
 import org.gradle.internal.component.external.model.ivy.RealisedIvyModuleResolveMetadataSerializationHelper;
 import org.gradle.internal.component.external.model.maven.DefaultMavenModuleResolveMetadata;
+import org.gradle.internal.component.external.model.maven.MavenDependencyDescriptor;
 import org.gradle.internal.component.external.model.maven.RealisedMavenModuleResolveMetadata;
 import org.gradle.internal.component.external.model.maven.RealisedMavenModuleResolveMetadataSerializationHelper;
 import org.gradle.internal.resolve.caching.DesugaringAttributeContainerSerializer;
@@ -42,6 +44,8 @@ import org.gradle.internal.serialize.Encoder;
 
 import java.io.EOFException;
 import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Serializer for {@link ModuleComponentResolveMetadata}.
@@ -66,14 +70,15 @@ public class ModuleComponentResolveMetadataSerializer extends AbstractSerializer
     @Override
     public ModuleComponentResolveMetadata read(Decoder decoder) throws EOFException, Exception {
 
-        MutableModuleComponentResolveMetadata mutable = delegate.read(decoder, moduleIdentifierFactory);
+        Map<Integer, MavenDependencyDescriptor> deduplicationDependencyCache = Maps.newHashMap();
+        MutableModuleComponentResolveMetadata mutable = delegate.read(decoder, moduleIdentifierFactory, deduplicationDependencyCache);
         readPlatformOwners(decoder, mutable);
         AbstractLazyModuleComponentResolveMetadata resolveMetadata = (AbstractLazyModuleComponentResolveMetadata) mutable.asImmutable();
 
         if (resolveMetadata instanceof DefaultIvyModuleResolveMetadata) {
             return ivySerializationHelper.readMetadata(decoder, (DefaultIvyModuleResolveMetadata) resolveMetadata);
         } else if (resolveMetadata instanceof DefaultMavenModuleResolveMetadata) {
-            return mavenSerializationHelper.readMetadata(decoder, (DefaultMavenModuleResolveMetadata) resolveMetadata);
+            return mavenSerializationHelper.readMetadata(decoder, (DefaultMavenModuleResolveMetadata) resolveMetadata, deduplicationDependencyCache);
         } else {
             throw new IllegalStateException("Unknown resolved metadata type: " + resolveMetadata.getClass());
         }
@@ -83,46 +88,45 @@ public class ModuleComponentResolveMetadataSerializer extends AbstractSerializer
         int len = decoder.readSmallInt();
         if (len>0) {
             for (int i=0; i<len; i++) {
-                ComponentIdentifier moduleComponentIdentifier = readModuleIdentifier(decoder);
+                VirtualComponentIdentifier moduleComponentIdentifier = readModuleIdentifier(decoder);
                 mutable.belongsTo(moduleComponentIdentifier);
             }
         }
     }
 
-    private ModuleComponentIdentifier readModuleIdentifier(Decoder decoder) throws IOException {
-        boolean virtual = decoder.readBoolean();
+    private VirtualComponentIdentifier readModuleIdentifier(Decoder decoder) throws IOException {
         String group = decoder.readString();
         String module = decoder.readString();
         String version = decoder.readString();
         ModuleIdentifier moduleIdentifier = DefaultModuleIdentifier.newId(group, module);
-        return virtual ? new DefaultVirtualModuleComponentIdentifier(moduleIdentifier, version) : DefaultModuleComponentIdentifier.newId(moduleIdentifier, version);
+        return new DefaultVirtualModuleComponentIdentifier(moduleIdentifier, version);
     }
 
     @Override
     public void write(Encoder encoder, ModuleComponentResolveMetadata value) throws Exception {
         AbstractRealisedModuleComponentResolveMetadata transformed = assertRealized(value);
-        delegate.write(encoder, transformed);
+        HashMap<ExternalDependencyDescriptor, Integer> deduplicationDependencyCache = Maps.newHashMap();
+        delegate.write(encoder, transformed, deduplicationDependencyCache);
         writeOwners(encoder, value.getPlatformOwners());
         if (transformed instanceof RealisedIvyModuleResolveMetadata) {
             ivySerializationHelper.writeRealisedVariantsData(encoder, transformed);
-            ivySerializationHelper.writeRealisedConfigurationsData(encoder, transformed);
+            ivySerializationHelper.writeRealisedConfigurationsData(encoder, transformed, deduplicationDependencyCache);
         } else if (transformed instanceof RealisedMavenModuleResolveMetadata) {
             mavenSerializationHelper.writeRealisedVariantsData(encoder, transformed);
-            mavenSerializationHelper.writeRealisedConfigurationsData(encoder, transformed);
+            mavenSerializationHelper.writeRealisedConfigurationsData(encoder, transformed, deduplicationDependencyCache);
         } else {
             throw new IllegalStateException("Unexpected realised module component resolve metadata type: " + transformed.getClass());
         }
     }
 
-    private void writeOwners(Encoder encoder, ImmutableList<? extends ComponentIdentifier> platformOwners) throws IOException {
+    private void writeOwners(Encoder encoder, ImmutableList<? extends VirtualComponentIdentifier> platformOwners) throws IOException {
         encoder.writeSmallInt(platformOwners.size());
         for (ComponentIdentifier platformOwner : platformOwners) {
-            writeComponentIdentifier(encoder, (ModuleComponentIdentifier)platformOwner);
+            writeComponentIdentifier(encoder, (ModuleComponentIdentifier) platformOwner);
         }
     }
 
     private void writeComponentIdentifier(Encoder encoder, ModuleComponentIdentifier platformOwner) throws IOException {
-        encoder.writeBoolean(platformOwner instanceof VirtualComponentIdentifier);
         encoder.writeString(platformOwner.getGroup());
         encoder.writeString(platformOwner.getModule());
         encoder.writeString(platformOwner.getVersion());

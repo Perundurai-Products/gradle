@@ -38,6 +38,7 @@ public class ComponentSelectionReasons {
     public static final ComponentSelectionDescriptorInternal COMPOSITE_BUILD = new DefaultComponentSelectionDescriptor(ComponentSelectionCause.COMPOSITE_BUILD);
     public static final ComponentSelectionDescriptorInternal CONSTRAINT = new DefaultComponentSelectionDescriptor(ComponentSelectionCause.CONSTRAINT);
     public static final ComponentSelectionDescriptorInternal REJECTION = new DefaultComponentSelectionDescriptor(ComponentSelectionCause.REJECTION);
+    public static final ComponentSelectionDescriptorInternal BY_ANCESTOR = new DefaultComponentSelectionDescriptor(ComponentSelectionCause.BY_ANCESTOR);
 
     public static ComponentSelectionReason requested() {
         return new DefaultComponentSelectionReason(REQUESTED);
@@ -68,12 +69,13 @@ public class ComponentSelectionReasons {
         private final ArrayDeque<ComponentSelectionDescriptorInternal> descriptions;
 
         private DefaultComponentSelectionReason(ComponentSelectionDescriptor... descriptors) {
-            descriptions = new ArrayDeque<ComponentSelectionDescriptorInternal>(1);
+            descriptions = new ArrayDeque<>(1);
             for (ComponentSelectionDescriptor descriptor : descriptors) {
                 descriptions.add((ComponentSelectionDescriptorInternal) descriptor);
             }
         }
 
+        @Override
         public boolean isForced() {
             return hasCause(ComponentSelectionCause.FORCED);
         }
@@ -87,29 +89,28 @@ public class ComponentSelectionReasons {
             return false;
         }
 
+        @Override
         public boolean isConflictResolution() {
             return hasCause(ComponentSelectionCause.CONFLICT_RESOLUTION);
         }
 
+        @Override
         public boolean isSelectedByRule() {
             return hasCause(ComponentSelectionCause.SELECTED_BY_RULE);
         }
 
+        @Override
         public boolean isExpected() {
-            return isCauseExpected(Iterables.getLast(descriptions));
+            return descriptions.size() == 1 && isCauseExpected(Iterables.getLast(descriptions));
         }
 
+        @Override
         public boolean isCompositeSubstitution() {
             return hasCause(ComponentSelectionCause.COMPOSITE_BUILD);
         }
 
-        public String getDescription() {
-            // for backwards compatibility, we use the last added description
-            return descriptions.getLast().toString();
-        }
-
         public String toString() {
-            return getDescription();
+            return descriptions.getLast().toString();
         }
 
         @Override
@@ -137,7 +138,7 @@ public class ComponentSelectionReasons {
 
         @Override
         public List<ComponentSelectionDescriptor> getDescriptions() {
-            return ImmutableList.<ComponentSelectionDescriptor>copyOf(descriptions);
+            return ImmutableList.copyOf(descriptions);
         }
 
         @Override

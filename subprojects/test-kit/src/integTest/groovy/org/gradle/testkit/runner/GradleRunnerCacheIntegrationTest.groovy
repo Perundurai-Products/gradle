@@ -18,9 +18,13 @@ package org.gradle.testkit.runner
 
 import org.gradle.initialization.StartParameterBuildOptions
 import org.gradle.testkit.runner.fixtures.NonCrossVersion
-import org.gradle.util.TextUtil
+import org.gradle.util.internal.TextUtil
 
-import static org.gradle.testkit.runner.TaskOutcome.*
+import static org.gradle.testkit.runner.TaskOutcome.FAILED
+import static org.gradle.testkit.runner.TaskOutcome.FROM_CACHE
+import static org.gradle.testkit.runner.TaskOutcome.SKIPPED
+import static org.gradle.testkit.runner.TaskOutcome.SUCCESS
+import static org.gradle.testkit.runner.TaskOutcome.UP_TO_DATE
 
 /**
  * Tests the behavior of a task with a FROM_CACHE result
@@ -39,6 +43,7 @@ class GradleRunnerCacheIntegrationTest extends BaseGradleRunnerIntegrationTest {
                 File outputFile
 
                 @InputFile
+                @PathSensitive(PathSensitivity.NONE)
                 File inputFile
 
                 @TaskAction
@@ -55,7 +60,7 @@ class GradleRunnerCacheIntegrationTest extends BaseGradleRunnerIntegrationTest {
         def cacheDir = file("task-output-cache")
         settingsFile << """
             buildCache {
-                local(DirectoryBuildCache) {
+                local {
                     directory = "${TextUtil.escapeString(cacheDir.absolutePath)}"
                 }
             }

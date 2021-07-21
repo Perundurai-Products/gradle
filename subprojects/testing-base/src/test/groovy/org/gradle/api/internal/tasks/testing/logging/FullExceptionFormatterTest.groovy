@@ -16,6 +16,7 @@
 
 package org.gradle.api.internal.tasks.testing.logging
 
+import org.gradle.api.internal.tasks.testing.junit.JUnitSupport
 import spock.lang.Specification
 import org.gradle.api.tasks.testing.logging.TestLogging
 import org.gradle.api.tasks.testing.logging.TestStackTraceFilter
@@ -174,6 +175,26 @@ class FullExceptionFormatterTest extends Specification {
         at org.ClassName1.methodName1(FileName1.java:11)
         at org.ClassName2.methodName2(FileName2.java:22)
         at ClassName.testName(MyTest.java:22)
+"""
+    }
+
+    def "retains stacktrace for inherited test classes"() {
+        testLogging.getShowStackTraces() >> true
+        testLogging.getStackTraceFilters() >> EnumSet.of(TestStackTraceFilter.TRUNCATE, TestStackTraceFilter.GROOVY)
+        testDescriptor.className = JUnitSupport.UNKNOWN_CLASS
+
+        def exception = new Exception("ouch")
+        exception.stackTrace = createGroovyTrace()
+
+        expect:
+        formatter.format(testDescriptor, [exception]) == """\
+    java.lang.Exception: ouch
+        at org.ClassName1.methodName1(FileName1.java:11)
+        at java.lang.reflect.Method.invoke(Method.java:597)
+        at org.ClassName2.methodName2(FileName2.java:22)
+        at ClassName.testName(MyTest.java:22)
+        at java.lang.reflect.Method.invoke(Method.java:597)
+        at org.ClassName3.methodName3(FileName3.java:33)
 """
     }
 

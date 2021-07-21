@@ -18,16 +18,12 @@ package org.gradle.integtests.resolve.suppliers
 
 import org.gradle.integtests.fixtures.GradleMetadataResolveRunner
 import org.gradle.integtests.fixtures.RequiredFeature
-import org.gradle.integtests.fixtures.RequiredFeatures
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.integtests.resolve.AbstractModuleDependencyResolveTest
 import spock.lang.Unroll
 
-@RequiredFeatures([
-    // we only need to check without experimental, it doesn't depend on this flag
-    @RequiredFeature(feature = GradleMetadataResolveRunner.EXPERIMENTAL_RESOLVE_BEHAVIOR, value = "false"),
-    // we only need to check without Gradle metadata, it doesn't matter either
-    @RequiredFeature(feature = GradleMetadataResolveRunner.GRADLE_METADATA, value = "false"),
-])
+// we only need to check without Gradle metadata, it doesn't matter
+@RequiredFeature(feature = GradleMetadataResolveRunner.GRADLE_METADATA, value = "false")
 class CustomVersionListerIntegrationTest extends AbstractModuleDependencyResolveTest {
     void "can list versions without hitting repository"() {
         withLister([testA: [1, 2, 3]])
@@ -82,6 +78,7 @@ class CustomVersionListerIntegrationTest extends AbstractModuleDependencyResolve
         succeeds 'checkDeps'
     }
 
+    @ToBeFixedForConfigurationCache
     void "doesn't fallback to repository listing when empty list version is returned"() {
         withLister([testA: []])
         given:
@@ -98,7 +95,7 @@ class CustomVersionListerIntegrationTest extends AbstractModuleDependencyResolve
         failure.assertHasCause("Could not find any matches for org:testA:+ as no versions of org:testA are available.")
     }
 
-    void "can version listing can use module identifer to return the version list"() {
+    void "can version listing can use module identifier to return the version list"() {
         withLister([testA: [1, 2, 3], testB: [1, 2]])
         given:
         repository {
@@ -130,6 +127,7 @@ class CustomVersionListerIntegrationTest extends AbstractModuleDependencyResolve
     }
 
     @Unroll
+    @ToBeFixedForConfigurationCache
     void "caches version listing using #lister lister"() {
         ListerInteractions listerInteractions
         switch (lister) {
@@ -190,6 +188,7 @@ class CustomVersionListerIntegrationTest extends AbstractModuleDependencyResolve
         'file on repository' | [testA: [1, 2, 3]]
     }
 
+    @ToBeFixedForConfigurationCache
     void "can recover from broken lister"() {
         withBrokenLister()
         given:
@@ -225,6 +224,7 @@ class CustomVersionListerIntegrationTest extends AbstractModuleDependencyResolve
         succeeds 'checkDeps'
     }
 
+    @ToBeFixedForConfigurationCache
     def "can recover from --offline mode"() {
         withLister(['testA': [1, 2, 3]])
 
@@ -310,10 +310,10 @@ $listing
         buildFile << """
             class BrokenLister implements ComponentMetadataVersionLister {
                 private final boolean breakBuild
-                
+
                 @javax.inject.Inject
                 BrokenLister(boolean breakBuild) { this.breakBuild = breakBuild }
-            
+
                 void execute(ComponentMetadataListerDetails details) {
                     if (breakBuild) { throw new RuntimeException("oh noes!") }
                 }
@@ -329,7 +329,7 @@ $listing
             class MyLister implements ComponentMetadataVersionLister {
 
                 final RepositoryResourceAccessor repositoryResourceAccessor
-            
+
                 @javax.inject.Inject
                 MyLister(RepositoryResourceAccessor accessor) { repositoryResourceAccessor = accessor }
 

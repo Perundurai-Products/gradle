@@ -20,7 +20,7 @@ import groovy.lang.Closure;
 import groovy.lang.GroovyObject;
 import org.gradle.api.Action;
 import org.gradle.api.tasks.AntBuilderAware;
-import org.gradle.util.AntUtil;
+import org.gradle.util.internal.AntUtil;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -74,11 +74,14 @@ public class PatternSetAntBuilderDelegate implements AntBuilderAware {
         return node;
     }
 
+    @Override
     public Object addToAntBuilder(Object node, String childNodeName) {
         return and(node, new Action<Object>() {
+            @Override
             public void execute(Object node) {
                 if (!includes.isEmpty()) {
                     or(node, new Action<Object>() {
+                        @Override
                         public void execute(Object node) {
                             addFilenames(node, includes, caseSensitive);
                         }
@@ -87,8 +90,10 @@ public class PatternSetAntBuilderDelegate implements AntBuilderAware {
 
                 if (!excludes.isEmpty()) {
                     not(node, new Action<Object>() {
+                        @Override
                         public void execute(Object node) {
                             or(node, new Action<Object>() {
+                                @Override
                                 public void execute(Object node) {
                                     addFilenames(node, excludes, caseSensitive);
                                 }

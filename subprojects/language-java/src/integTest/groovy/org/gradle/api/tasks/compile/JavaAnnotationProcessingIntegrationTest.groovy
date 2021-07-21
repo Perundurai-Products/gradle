@@ -22,7 +22,7 @@ import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 import org.gradle.integtests.fixtures.AvailableJavaHomes
 import org.gradle.language.fixtures.CompileJavaBuildOperationsFixture
 import org.gradle.language.fixtures.HelperProcessorFixture
-import org.gradle.util.TextUtil
+import org.gradle.util.internal.TextUtil
 import spock.lang.Issue
 import spock.lang.Unroll
 
@@ -55,7 +55,7 @@ class JavaAnnotationProcessingIntegrationTest extends AbstractIntegrationSpec {
         processorProjectDir.file("build.gradle") << """
             apply plugin: "java"
             dependencies {
-                compile project(':annotation')
+                implementation project(':annotation')
             }
         """
 
@@ -69,7 +69,7 @@ class JavaAnnotationProcessingIntegrationTest extends AbstractIntegrationSpec {
         // The class that is the target of the processor
         file('src/main/java/TestApp.java') << '''
             @Helper
-            class TestApp { 
+            class TestApp {
                 public static void main(String[] args) {
                     System.out.println(new TestAppHelper().getValue()); // generated class
                 }
@@ -83,7 +83,7 @@ class JavaAnnotationProcessingIntegrationTest extends AbstractIntegrationSpec {
                 compileOnly project(":annotation")
                 annotationProcessor project(":processor")
             }
-            compileJava.options.annotationProcessorGeneratedSourcesDirectory = file("build/generated-sources")
+            compileJava.options.generatedSourceOutputDirectory = file("build/generated-sources")
         """
 
         expect:
@@ -98,7 +98,7 @@ class JavaAnnotationProcessingIntegrationTest extends AbstractIntegrationSpec {
                 compileOnly project(":annotation")
                 annotationProcessor project(":processor")
             }
-            compileJava.options.annotationProcessorGeneratedSourcesDirectory = file("build/generated-sources")
+            compileJava.options.generatedSourceOutputDirectory = file("build/generated-sources")
         """
         succeeds "compileJava"
 
@@ -124,30 +124,30 @@ class JavaAnnotationProcessingIntegrationTest extends AbstractIntegrationSpec {
 
         expect:
         succeeds "sourcesJar"
-        ":compileJava" in executedTasks
+        executed(":compileJava")
     }
 
     def "can model annotation processor arguments"() {
-        buildFile << """                                                       
+        buildFile << """
             class HelperAnnotationProcessor implements CommandLineArgumentProvider {
                 @Input
                 String message
-                
+
                 HelperAnnotationProcessor(String message) {
                     this.message = message
                 }
-                
+
                 @Override
                 List<String> asArguments() {
                     ["-Amessage=\${message}".toString()]
                 }
             }
-            
+
             dependencies {
                 compileOnly project(":annotation")
                 annotationProcessor project(":processor")
             }
-            
+
             compileJava.options.compilerArgumentProviders << new HelperAnnotationProcessor("fromOptions")
         """
 
@@ -162,7 +162,8 @@ class JavaAnnotationProcessingIntegrationTest extends AbstractIntegrationSpec {
 
         buildFile << """
             dependencies {
-                compile project(":processor")
+                implementation project(":annotation")
+                implementation project(":processor")
             }
         """
 
@@ -178,9 +179,10 @@ class JavaAnnotationProcessingIntegrationTest extends AbstractIntegrationSpec {
     def "empty processor path overrides processors in the compile classpath, and no deprecation warning is emitted"() {
         buildFile << """
             dependencies {
-                compile project(":processor")
+                implementation project(":annotation")
+                implementation project(":processor")
             }
-            
+
             compileJava {
               options.annotationProcessorPath = files()
             }
@@ -205,11 +207,12 @@ class JavaAnnotationProcessingIntegrationTest extends AbstractIntegrationSpec {
             configurations {
                 apt
             }
-            
+
             dependencies {
-                compile project(":processor")
+                implementation project(":annotation")
+                implementation project(":processor")
             }
-            
+
             compileJava {
               options.annotationProcessorPath = configurations.apt
             }
@@ -232,7 +235,8 @@ class JavaAnnotationProcessingIntegrationTest extends AbstractIntegrationSpec {
     def "processors in the compile classpath don't emit deprecation warning if processing is disabled"() {
         buildFile << """
             dependencies {
-                compile project(":processor")
+                implementation project(":annotation")
+                implementation project(":processor")
             }
             compileJava {
                 options.compilerArgs << "-proc:none"
@@ -300,7 +304,7 @@ class JavaAnnotationProcessingIntegrationTest extends AbstractIntegrationSpec {
         when:
         file('src/main/java/TestApp.java').text = '''
             @Helper
-            class TestApp { 
+            class TestApp {
                 public static void main(String[] args) {
                     System.out.println(new TestAppHelper().getValue() + "Changed!"); // generated class
                 }

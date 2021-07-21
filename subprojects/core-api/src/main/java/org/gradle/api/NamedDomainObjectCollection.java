@@ -27,7 +27,7 @@ import java.util.SortedMap;
 import java.util.SortedSet;
 
 /**
- * <p>A {@code NamedDomainObjectCollection} represents a collection of domain objects that have an inherent, constant, name.</p>
+ * <p>A {@code NamedDomainObjectCollection} represents a collection of objects that have an inherent, constant, name.</p>
  *
  * <p>Objects to be added to a named domain object collection must implement {@code equals()} in such a way that no two objects
  * with different names are considered equal. That is, all equality tests <strong>must</strong> consider the name as an
@@ -71,7 +71,7 @@ import java.util.SortedSet;
  * books.gradle.name == "gradle"
  * </pre>
  *
- * @param <T> The type of domain objects in this collection.
+ * @param <T> The type of objects in this collection.
  */
 public interface NamedDomainObjectCollection<T> extends DomainObjectCollection<T> {
 
@@ -81,6 +81,7 @@ public interface NamedDomainObjectCollection<T> extends DomainObjectCollection<T
      * @param e the item to add to the collection
      * @return {@code true} if the item was added, or {@code} false if an item with the same name already exists.
      */
+    @Override
     boolean add(T e);
 
     /**
@@ -89,6 +90,7 @@ public interface NamedDomainObjectCollection<T> extends DomainObjectCollection<T
      * @param c the items to add to the collection
      * @return {@code true} if any item was added, or {@code} false if all items have non unique names within this collection.
      */
+    @Override
     boolean addAll(Collection<? extends T> c);
 
     /**
@@ -158,7 +160,7 @@ public interface NamedDomainObjectCollection<T> extends DomainObjectCollection<T
     T getByName(String name, Action<? super T> configureAction) throws UnknownDomainObjectException;
 
     /**
-     * Locates an object by name, failing if there is no such task. This method is identical to {@link
+     * Locates an object by name, failing if there is no such object. This method is identical to {@link
      * #getByName(String)}. You can call this method in your build script by using the groovy {@code []} operator.
      *
      * @param name The object name
@@ -206,16 +208,19 @@ public interface NamedDomainObjectCollection<T> extends DomainObjectCollection<T
     /**
      * {@inheritDoc}
      */
+    @Override
     <S extends T> NamedDomainObjectCollection<S> withType(Class<S> type);
 
     /**
      * {@inheritDoc}
      */
+    @Override
     NamedDomainObjectCollection<T> matching(Spec<? super T> spec);
 
     /**
      * {@inheritDoc}
      */
+    @Override
     NamedDomainObjectCollection<T> matching(Closure spec);
 
     /**

@@ -17,11 +17,14 @@
 package org.gradle.nativeplatform.fixtures;
 
 import com.google.common.base.Joiner;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 import org.gradle.api.internal.file.TestFiles;
 import org.gradle.api.specs.Spec;
-import org.gradle.integtests.fixtures.AbstractContextualMultiVersionSpecRunner;
+import org.gradle.integtests.fixtures.VersionedTool;
+import org.gradle.integtests.fixtures.executer.GradleExecuter;
 import org.gradle.internal.nativeintegration.ProcessEnvironment;
 import org.gradle.internal.os.OperatingSystem;
 import org.gradle.nativeplatform.fixtures.msvcpp.VisualStudioLocatorTestFixture;
@@ -43,26 +46,27 @@ import org.gradle.nativeplatform.toolchain.plugins.SwiftCompilerPlugin;
 import org.gradle.platform.base.internal.toolchain.SearchResult;
 import org.gradle.test.fixtures.file.TestFile;
 import org.gradle.testfixtures.internal.NativeServicesTestFixture;
-import org.gradle.util.CollectionUtils;
-import org.gradle.util.GUtil;
-import org.gradle.util.VersionNumber;
+import org.gradle.util.internal.CollectionUtils;
+import org.gradle.util.internal.GUtil;
+import org.gradle.util.internal.VersionNumber;
 
 import javax.annotation.Nullable;
 import java.io.File;
-import java.io.FileFilter;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
-import static org.gradle.nativeplatform.fixtures.msvcpp.VisualStudioVersion.VISUALSTUDIO_2012;
-import static org.gradle.nativeplatform.fixtures.msvcpp.VisualStudioVersion.VISUALSTUDIO_2013;
-import static org.gradle.nativeplatform.fixtures.msvcpp.VisualStudioVersion.VISUALSTUDIO_2015;
-import static org.gradle.nativeplatform.fixtures.msvcpp.VisualStudioVersion.VISUALSTUDIO_2017;
+import static org.gradle.nativeplatform.fixtures.msvcpp.VisualStudioVersion.*;
 
 public class AvailableToolChains {
-    private static final Comparator<ToolChainCandidate> LATEST_FIRST = Collections.reverseOrder(new Comparator<ToolChainCandidate>() {
+    private static final Comparator<ToolChainCandidate> LATEST_RELEASED_FIRST = Collections.reverseOrder(new Comparator<ToolChainCandidate>() {
         @Override
         public int compare(ToolChainCandidate toolchain1, ToolChainCandidate toolchain2) {
             return toolchain1.getVersion().compareTo(toolchain2.getVersion());
@@ -126,21 +130,27 @@ public class AvailableToolChains {
     }
 
     static private List<ToolChainCandidate> findClangs(boolean mustFind) {
-        GccMetadataProvider versionDeterminer = GccMetadataProvider.forClang(TestFiles.execActionFactory());
-
-        Set<File> clangCandidates = ImmutableSet.copyOf(OperatingSystem.current().findAllInPath("clang"));
         List<ToolChainCandidate> toolChains = Lists.newArrayList();
-        if (!clangCandidates.isEmpty()) {
-            File firstInPath = clangCandidates.iterator().next();
-            for (File candidate : clangCandidates) {
-                SearchResult<GccMetadata> version = versionDeterminer.getCompilerMetaData(candidate, Collections.<String>emptyList(), Collections.<File>emptyList());
-                if (version.isAvailable()) {
-                    InstalledClang clang = new InstalledClang(version.getComponent().getVersion());
-                    if (!candidate.equals(firstInPath)) {
-                        // Not the first g++ in the path, needs the path variable updated
-                        clang.inPath(candidate.getParentFile());
+
+        // On macOS, we assume co-located Xcode is installed into /opt/xcode and default location at /Applications/Xcode.app
+        //   We need to search for Clang differently on macOS because we need to know the Xcode version for x86 support.
+        if (OperatingSystem.current().isMacOsX()) {
+            toolChains.addAll(findXcodes().stream().map(InstalledXcode::getClang).filter(Optional::isPresent).map(Optional::get).collect(Collectors.toList()));
+        } else {
+            GccMetadataProvider versionDeterminer = GccMetadataProvider.forClang(TestFiles.execActionFactory());
+            Set<File> clangCandidates = ImmutableSet.copyOf(OperatingSystem.current().findAllInPath("clang"));
+            if (!clangCandidates.isEmpty()) {
+                File firstInPath = clangCandidates.iterator().next();
+                for (File candidate : clangCandidates) {
+                    SearchResult<GccMetadata> version = versionDeterminer.getCompilerMetaData(Collections.emptyList(), spec -> spec.executable(candidate));
+                    if (version.isAvailable()) {
+                        InstalledClang clang = new InstalledClang(version.getComponent().getVersion());
+                        if (!candidate.equals(firstInPath)) {
+                            // Not the first g++ in the path, needs the path variable updated
+                            clang.inPath(candidate.getParentFile());
+                        }
+                        toolChains.add(clang);
                     }
-                    toolChains.add(clang);
                 }
             }
         }
@@ -149,7 +159,7 @@ public class AvailableToolChains {
             toolChains.add(new UnavailableToolChain(ToolFamily.CLANG));
         }
 
-        toolChains.sort(LATEST_FIRST);
+        toolChains.sort(LATEST_RELEASED_FIRST);
 
         return toolChains;
     }
@@ -183,7 +193,7 @@ public class AvailableToolChains {
             toolChains.add(new UnavailableToolChain(ToolFamily.VISUAL_CPP));
         }
 
-        toolChains.sort(LATEST_FIRST);
+        toolChains.sort(LATEST_RELEASED_FIRST);
 
         return toolChains;
     }
@@ -225,7 +235,7 @@ public class AvailableToolChains {
         if (!gppCandidates.isEmpty()) {
             File firstInPath = gppCandidates.iterator().next();
             for (File candidate : gppCandidates) {
-                SearchResult<GccMetadata> version = versionDeterminer.getCompilerMetaData(candidate, Collections.<String>emptyList(), Collections.<File>emptyList());
+                SearchResult<GccMetadata> version = versionDeterminer.getCompilerMetaData(Collections.emptyList(), spec -> spec.executable(candidate));
                 if (version.isAvailable()) {
                     InstalledGcc gcc = new InstalledGcc(ToolFamily.GCC, version.getComponent().getVersion());
                     if (!candidate.equals(firstInPath)) {
@@ -241,7 +251,7 @@ public class AvailableToolChains {
             toolChains.add(new UnavailableToolChain(ToolFamily.GCC));
         }
 
-        toolChains.sort(LATEST_FIRST);
+        toolChains.sort(LATEST_RELEASED_FIRST);
 
         return toolChains;
     }
@@ -253,25 +263,23 @@ public class AvailableToolChains {
 
         // On Linux, we assume swift is installed into /opt/swift
         File rootSwiftInstall = new File("/opt/swift");
-        File[] candidates = GUtil.elvis(rootSwiftInstall.listFiles(new FileFilter() {
-            @Override
-            public boolean accept(File swiftInstall) {
-                return swiftInstall.isDirectory() && !swiftInstall.getName().equals("latest");
-            }
-        }), new File[0]);
+        File[] swiftCandidates = GUtil.getOrDefault(rootSwiftInstall.listFiles(swiftInstall -> swiftInstall.isDirectory() && !swiftInstall.getName().equals("latest")), () -> new File[0]);
 
-        for (File swiftInstall : candidates) {
+        for (File swiftInstall : swiftCandidates) {
             File swiftc = new File(swiftInstall, "/usr/bin/swiftc");
-            SearchResult<SwiftcMetadata> version = versionDeterminer.getCompilerMetaData(swiftc, Collections.<String>emptyList(), Collections.<File>emptyList());
+            SearchResult<SwiftcMetadata> version = versionDeterminer.getCompilerMetaData(Collections.emptyList(), spec -> spec.executable(swiftc));
             if (version.isAvailable()) {
                 File binDir = swiftc.getParentFile();
                 toolChains.add(new InstalledSwiftc(binDir, version.getComponent().getVersion()).inPath(binDir, new File("/usr/bin")));
             }
         }
 
+        // On macOS, we assume co-located Xcode is installed into /opt/xcode and default location at /Applications/Xcode.app
+        toolChains.addAll(findXcodes().stream().map(InstalledXcode::getSwiftc).filter(Optional::isPresent).map(Optional::get).collect(Collectors.toList()));
+
         List<File> swiftcCandidates = OperatingSystem.current().findAllInPath("swiftc");
         for (File candidate : swiftcCandidates) {
-            SearchResult<SwiftcMetadata> version = versionDeterminer.getCompilerMetaData(candidate, Collections.<String>emptyList(), Collections.<File>emptyList());
+            SearchResult<SwiftcMetadata> version = versionDeterminer.getCompilerMetaData(Collections.emptyList(), spec -> spec.executable(candidate));
             if (version.isAvailable()) {
                 File binDir = candidate.getParentFile();
                 InstalledSwiftc swiftc = new InstalledSwiftc(binDir, version.getComponent().getVersion());
@@ -283,7 +291,7 @@ public class AvailableToolChains {
         if (toolChains.isEmpty()) {
             toolChains.add(new UnavailableToolChain(ToolFamily.SWIFTC));
         } else {
-            toolChains.sort(LATEST_FIRST);
+            toolChains.sort(LATEST_RELEASED_FIRST);
         }
 
         return toolChains;
@@ -304,7 +312,7 @@ public class AvailableToolChains {
         }
     }
 
-    public static abstract class ToolChainCandidate implements AbstractContextualMultiVersionSpecRunner.VersionedTool {
+    public static abstract class ToolChainCandidate implements VersionedTool {
         @Override
         public String toString() {
             return getDisplayName();
@@ -401,6 +409,7 @@ public class AvailableToolChains {
          * Initialise the process environment so that this tool chain is visible to the default discovery mechanism that the
          * plugin uses (eg add the compiler to the PATH).
          */
+        @Override
         public void initialiseEnvironment() {
             String compilerPath = Joiner.on(File.pathSeparator).join(pathEntries);
 
@@ -412,6 +421,7 @@ public class AvailableToolChains {
             }
         }
 
+        @Override
         public void resetEnvironment() {
             if (originalPath != null) {
                 PROCESS_ENVIRONMENT.setEnvironmentVariable(pathVarName, originalPath);
@@ -463,6 +473,10 @@ public class AvailableToolChains {
 
         public String platformSpecificToolChainConfiguration() {
             return "";
+        }
+
+        public void configureExecuter(GradleExecuter executer) {
+            // Toolchains should be using default configuration
         }
     }
 
@@ -697,7 +711,156 @@ public class AvailableToolChains {
 
         @Override
         public boolean meets(ToolChainRequirement requirement) {
-            return requirement == ToolChainRequirement.SWIFTC || (requirement == ToolChainRequirement.SWIFTC_3 && getVersion().getMajor() == 3) || (requirement == ToolChainRequirement.SWIFTC_4 && getVersion().getMajor() == 4);
+            switch (requirement) {
+                case SWIFTC:
+                    return true;
+                case SWIFTC_3:
+                    return getVersion().getMajor() == 3;
+                case SWIFTC_4:
+                    return getVersion().getMajor() == 4;
+                case SWIFTC_5:
+                    return getVersion().getMajor() == 5;
+                case SWIFTC_4_OR_OLDER:
+                    return getVersion().getMajor() < 5;
+                default:
+                    return false;
+            }
+        }
+    }
+
+    static List<InstalledXcode> findXcodes() {
+        List<InstalledXcode> xcodes = new ArrayList<>();
+
+        // On macOS, we assume co-located Xcode is installed into /opt/xcode
+        File rootXcodeInstall = new File("/opt/xcode");
+        List<File> xcodeCandidates = Lists.newArrayList(Arrays.asList(GUtil.getOrDefault(rootXcodeInstall.listFiles(File::isDirectory), () -> new File[0])));
+        xcodeCandidates.add(new File("/Applications/Xcode.app")); // Default Xcode installation
+        xcodeCandidates.stream().filter(File::exists).forEach(xcodeInstall -> {
+            TestFile xcodebuild = new TestFile("/usr/bin/xcodebuild");
+
+            String output = xcodebuild.execute(Collections.singletonList("-version"), Collections.singletonList("DEVELOPER_DIR=" + xcodeInstall.getAbsolutePath())).getOut();
+            Pattern versionRegex = Pattern.compile("Xcode (\\d+\\.\\d+(\\.\\d+)?)");
+            Matcher matcher = versionRegex.matcher(output);
+            if (matcher.find()) {
+                VersionNumber version = VersionNumber.parse(matcher.group(1));
+                xcodes.add(new InstalledXcode(xcodeInstall, version));
+            }
+        });
+
+        return xcodes;
+    }
+
+    public static class InstalledXcode {
+        private static final ProcessEnvironment PROCESS_ENVIRONMENT = NativeServicesTestFixture.getInstance().get(ProcessEnvironment.class);
+        private final File xcodeDir;
+        private final VersionNumber version;
+        private String originalDeveloperDir;
+
+        public InstalledXcode(File xcodeDir, VersionNumber version) {
+            this.xcodeDir = xcodeDir;
+            this.version = version;
+        }
+
+        private List<String> getRuntimeEnv() {
+            return ImmutableList.of("DEVELOPER_DIR=" + xcodeDir.getAbsolutePath());
+        }
+
+        private void initialiseEnvironment() {
+            originalDeveloperDir = System.getenv("DEVELOPER_DIR");
+            System.out.println(String.format("Using DEVELOPER_DIR %s", xcodeDir.getAbsolutePath()));
+            PROCESS_ENVIRONMENT.setEnvironmentVariable("DEVELOPER_DIR", xcodeDir.getAbsolutePath());
+        }
+
+        private void resetEnvironment() {
+            if (originalDeveloperDir != null) {
+                PROCESS_ENVIRONMENT.setEnvironmentVariable("DEVELOPER_DIR", xcodeDir.getAbsolutePath());
+            }
+        }
+
+        private void configureExecuter(GradleExecuter executer) {
+            executer.withEnvironmentVars(ImmutableMap.of("DEVELOPER_DIR", xcodeDir.getAbsolutePath()));
+        }
+
+        public Optional<InstalledToolChain> getSwiftc() {
+            SwiftcMetadataProvider versionDeterminer = new SwiftcMetadataProvider(TestFiles.execActionFactory());
+            File swiftc = new File("/usr/bin/swiftc");
+            SearchResult<SwiftcMetadata> version = versionDeterminer.getCompilerMetaData(Collections.emptyList(), spec -> spec.executable(swiftc).environment("DEVELOPER_DIR", xcodeDir.getAbsolutePath()));
+            if (!version.isAvailable()) {
+                return Optional.empty();
+            }
+
+            return Optional.of(new InstalledSwiftc(new File("/usr/bin"), version.getComponent().getVersion()) {
+                @Override
+                public List<String> getRuntimeEnv() {
+                    List<String> result = new ArrayList<>();
+                    result.addAll(super.getRuntimeEnv());
+                    result.addAll(InstalledXcode.this.getRuntimeEnv());
+                    return result;
+                }
+
+                @Override
+                public void initialiseEnvironment() {
+                    super.initialiseEnvironment();
+                    InstalledXcode.this.initialiseEnvironment();
+                }
+
+                @Override
+                public void resetEnvironment() {
+                    InstalledXcode.this.resetEnvironment();
+                    super.resetEnvironment();
+                }
+
+                @Override
+                public void configureExecuter(GradleExecuter executer) {
+                    super.configureExecuter(executer);
+                    InstalledXcode.this.configureExecuter(executer);
+                }
+            });
+        }
+
+        public Optional<InstalledToolChain> getClang() {
+            GccMetadataProvider versionDeterminer = GccMetadataProvider.forClang(TestFiles.execActionFactory());
+            File clang = new File("/usr/bin/clang");
+            SearchResult<GccMetadata> version = versionDeterminer.getCompilerMetaData(Collections.emptyList(), spec -> spec.executable(clang).environment("DEVELOPER_DIR", xcodeDir.getAbsolutePath()));
+            if (!version.isAvailable()) {
+                return Optional.empty();
+            }
+
+            return Optional.of(new InstalledClang(version.getComponent().getVersion()) {
+                @Override
+                public List<String> getRuntimeEnv() {
+                    List<String> result = new ArrayList<>();
+                    result.addAll(super.getRuntimeEnv());
+                    result.addAll(InstalledXcode.this.getRuntimeEnv());
+                    return result;
+                }
+
+                @Override
+                public void initialiseEnvironment() {
+                    super.initialiseEnvironment();
+                    InstalledXcode.this.initialiseEnvironment();
+                }
+
+                @Override
+                public void resetEnvironment() {
+                    InstalledXcode.this.resetEnvironment();
+                    super.resetEnvironment();
+                }
+
+                @Override
+                public void configureExecuter(GradleExecuter executer) {
+                    super.configureExecuter(executer);
+                    InstalledXcode.this.configureExecuter(executer);
+                }
+
+                @Override
+                public boolean meets(ToolChainRequirement requirement) {
+                    if (ToolChainRequirement.SUPPORTS_32.equals(requirement) || ToolChainRequirement.SUPPORTS_32_AND_64.equals(requirement)) {
+                        return InstalledXcode.this.version.getMajor() < 10;
+                    }
+                    return super.meets(requirement);
+                }
+            });
         }
     }
 
@@ -754,6 +917,10 @@ public class AvailableToolChains {
                     return version.equals(VISUALSTUDIO_2017.getVersion());
                 case VISUALCPP_2017_OR_NEWER:
                     return version.compareTo(VISUALSTUDIO_2017.getVersion()) >= 0;
+                case VISUALCPP_2019:
+                    return version.equals(VISUALSTUDIO_2019.getVersion());
+                case VISUALCPP_2019_OR_NEWER:
+                    return version.compareTo(VISUALSTUDIO_2019.getVersion()) >= 0;
                 default:
                     return false;
             }
@@ -788,6 +955,7 @@ public class AvailableToolChains {
             return true;
         }
 
+        @Override
         public VersionNumber getVersion() {
             return version;
         }

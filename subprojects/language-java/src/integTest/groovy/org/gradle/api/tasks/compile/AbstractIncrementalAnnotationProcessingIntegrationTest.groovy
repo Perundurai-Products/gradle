@@ -49,7 +49,7 @@ abstract class AbstractIncrementalAnnotationProcessingIntegrationTest extends Ab
             allprojects {
                 apply plugin: 'java'
             }
-            
+
             dependencies {
                 compileOnly project(":annotation")
                 annotationProcessor project(":processor")
@@ -71,13 +71,20 @@ abstract class AbstractIncrementalAnnotationProcessingIntegrationTest extends Ab
     }
 
     protected final File java(String... classBodies) {
+        javaInPackage('', classBodies)
+    }
+
+    protected final File javaInPackage(String packageName, String... classBodies) {
         File out
+        def packageStatement = packageName.empty ? "" : "package ${packageName};\n"
+        def packagePathPrefix = packageName.empty ? '' : "${packageName.replace('.', '/')}/"
         for (String body : classBodies) {
             def className = (body =~ /(?s).*?class (\w+) .*/)[0][1]
             assert className: "unable to find class name"
-            def f = file("src/main/java/${className}.java")
+            def f = file("src/main/java/${packagePathPrefix}${className}.java")
             f.createFile()
-            f.text = body
+            f.text = packageStatement
+            f << body
             out = f
         }
         out
@@ -114,4 +121,39 @@ abstract class AbstractIncrementalAnnotationProcessingIntegrationTest extends Ab
         outputs.recompiledClasses("A", "B")
     }
 
+    def "recompiles when a resource is removed"() {
+        given:
+        buildFile << """
+            compileJava.inputs.dir 'src/main/resources'
+        """
+        java("class A {}")
+        java("class B {}")
+        def resource = file("src/main/resources/foo.txt")
+        resource.text = 'foo'
+
+        outputs.snapshot { succeeds 'compileJava' }
+
+        when:
+        resource.delete()
+
+        then:
+        succeeds 'compileJava'
+        outputs.recompiledClasses("A", "B")
+    }
+
+    def "compilation is incremental when an empty directory is added"() {
+        given:
+        def a = java("class A {}")
+        java("class B {}")
+
+        outputs.snapshot { succeeds 'compileJava' }
+
+        when:
+        a.text = "class A { /*change*/ }"
+        file('src/main/java/different').createDir()
+
+        then:
+        succeeds 'compileJava'
+        outputs.recompiledClasses("A")
+    }
 }

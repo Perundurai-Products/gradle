@@ -16,6 +16,7 @@
 
 package org.gradle.integtests.resource.gcs.ivy
 
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.integtests.fixtures.executer.ExecutionResult
 import org.gradle.integtests.resolve.ivy.AbstractIvyRemoteRepoResolveIntegrationTest
 import org.gradle.integtests.resource.gcs.fixtures.GcsServer
@@ -29,7 +30,7 @@ import static org.gradle.internal.resource.transport.gcp.gcs.GcsConnectionProper
 class IvyGcsRepoResolveIntegrationTest extends AbstractIvyRemoteRepoResolveIntegrationTest {
 
     @Rule
-    final GcsServer server = new GcsServer(temporaryFolder)
+    GcsServer server = new GcsServer(temporaryFolder)
 
     @Override
     RepositoryServer getServer() {
@@ -43,6 +44,7 @@ class IvyGcsRepoResolveIntegrationTest extends AbstractIvyRemoteRepoResolveInteg
         result = executer.withTasks(*tasks).run()
     }
 
+    @ToBeFixedForConfigurationCache(skip = ToBeFixedForConfigurationCache.Skip.FAILS_TO_CLEANUP)
     def "cannot add invalid authentication types for gcs repo"() {
         given:
         def remoteIvyRepo = server.getRemoteIvyRepo()

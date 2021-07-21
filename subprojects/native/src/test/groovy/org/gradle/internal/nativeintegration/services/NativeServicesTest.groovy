@@ -18,12 +18,13 @@ package org.gradle.internal.nativeintegration.services
 import net.rubygrapefruit.platform.ProcessLauncher
 import net.rubygrapefruit.platform.SystemInfo
 import net.rubygrapefruit.platform.WindowsRegistry
+import org.gradle.api.internal.file.temp.TemporaryFileProvider
+import org.gradle.internal.file.Chmod
+import org.gradle.internal.file.Stat
 import org.gradle.internal.nativeintegration.ProcessEnvironment
 import org.gradle.internal.nativeintegration.console.ConsoleDetector
-import org.gradle.internal.nativeintegration.filesystem.Chmod
 import org.gradle.internal.nativeintegration.filesystem.FileCanonicalizer
 import org.gradle.internal.nativeintegration.filesystem.FileSystem
-import org.gradle.internal.nativeintegration.filesystem.Stat
 import org.gradle.internal.os.OperatingSystem
 import org.gradle.util.UsesNativeServices
 import spock.lang.Specification
@@ -76,5 +77,10 @@ class NativeServicesTest extends Specification {
     def "makes a ProcessLauncher available"() {
         expect:
         services.get(ProcessLauncher) != null
+    }
+
+    def "makes a TemporaryFileProvider available"() {
+        expect:
+        services.get(TemporaryFileProvider) != null
     }
 }

@@ -24,6 +24,7 @@ import org.gradle.api.internal.collections.CollectionFilter;
 import org.gradle.api.internal.collections.SortedSetElementSource;
 import org.gradle.api.specs.Spec;
 import org.gradle.api.specs.Specs;
+import org.gradle.internal.Cast;
 import org.gradle.internal.reflect.Instantiator;
 
 import java.util.LinkedHashSet;
@@ -35,10 +36,6 @@ public class DefaultNamedDomainObjectSet<T> extends DefaultNamedDomainObjectColl
     public DefaultNamedDomainObjectSet(Class<? extends T> type, Instantiator instantiator, Namer<? super T> namer, CollectionCallbackActionDecorator decorator) {
         super(type, new SortedSetElementSource<T>(new Namer.Comparator<T>(namer)), instantiator, namer, decorator);
         this.parentMutationGuard = MutationGuards.identity();
-    }
-
-    public DefaultNamedDomainObjectSet(Class<? extends T> type, Instantiator instantiator) {
-        this(type, instantiator, CollectionCallbackActionDecorator.NOOP);
     }
 
     public DefaultNamedDomainObjectSet(Class<? extends T> type, Instantiator instantiator, CollectionCallbackActionDecorator decorator) {
@@ -57,7 +54,7 @@ public class DefaultNamedDomainObjectSet<T> extends DefaultNamedDomainObjectColl
 
     @Override
     protected <S extends T> DefaultNamedDomainObjectSet<S> filtered(CollectionFilter<S> filter) {
-        return getInstantiator().newInstance(DefaultNamedDomainObjectSet.class, this, filter, getInstantiator(), getNamer());
+        return Cast.uncheckedNonnullCast(getInstantiator().newInstance(DefaultNamedDomainObjectSet.class, this, filter, getInstantiator(), getNamer()));
     }
 
     @Override

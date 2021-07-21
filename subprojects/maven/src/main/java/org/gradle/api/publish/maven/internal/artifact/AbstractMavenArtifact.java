@@ -19,14 +19,14 @@ package org.gradle.api.publish.maven.internal.artifact;
 import com.google.common.base.Strings;
 import org.gradle.api.internal.tasks.AbstractTaskDependency;
 import org.gradle.api.internal.tasks.DefaultTaskDependency;
-import org.gradle.api.internal.tasks.TaskDependencyInternal;
 import org.gradle.api.internal.tasks.TaskDependencyResolveContext;
+import org.gradle.api.publish.internal.PublicationArtifactInternal;
 import org.gradle.api.publish.maven.MavenArtifact;
 import org.gradle.api.tasks.TaskDependency;
 
 import java.io.File;
 
-public abstract class AbstractMavenArtifact implements MavenArtifact {
+public abstract class AbstractMavenArtifact implements MavenArtifact, PublicationArtifactInternal {
     private final TaskDependency allBuildDependencies;
     private final DefaultTaskDependency additionalBuildDependencies;
     private String extension;
@@ -37,37 +37,44 @@ public abstract class AbstractMavenArtifact implements MavenArtifact {
         this.allBuildDependencies = new CompositeTaskDependency();
     }
 
+    @Override
     public abstract File getFile();
 
+    @Override
     public final String getExtension() {
         return extension != null ? extension : getDefaultExtension();
     }
 
     protected abstract String getDefaultExtension();
 
+    @Override
     public final void setExtension(String extension) {
         this.extension = Strings.nullToEmpty(extension);
     }
 
+    @Override
     public final String getClassifier() {
         return Strings.emptyToNull(classifier != null ? classifier : getDefaultClassifier());
     }
 
     protected abstract String getDefaultClassifier();
 
+    @Override
     public final void setClassifier(String classifier) {
         this.classifier = Strings.nullToEmpty(classifier);
     }
 
+    @Override
     public final void builtBy(Object... tasks) {
         additionalBuildDependencies.add(tasks);
     }
 
+    @Override
     public final TaskDependency getBuildDependencies() {
         return allBuildDependencies;
     }
 
-    protected abstract TaskDependencyInternal getDefaultBuildDependencies();
+    protected abstract TaskDependency getDefaultBuildDependencies();
 
     @Override
     public final String toString() {
@@ -78,7 +85,7 @@ public abstract class AbstractMavenArtifact implements MavenArtifact {
 
         @Override
         public void visitDependencies(TaskDependencyResolveContext context) {
-            getDefaultBuildDependencies().visitDependencies(context);
+            context.add(getDefaultBuildDependencies());
             additionalBuildDependencies.visitDependencies(context);
         }
     }

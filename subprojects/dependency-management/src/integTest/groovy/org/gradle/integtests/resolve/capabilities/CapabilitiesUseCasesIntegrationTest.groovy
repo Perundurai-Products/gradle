@@ -18,9 +18,8 @@ package org.gradle.integtests.resolve.capabilities
 
 import org.gradle.integtests.fixtures.GradleMetadataResolveRunner
 import org.gradle.integtests.fixtures.RequiredFeature
-import org.gradle.integtests.fixtures.RequiredFeatures
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.integtests.resolve.AbstractModuleDependencyResolveTest
-import spock.lang.Ignore
 import spock.lang.Unroll
 
 class CapabilitiesUseCasesIntegrationTest extends AbstractModuleDependencyResolveTest {
@@ -38,6 +37,7 @@ class CapabilitiesUseCasesIntegrationTest extends AbstractModuleDependencyResolv
      * enforce the use of only one of them at the same time.
      */
     @Unroll
+    @ToBeFixedForConfigurationCache(iterationMatchers = [".*conflict fix not applied.*"])
     def "can choose between cglib and cglib-nodep by declaring capabilities (#description)"() {
         given:
         repository {
@@ -62,19 +62,19 @@ class CapabilitiesUseCasesIntegrationTest extends AbstractModuleDependencyResolv
             dependencies {
                conf "cglib:cglib-nodep:3.2.5"
                conf "cglib:cglib:3.2.5"
-            
+
                components {
                   withModule('cglib:cglib-nodep', CapabilityRule)
                }
             }
-            
+
             configurations.all {
                 resolutionStrategy {
                     dependencySubstitution {
                         if ($fixConflict) {
                             substitute(module('cglib:cglib-nodep'))
                                 .because('capability cglib is provided by cglib:cglib and cglib:cglib-nodep')
-                                .with(module('cglib:cglib:3.2.5'))
+                                .using(module('cglib:cglib:3.2.5'))
                         }
                     }
                 }
@@ -107,7 +107,12 @@ class CapabilitiesUseCasesIntegrationTest extends AbstractModuleDependencyResolv
                 }
             }
         } else {
-            failure.assertHasCause("Cannot choose between cglib:cglib-nodep:3.2.5 and cglib:cglib:3.2.5 because they provide the same capability: cglib:cglib:3.2.5")
+            def variant = 'runtime'
+            if (!isGradleMetadataPublished() && useIvy()) {
+                variant = 'default'
+            }
+            failure.assertHasCause("""Module 'cglib:cglib-nodep' has been rejected:
+   Cannot select module with conflict on capability 'cglib:cglib:3.2.5' also provided by [cglib:cglib:3.2.5($variant)]""")
         }
 
         where:
@@ -126,6 +131,7 @@ class CapabilitiesUseCasesIntegrationTest extends AbstractModuleDependencyResolv
      * This is from the consumer point of view, fixing the fact the library doesn't declare capabilities.
      */
     @Unroll
+    @ToBeFixedForConfigurationCache(iterationMatchers = [".*conflict fix not applied.*"])
     def "can select groovy-all over individual groovy-whatever (#description)"() {
         given:
         repository {
@@ -161,18 +167,18 @@ class CapabilitiesUseCasesIntegrationTest extends AbstractModuleDependencyResolv
             dependencies {
                conf "org:a:1.0"
                conf "org:b:1.0"
-            
+
                components {
                   withModule('org.apache:groovy-all', CapabilityRule)
-               }               
+               }
 
                // solution
                configurations.all {
                    resolutionStrategy {
                        dependencySubstitution {
                            if ($fixConflict) {
-                              substitute module('org.apache:groovy') with module('org.apache:groovy-all:1.0')
-                              substitute module('org.apache:groovy-json') with module('org.apache:groovy-all:1.0')
+                              substitute module('org.apache:groovy') using module('org.apache:groovy-all:1.0')
+                              substitute module('org.apache:groovy-json') using module('org.apache:groovy-all:1.0')
                            }
                        }
                    }
@@ -217,7 +223,16 @@ class CapabilitiesUseCasesIntegrationTest extends AbstractModuleDependencyResolv
             }
         } else {
             fails ':checkDeps'
-            failure.assertHasCause("Cannot choose between org.apache:groovy-all:1.0 and org.apache:groovy:1.0 because they provide the same capability: org.apache:groovy:1.0")
+            def variant = 'runtime'
+            if (!isGradleMetadataPublished() && useIvy()) {
+                variant = 'default'
+            }
+            failure.assertHasCause("""Module 'org.apache:groovy' has been rejected:
+   Cannot select module with conflict on capability 'org.apache:groovy:1.0' also provided by [org.apache:groovy-all:1.0($variant)]""")
+            failure.assertHasCause("""Module 'org.apache:groovy-json' has been rejected:
+   Cannot select module with conflict on capability 'org.apache:groovy-json:1.0' also provided by [org.apache:groovy-all:1.0($variant)]""")
+            failure.assertHasCause("""Module 'org.apache:groovy-all' has been rejected:
+   Cannot select module with conflict on capability 'org.apache:groovy-json:1.0' also provided by [org.apache:groovy-json:1.0($variant)]""")
         }
 
         where:
@@ -239,6 +254,7 @@ class CapabilitiesUseCasesIntegrationTest extends AbstractModuleDependencyResolv
      * This is from the consumer point of view, fixing the fact the library doesn't declare capabilities.
      */
     @Unroll
+    @ToBeFixedForConfigurationCache(iterationMatchers = [".*conflict fix not applied.*"])
     def "can select individual groovy-whatever over individual groovy-all (#description)"() {
         given:
         repository {
@@ -274,19 +290,19 @@ class CapabilitiesUseCasesIntegrationTest extends AbstractModuleDependencyResolv
             dependencies {
                conf "org:a:1.0"
                conf "org:b:1.0"
-            
+
                components {
                   withModule('org.apache:groovy-all', CapabilityRule)
-                  
+
                   // solution
                   configurations.all {
                       resolutionStrategy {
                           dependencySubstitution {
-                              if ($fixConflict) { substitute module('org.apache:groovy-all') with module('org.apache:groovy-json:1.0') }
+                              if ($fixConflict) { substitute module('org.apache:groovy-all') using module('org.apache:groovy-json:1.0') }
                           }
                       }
                   }
-               } 
+               }
             }
         """
 
@@ -330,7 +346,16 @@ class CapabilitiesUseCasesIntegrationTest extends AbstractModuleDependencyResolv
             }
         } else {
             fails ':checkDeps'
-            failure.assertHasCause("Cannot choose between org.apache:groovy-all:1.0 and org.apache:groovy:1.0 because they provide the same capability: org.apache:groovy:1.0")
+            def variant = 'runtime'
+            if (!isGradleMetadataPublished() && useIvy()) {
+                variant = 'default'
+            }
+            failure.assertHasCause("""Module 'org.apache:groovy' has been rejected:
+   Cannot select module with conflict on capability 'org.apache:groovy:1.0' also provided by [org.apache:groovy-all:1.0($variant)]""")
+            failure.assertHasCause("""Module 'org.apache:groovy-json' has been rejected:
+   Cannot select module with conflict on capability 'org.apache:groovy-json:1.0' also provided by [org.apache:groovy-all:1.0($variant)]""")
+            failure.assertHasCause("""Module 'org.apache:groovy-all' has been rejected:
+   Cannot select module with conflict on capability 'org.apache:groovy-json:1.0' also provided by [org.apache:groovy-json:1.0($variant)]""")
         }
 
         where:
@@ -347,9 +372,8 @@ class CapabilitiesUseCasesIntegrationTest extends AbstractModuleDependencyResolv
      *
      * This test also makes sure that the order in which dependencies are seen in the graph do not matter.
      */
-    @RequiredFeatures(
-        @RequiredFeature(feature = GradleMetadataResolveRunner.GRADLE_METADATA, value = "true")
-    )
+    @RequiredFeature(feature = GradleMetadataResolveRunner.GRADLE_METADATA, value = "true")
+    @ToBeFixedForConfigurationCache(iterationMatchers = [".*failOnVersionConflict=true.*"])
     @Unroll
     def "published module can declare relocation (first in graph = #first, second in graph = #second, failOnVersionConflict=#failOnVersionConflict)"() {
         given:
@@ -358,6 +382,7 @@ class CapabilitiesUseCasesIntegrationTest extends AbstractModuleDependencyResolv
             'asm:asm:3.0'()
             'org.ow2.asm:asm:4.0' {
                 variant('runtime') {
+                    capability('org.ow2.asm', 'asm', '4.0') // explicitly declare capability
                     capability('asm', 'asm', '4.0') // upgrades the asm capability
                 }
             }
@@ -368,10 +393,11 @@ class CapabilitiesUseCasesIntegrationTest extends AbstractModuleDependencyResolv
                conf "$first"
                conf "$second"
             }
-            
+
             if ($failOnVersionConflict) {
                configurations.conf.resolutionStrategy.failOnVersionConflict()
             }
+            configurations.conf.resolutionStrategy.capabilitiesResolution.all { selectHighestVersion() }
         """
 
         when:
@@ -391,7 +417,7 @@ class CapabilitiesUseCasesIntegrationTest extends AbstractModuleDependencyResolv
 
         then:
         if (failOnVersionConflict) {
-            failure.assertHasCause("Cannot choose between asm:asm:3.0 and org.ow2.asm:asm:4.0 because they provide the same capability: asm:asm:3.0, asm:asm:4.0")
+            failure.assertHasCause("Conflict(s) found for the following module(s):\n  - org.ow2.asm:asm latest version of capability asm:asm")
         } else {
             resolve.expectGraph {
                 root(":", ":test:") {
@@ -415,20 +441,21 @@ class CapabilitiesUseCasesIntegrationTest extends AbstractModuleDependencyResolv
      * as we visit the graph. But using a module substitution rule, we can fix the problem.
      */
 
-    @RequiredFeatures(
-        @RequiredFeature(feature = GradleMetadataResolveRunner.GRADLE_METADATA, value = "true")
-    )
+    @RequiredFeature(feature = GradleMetadataResolveRunner.GRADLE_METADATA, value = "true")
+    @ToBeFixedForConfigurationCache(iterationMatchers = [".*conflict fix not applied.*"])
     @Unroll
     def "can express preference for capabilities declared in published modules (#description)"() {
         given:
         repository {
             'org:testA:1.0' {
                 variant('runtime') {
+                    capability('org', 'testA', '1.0')
                     capability('cap')
                 }
             }
             'org:testB:1.0' {
                 variant('runtime') {
+                    capability('org', 'testB', '1.0')
                     capability('cap')
                 }
             }
@@ -439,12 +466,12 @@ class CapabilitiesUseCasesIntegrationTest extends AbstractModuleDependencyResolv
                 conf 'org:testA:1.0'
                 conf 'org:testB:1.0'
             }
-            
+
             // fix the conflict between modules providing the same capability
             configurations.all {
                 resolutionStrategy {
                    dependencySubstitution {
-                      if ($fixConflict) { substitute module('org:testA') with module('org:testB:1.0') }
+                      if ($fixConflict) { substitute module('org:testA') using module('org:testB:1.0') }
                    }
                 }
             }
@@ -477,18 +504,15 @@ class CapabilitiesUseCasesIntegrationTest extends AbstractModuleDependencyResolv
                 }
             }
         } else {
-            failure.assertHasCause("Cannot choose between org:testA:1.0 and org:testB:1.0 because they provide the same capability: org.test:cap:1.0")
+            failure.assertHasCause("""Module 'org:testA' has been rejected:
+   Cannot select module with conflict on capability 'org.test:cap:1.0' also provided by [org:testB:1.0(runtime)]""")
+            failure.assertHasCause("""Module 'org:testB' has been rejected:
+   Cannot select module with conflict on capability 'org.test:cap:1.0' also provided by [org:testA:1.0(runtime)]""")
         }
 
         where:
         fixConflict | description
         false       | 'conflict fix not applied'
         true        | 'conflict fix applied'
-    }
-
-    @Ignore
-    def "trust no one"() {
-        expect:
-        true // Spock doesn't like when there are only Unroll tests in a test class
     }
 }

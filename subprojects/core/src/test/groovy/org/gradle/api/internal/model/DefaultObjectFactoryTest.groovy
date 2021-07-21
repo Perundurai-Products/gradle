@@ -16,16 +16,21 @@
 
 package org.gradle.api.internal.model
 
+import org.gradle.api.internal.collections.DomainObjectCollectionFactory
+import org.gradle.api.internal.file.FileCollectionFactory
 import org.gradle.api.internal.file.FilePropertyFactory
-import org.gradle.api.internal.file.FileResolver
+import org.gradle.api.internal.file.TestFiles
 import org.gradle.api.internal.file.collections.DirectoryFileTreeFactory
+import org.gradle.api.internal.provider.DefaultPropertyFactory
+import org.gradle.api.internal.provider.PropertyHost
 import org.gradle.internal.reflect.Instantiator
 import spock.lang.Specification
 import spock.lang.Unroll
 
-
 class DefaultObjectFactoryTest extends Specification {
-    def factory = new DefaultObjectFactory(Stub(Instantiator), Stub(NamedObjectInstantiator), Stub(FileResolver), Stub(DirectoryFileTreeFactory), Stub(FilePropertyFactory))
+    def propertyFactory = new DefaultPropertyFactory(Stub(PropertyHost))
+    def patternSetFactory = TestFiles.patternSetFactory
+    def factory = new DefaultObjectFactory(Stub(Instantiator), Stub(NamedObjectInstantiator), Stub(DirectoryFileTreeFactory), patternSetFactory, propertyFactory, Stub(FilePropertyFactory), Stub(FileCollectionFactory), Stub(DomainObjectCollectionFactory))
 
     def "property has no value"() {
         expect:
@@ -37,7 +42,7 @@ class DefaultObjectFactoryTest extends Specification {
 
         then:
         def e = thrown(IllegalStateException)
-        e.message == 'No value has been specified for this provider.'
+        e.message == 'Cannot query the value of this property because it has no value available.'
     }
 
     def "cannot create property for null value"() {

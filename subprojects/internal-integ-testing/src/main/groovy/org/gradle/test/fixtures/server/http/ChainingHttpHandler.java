@@ -19,12 +19,16 @@ package org.gradle.test.fixtures.server.http;
 import com.google.common.base.Charsets;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
+import org.apache.commons.lang3.exception.ExceptionUtils;
+import org.gradle.integtests.fixtures.timeout.JavaProcessStackTracesMonitor;
 import org.gradle.internal.UncheckedException;
 import org.gradle.internal.exceptions.DefaultMultiCauseException;
 import org.gradle.internal.time.Clock;
 import org.gradle.internal.time.Time;
+import org.gradle.test.fixtures.ResettableExpectations;
 
-import javax.annotation.Nullable;
+import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -34,7 +38,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
 
-class ChainingHttpHandler implements HttpHandler {
+class ChainingHttpHandler implements HttpHandler, ResettableExpectations {
     private final int timeoutMs;
     private final AtomicInteger counter;
     private final List<TrackingHttpHandler> handlers = new CopyOnWriteArrayList<TrackingHttpHandler>();
@@ -67,10 +71,7 @@ class ChainingHttpHandler implements HttpHandler {
     }
 
     public void waitForCompletion() {
-        for (TrackingHttpHandler handler : handlers) {
-            handler.cancelBlockedRequests();
-        }
-
+        cancelBlockedRequests();
         waitForRequestsToFinish();
 
         lock.lock();
@@ -94,6 +95,26 @@ class ChainingHttpHandler implements HttpHandler {
         }
     }
 
+    @Override
+    public void resetExpectations() {
+        cancelBlockedRequests();
+        waitForRequestsToFinish();
+        lock.lock();
+        try {
+            outcomes.clear();
+            handlers.clear();
+            completed = true;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private void cancelBlockedRequests() {
+        for (TrackingHttpHandler handler : handlers) {
+            handler.cancelBlockedRequests();
+        }
+    }
+
     private void waitForRequestsToFinish() {
         long completionTimeout = clock.getCurrentTime() + timeoutMs;
         for (RequestOutcome outcome : outcomes) {
@@ -108,31 +129,52 @@ class ChainingHttpHandler implements HttpHandler {
             int id = counter.incrementAndGet();
 
             RequestOutcome outcome = requestStarted(httpExchange);
-            System.out.println(String.format("[%d] handling %s", id, outcome.getDisplayName()));
+            System.out.printf("[%d] handling %s%n", id, outcome.getDisplayName());
 
             try {
-                ResponseProducer responseProducer = selectProducer(id, httpExchange, outcome);
-                if (responseProducer != null) {
-                    System.out.println(String.format("[%d] sending response for %s", id, outcome.getDisplayName()));
+                ResponseProducer responseProducer = selectProducer(id, httpExchange);
+                System.out.printf("[%d] sending response for %s%n", id, outcome.getDisplayName());
+                if (!responseProducer.isFailure()) {
                     responseProducer.writeTo(id, httpExchange);
                 } else {
-                    System.out.println(String.format("[%d] sending error response for unexpected request", id));
-                    if (outcome.method.equals("HEAD")) {
-                        httpExchange.sendResponseHeaders(500, -1);
-                    } else {
-                        byte[] message = String.format("Failed request %s", outcome.getDisplayName()).getBytes(Charsets.UTF_8);
-                        httpExchange.sendResponseHeaders(500, message.length);
-                        httpExchange.getResponseBody().write(message);
-                    }
+                    Throwable failure = responseProducer.getFailure();
+                    requestFailed(outcome, failure);
+                    String stacktrace = ExceptionUtils.getStackTrace(failure);
+                    // We observed jstack hanging on windows
+//                    dumpThreadsUponTimeout(stacktrace);
+                    System.out.printf("[%d] handling failed with exception %s%n", id, stacktrace);
+                    sendFailure(httpExchange, 400, outcome);
                 }
             } catch (Throwable t) {
-                System.out.println(String.format("[%d] handling %s failed with exception", id, outcome.getDisplayName()));
-                requestFailed(outcome, t);
+                System.out.printf("[%d] handling %s failed with exception%n", id, outcome.getDisplayName());
+                try {
+                    sendFailure(httpExchange, 500, outcome);
+                } catch (IOException e) {
+                    // Ignore
+                }
+                requestFailed(outcome, new AssertionError(String.format("Failed to handle %s", outcome.getDisplayName()), t));
             } finally {
                 requestCompleted(outcome);
             }
         } finally {
             httpExchange.close();
+        }
+    }
+
+    // Dump all JVMs' threads on the machine to troubleshoot deadlock issues
+    private void dumpThreadsUponTimeout(String stacktrace) {
+        if (stacktrace.contains("due to a timeout waiting for other requests")) {
+            JavaProcessStackTracesMonitor.printAllStackTracesByJstack(new File("."));
+        }
+    }
+
+    private void sendFailure(HttpExchange httpExchange, int responseCode, RequestOutcome outcome) throws IOException {
+        if (outcome.method.equals("HEAD")) {
+            httpExchange.sendResponseHeaders(responseCode, -1);
+        } else {
+            byte[] message = String.format("Failed request %s", outcome.getDisplayName()).getBytes(Charsets.UTF_8);
+            httpExchange.sendResponseHeaders(responseCode, message.length);
+            httpExchange.getResponseBody().write(message);
         }
     }
 
@@ -152,7 +194,7 @@ class ChainingHttpHandler implements HttpHandler {
         lock.lock();
         try {
             if (outcome.failure == null) {
-                outcome.failure = new AssertionError(String.format("Failed to handle %s", outcome.getDisplayName()), t);
+                outcome.failure = t;
             }
         } finally {
             lock.unlock();
@@ -163,18 +205,14 @@ class ChainingHttpHandler implements HttpHandler {
         outcome.completed();
     }
 
-    /**
-     * Returns null on failure.
-     */
-    @Nullable
-    private ResponseProducer selectProducer(int id, HttpExchange httpExchange, RequestOutcome outcome) {
+    private ResponseProducer selectProducer(int id, HttpExchange httpExchange) {
         lock.lock();
         try {
             requestsStarted++;
             condition.signalAll();
             if (completed) {
                 System.out.println(String.format("[%d] received request %s %s after HTTP server has stopped.", id, httpExchange.getRequestMethod(), httpExchange.getRequestURI()));
-                return null;
+                return new UnexpectedRequestFailure(httpExchange.getRequestMethod(), httpExchange.getRequestURI().getPath());
             }
             for (TrackingHttpHandler handler : handlers) {
                 ResponseProducer responseProducer = handler.selectResponseProducer(id, httpExchange);
@@ -182,15 +220,10 @@ class ChainingHttpHandler implements HttpHandler {
                     return responseProducer;
                 }
             }
-            System.out.println(String.format("[%d] unexpected request %s %s", id, httpExchange.getRequestMethod(), httpExchange.getRequestURI()));
-            outcome.failure = new AssertionError(String.format("Received unexpected request %s %s", httpExchange.getRequestMethod(), httpExchange.getRequestURI().getPath()));
-        } catch (Throwable t) {
-            System.out.println(String.format("[%d] error during handling of request %s %s", id, httpExchange.getRequestMethod(), httpExchange.getRequestURI()));
-            outcome.failure = new AssertionError(String.format("Failed to handle %s %s", httpExchange.getRequestMethod(), httpExchange.getRequestURI().getPath()), t);
+            return new UnexpectedRequestFailure(httpExchange.getRequestMethod(), httpExchange.getRequestURI().getPath());
         } finally {
             lock.unlock();
         }
-        return null;
     }
 
     void waitForRequests(int requestCount) {

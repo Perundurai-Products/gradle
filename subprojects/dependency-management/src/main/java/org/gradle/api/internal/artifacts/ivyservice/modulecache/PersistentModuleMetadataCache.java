@@ -19,21 +19,21 @@ import com.google.common.base.Objects;
 import com.google.common.collect.Interner;
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier;
 import org.gradle.api.internal.artifacts.ImmutableModuleIdentifierFactory;
-import org.gradle.api.internal.artifacts.ivyservice.ArtifactCacheMetadata;
 import org.gradle.api.internal.artifacts.ivyservice.ArtifactCacheLockingManager;
+import org.gradle.api.internal.artifacts.ivyservice.ArtifactCacheMetadata;
 import org.gradle.api.internal.artifacts.ivyservice.resolveengine.result.AttributeContainerSerializer;
 import org.gradle.api.internal.artifacts.ivyservice.resolveengine.result.ComponentIdentifierSerializer;
 import org.gradle.api.internal.artifacts.repositories.metadata.IvyMutableModuleMetadataFactory;
 import org.gradle.api.internal.artifacts.repositories.metadata.MavenMutableModuleMetadataFactory;
 import org.gradle.cache.PersistentIndexedCache;
-import org.gradle.internal.Factory;
 import org.gradle.internal.component.external.model.ModuleComponentResolveMetadata;
 import org.gradle.internal.component.external.model.MutableModuleComponentResolveMetadata;
+import org.gradle.internal.hash.ChecksumService;
 import org.gradle.internal.resource.local.DefaultPathKeyFileStore;
 import org.gradle.internal.serialize.AbstractSerializer;
 import org.gradle.internal.serialize.Decoder;
 import org.gradle.internal.serialize.Encoder;
-import org.gradle.util.BuildCommencedTimeProvider;
+import org.gradle.util.internal.BuildCommencedTimeProvider;
 
 public class PersistentModuleMetadataCache extends AbstractModuleMetadataCache {
 
@@ -48,9 +48,11 @@ public class PersistentModuleMetadataCache extends AbstractModuleMetadataCache {
                                          AttributeContainerSerializer attributeContainerSerializer,
                                          MavenMutableModuleMetadataFactory mavenMetadataFactory,
                                          IvyMutableModuleMetadataFactory ivyMetadataFactory,
-                                         Interner<String> stringInterner) {
+                                         Interner<String> stringInterner,
+                                         ModuleSourcesSerializer moduleSourcesSerializer,
+                                         ChecksumService checksumService) {
         super(timeProvider);
-        moduleMetadataStore = new ModuleMetadataStore(new DefaultPathKeyFileStore(artifactCacheMetadata.getMetaDataStoreDirectory()), new ModuleMetadataSerializer(attributeContainerSerializer, mavenMetadataFactory, ivyMetadataFactory), moduleIdentifierFactory, stringInterner);
+        moduleMetadataStore = new ModuleMetadataStore(new DefaultPathKeyFileStore(checksumService, artifactCacheMetadata.getMetaDataStoreDirectory()), new ModuleMetadataSerializer(attributeContainerSerializer, mavenMetadataFactory, ivyMetadataFactory, moduleSourcesSerializer), moduleIdentifierFactory, stringInterner);
         this.artifactCacheLockingManager = artifactCacheLockingManager;
     }
 
@@ -68,52 +70,49 @@ public class PersistentModuleMetadataCache extends AbstractModuleMetadataCache {
     @Override
     protected CachedMetadata get(ModuleComponentAtRepositoryKey key) {
         final PersistentIndexedCache<ModuleComponentAtRepositoryKey, ModuleMetadataCacheEntry> cache = getCache();
-        return artifactCacheLockingManager.useCache(new Factory<CachedMetadata>() {
-            @Override
-            public CachedMetadata create() {
-                ModuleMetadataCacheEntry entry = cache.get(key);
-                if (entry == null) {
-                    return null;
-                }
-                if (entry.isMissing()) {
-                    return new DefaultCachedMetadata(entry, null, timeProvider);
-                }
-                MutableModuleComponentResolveMetadata metadata = moduleMetadataStore.getModuleDescriptor(key);
-                if (metadata == null) {
-                    // Descriptor file has been deleted - ignore the entry
-                    cache.remove(key);
-                    return null;
-                }
-                return new DefaultCachedMetadata(entry, entry.configure(metadata), timeProvider);
+        return artifactCacheLockingManager.useCache(() -> {
+            ModuleMetadataCacheEntry entry = cache.getIfPresent(key);
+            if (entry == null) {
+                return null;
             }
+            if (entry.isMissing()) {
+                return new DefaultCachedMetadata(entry, null, timeProvider);
+            }
+            MutableModuleComponentResolveMetadata metadata = moduleMetadataStore.getModuleDescriptor(key);
+            if (metadata == null) {
+                // Descriptor file has been deleted - ignore the entry
+                cache.remove(key);
+                return null;
+            }
+            return new DefaultCachedMetadata(entry, entry.configure(metadata), timeProvider);
         });
     }
 
     @Override
-    protected void store(final ModuleComponentAtRepositoryKey key, final ModuleMetadataCacheEntry entry, final CachedMetadata cachedMetadata) {
+    protected CachedMetadata store(final ModuleComponentAtRepositoryKey key, final ModuleMetadataCacheEntry entry, final CachedMetadata cachedMetadata) {
         if (entry.isMissing()) {
             getCache().put(key, entry);
         } else {
             // Need to lock the cache in order to write to the module metadata store
-            artifactCacheLockingManager.useCache(new Runnable() {
-                @Override
-                public void run() {
-                    final ModuleComponentResolveMetadata metadata = cachedMetadata.getMetadata();
-                    moduleMetadataStore.putModuleDescriptor(key, metadata);
-                    getCache().put(key, entry);
-                }
+            artifactCacheLockingManager.useCache(() -> {
+                final ModuleComponentResolveMetadata metadata = cachedMetadata.getMetadata();
+                moduleMetadataStore.putModuleDescriptor(key, metadata);
+                getCache().put(key, entry);
             });
         }
+        return cachedMetadata;
     }
 
     private static class RevisionKeySerializer extends AbstractSerializer<ModuleComponentAtRepositoryKey> {
         private final ComponentIdentifierSerializer componentIdSerializer = new ComponentIdentifierSerializer();
 
+        @Override
         public void write(Encoder encoder, ModuleComponentAtRepositoryKey value) throws Exception {
             encoder.writeString(value.getRepositoryId());
             componentIdSerializer.write(encoder, value.getComponentId());
         }
 
+        @Override
         public ModuleComponentAtRepositoryKey read(Decoder decoder) throws Exception {
             String resolverId = decoder.readString();
             ModuleComponentIdentifier identifier = (ModuleComponentIdentifier) componentIdSerializer.read(decoder);

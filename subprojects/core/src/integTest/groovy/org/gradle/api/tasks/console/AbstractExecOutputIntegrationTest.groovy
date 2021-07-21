@@ -16,6 +16,7 @@
 
 package org.gradle.api.tasks.console
 
+import org.gradle.integtests.fixtures.UnsupportedWithConfigurationCache
 import org.gradle.integtests.fixtures.console.AbstractConsoleGroupedTaskFunctionalTest
 import spock.lang.Issue
 import spock.util.environment.OperatingSystem
@@ -25,6 +26,7 @@ abstract class AbstractExecOutputIntegrationTest extends AbstractConsoleGroupedT
     private static final String EXPECTED_OUTPUT = "Hello, World!"
     private static final String EXPECTED_ERROR = "Goodbye, World!"
 
+    @UnsupportedWithConfigurationCache(because = "Task.getProject() during execution")
     def "Project.javaexec output is grouped with its task output"() {
         given:
         generateMainJavaFileEchoing(EXPECTED_OUTPUT, EXPECTED_ERROR)
@@ -36,7 +38,7 @@ abstract class AbstractExecOutputIntegrationTest extends AbstractConsoleGroupedT
                 doLast {
                     project.javaexec {
                         classpath = sourceSets.main.runtimeClasspath
-                        main = 'Main'
+                        mainClass = 'Main'
                     }
                 }
             }
@@ -62,7 +64,7 @@ abstract class AbstractExecOutputIntegrationTest extends AbstractConsoleGroupedT
             task run(type: JavaExec) {
                 dependsOn 'compileJava'
                 classpath = sourceSets.main.runtimeClasspath
-                main = 'Main'
+                mainClass = 'Main'
             }
         """
 
@@ -77,6 +79,7 @@ abstract class AbstractExecOutputIntegrationTest extends AbstractConsoleGroupedT
         errorOutput.contains(EXPECTED_ERROR)
     }
 
+    @UnsupportedWithConfigurationCache(because = "Task.getProject() during execution")
     def "Project.exec output is grouped with its task output"() {
         given:
         buildFile << """

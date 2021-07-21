@@ -32,15 +32,26 @@ import org.gradle.test.fixtures.file.TestFile
 @CompileStatic
 abstract class AnnotationProcessorFixture {
     protected final String annotationName
+    protected final String annotationPackageName
+    protected final String fqAnnotationName
     IncrementalAnnotationProcessorType declaredType
 
     AnnotationProcessorFixture(String annotationName) {
+        this('', annotationName)
+    }
+
+    AnnotationProcessorFixture(String annotationPackageName, String annotationName) {
         this.annotationName = annotationName
+        this.annotationPackageName = annotationPackageName
+        this.fqAnnotationName = annotationPackageName.empty ? annotationName : "${annotationPackageName}.${annotationName}"
     }
 
     final void writeApiTo(TestFile projectDir) {
+        def packagePathPrefix = annotationPackageName.empty ? '' : "${annotationPackageName.replace('.', '/')}/"
+        def packageStatement = annotationPackageName.empty ? '' : "package ${annotationPackageName};"
         // Annotation handled by processor
-        projectDir.file("src/main/java/${annotationName}.java").text = """
+        projectDir.file("src/main/java/${packagePathPrefix}${annotationName}.java").text = """
+            ${packageStatement}
             public @interface $annotationName {
             }
 """
@@ -55,6 +66,14 @@ abstract class AnnotationProcessorFixture {
         //no support library by default
     }
 
+    String getDependenciesBlock() {
+        ""
+    }
+
+    String getRepositoriesBlock() {
+        ""
+    }
+
     final void writeAnnotationProcessorTo(TestFile projectDir) {
         // The annotation processor
         projectDir.file("src/main/java/${annotationName}Processor.java").text = """
@@ -65,26 +84,29 @@ abstract class AnnotationProcessorFixture {
             import javax.lang.model.element.*;
             import javax.lang.model.util.*;
             import javax.tools.*;
-                                       
+            ${annotationPackageName.empty ? '' : "import ${fqAnnotationName};"}
+
+            import static javax.tools.StandardLocation.*;
+
             @SupportedOptions({ "message" })
             public class ${annotationName}Processor extends AbstractProcessor {
                 private Map<String, String> options;
                 private Elements elementUtils;
                 private Filer filer;
                 private Messager messager;
-    
+
                 @Override
                 public Set<String> getSupportedAnnotationTypes() {
                     return Collections.singleton(${annotationName}.class.getName());
                 }
-                
+
                 ${supportedOptionsBlock}
-            
+
                 @Override
                 public SourceVersion getSupportedSourceVersion() {
                     return SourceVersion.latestSupported();
                 }
-    
+
                 @Override
                 public synchronized void init(ProcessingEnvironment processingEnv) {
                     elementUtils = processingEnv.getElementUtils();
@@ -92,7 +114,7 @@ abstract class AnnotationProcessorFixture {
                     messager = processingEnv.getMessager();
                     options = processingEnv.getOptions();
                 }
-    
+
                 @Override
                 public boolean process(Set<? extends TypeElement> annotations, RoundEnvironment roundEnv) {
                     for (TypeElement annotation : annotations) {
@@ -105,9 +127,25 @@ abstract class AnnotationProcessorFixture {
                 }
             }
 """
-        projectDir.file("src/main/resources/$AnnotationProcessorDetector.PROCESSOR_DECLARATION").text = "${annotationName}Processor"
+        projectDir.file("src/main/resources/$AnnotationProcessorDetector.PROCESSOR_DECLARATION") << "${annotationName}Processor\n"
         if (declaredType) {
-            projectDir.file("src/main/resources/$AnnotationProcessorDetector.INCREMENTAL_PROCESSOR_DECLARATION").text = "${annotationName}Processor,$declaredType"
+            projectDir.file("src/main/resources/$AnnotationProcessorDetector.INCREMENTAL_PROCESSOR_DECLARATION") << "${annotationName}Processor,$declaredType\n"
+        }
+        def deps = dependenciesBlock
+        if (deps) {
+            projectDir.file("build.gradle") << """
+            dependencies {
+                $deps
+            }
+            """
+        }
+        def repos = repositoriesBlock
+        if (repos) {
+            projectDir.file("build.gradle") << """
+            repositories {
+                $repos
+            }
+            """
         }
     }
 

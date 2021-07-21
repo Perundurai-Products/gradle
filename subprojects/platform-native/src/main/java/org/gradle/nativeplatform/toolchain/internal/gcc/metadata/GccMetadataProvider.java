@@ -20,6 +20,7 @@ import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
 import org.gradle.api.GradleException;
 import org.gradle.api.UncheckedIOException;
+import org.gradle.internal.FileUtils;
 import org.gradle.internal.io.StreamByteBuffer;
 import org.gradle.internal.os.OperatingSystem;
 import org.gradle.nativeplatform.platform.internal.ArchitectureInternal;
@@ -30,12 +31,13 @@ import org.gradle.nativeplatform.toolchain.internal.metadata.AbstractMetadataPro
 import org.gradle.nativeplatform.toolchain.internal.metadata.CompilerType;
 import org.gradle.process.internal.ExecAction;
 import org.gradle.process.internal.ExecActionFactory;
-import org.gradle.util.VersionNumber;
+import org.gradle.util.internal.VersionNumber;
 
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.StringReader;
+import java.nio.file.NoSuchFileException;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -143,7 +145,13 @@ public class GccMetadataProvider extends AbstractMetadataProvider<GccMetadata> {
                     if (isCygwin) {
                         include = mapCygwinPath(cygpathExe, include);
                     }
-                    builder.add(new File(include));
+                    File realPath = new File(include);
+                    try {
+                        realPath = realPath.toPath().toRealPath().toFile();
+                    } catch (NoSuchFileException ignore) {
+                        // resolve the potential symlink, if not found, fallback to do nothing.
+                    }
+                    builder.add(FileUtils.normalize(realPath));
                 }
             }
             return builder.build();

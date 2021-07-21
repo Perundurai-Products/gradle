@@ -19,7 +19,7 @@ package org.gradle.process.internal.streams;
 import org.gradle.api.UncheckedIOException;
 import org.gradle.internal.UncheckedException;
 import org.gradle.process.internal.StreamsHandler;
-import org.gradle.util.DisconnectableInputStream;
+import org.gradle.util.internal.DisconnectableInputStream;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -52,10 +52,12 @@ public class ForwardStdinStreamsHandler implements StreamsHandler {
         standardInputWriter = new ExecOutputHandleRunner("write standard input to " + processName, instr, process.getOutputStream(), completed);
     }
 
+    @Override
     public void start() {
         executor.execute(standardInputWriter);
     }
 
+    @Override
     public void stop() {
         disconnect();
         try {

@@ -17,7 +17,9 @@
 package org.gradle.integtests.fixtures
 
 import groovy.io.FileType
+import org.codehaus.groovy.control.CompilerConfiguration
 import org.gradle.internal.FileUtils
+import org.gradle.util.internal.TextUtil
 
 import java.util.function.Predicate
 
@@ -28,6 +30,8 @@ class CompilationOutputsFixture {
 
     private final File targetDir
     private final List<String> includeExtensions
+    private final String sourceSet
+    private final String lang
 
     CompilationOutputsFixture(File targetDir) {
         this(targetDir, [])
@@ -35,9 +39,11 @@ class CompilationOutputsFixture {
     /**
      * Tracks outputs in given target dir considering only the files by the given extensions (ignoring case)
      */
-    CompilationOutputsFixture(File targetDir, List<String> includeExtensions) {
+    CompilationOutputsFixture(File targetDir, List<String> includeExtensions, String sourceSet = "main", String lang = "java") {
         assert targetDir != null
         this.targetDir = targetDir
+        this.sourceSet = sourceSet
+        this.lang = lang
         this.includeExtensions = includeExtensions
     }
 
@@ -105,27 +111,54 @@ class CompilationOutputsFixture {
         assert changedFileNames == asSet(classNames)
     }
 
+    void recompiledFqn(String... classNames) {
+        assert getChangedFileNames(true) == asSet(classNames)
+    }
+
+    //asserts files deleted since last snapshot.
+    void deletedFiles(String... fileNames) {
+        def expectedNames = fileNames.collect({ removeExtension(it) }) as Set
+        def deleted = snapshot.findAll { !it.exists() }.collect { removeExtension(it.name) } as Set
+        assert deleted == expectedNames
+    }
+
     //asserts classes deleted since last snapshot. Class means file name without extension.
     void deletedClasses(String... classNames) {
         def deleted = snapshot.findAll { !it.exists() }.collect { removeExtension(it.name) } as Set
         assert deleted == asSet(classNames)
     }
 
-    private Set<String> getChangedFileNames() {
+    private Set<String> getChangedFileNames(boolean qualified = false) {
         // Get all of the files that do not have a zero last modified timestamp
-        return getFiles { it.lastModified() > 0 }
+        return getFiles(qualified) { it.lastModified() > 0 }
     }
 
-    private Set<String> getFiles(Predicate<File> criteria) {
+    private Set<String> getFiles(boolean qualified = false, Predicate<File> criteria) {
         // Get all of the files that do not have a zero last modified timestamp
         def changed = new HashSet()
-        targetDir.eachFileRecurse(FileType.FILES) {
+        def dir = qualified ? new File(new File(targetDir, lang), sourceSet) : targetDir
+        dir.eachFileRecurse(FileType.FILES) {
             if (isIncluded(it)) {
                 if (criteria.test(it)) {
-                    changed << removeExtension(it.name)
+                    if (qualified) {
+                        String relative = dir.toPath().relativize(it.toPath()).toString()
+                        changed << TextUtil.normaliseFileSeparators(removeExtension(relative)).replace('/', '.')
+                    } else {
+                        changed << removeExtension(it.name)
+                    }
                 }
             }
         }
         changed
+    }
+
+    Object evaluate(@GroovyBuildScriptLanguage String script) {
+        CompilerConfiguration config = new CompilerConfiguration()
+        config.classpath.add("${targetDir}/$lang/$sourceSet".toString())
+        new GroovyShell(config).evaluate(script)
+    }
+
+    void execute(@GroovyBuildScriptLanguage String script) {
+        evaluate(script)
     }
 }

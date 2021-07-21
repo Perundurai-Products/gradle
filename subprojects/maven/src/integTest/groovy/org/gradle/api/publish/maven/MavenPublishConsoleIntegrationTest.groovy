@@ -16,13 +16,15 @@
 
 package org.gradle.api.publish.maven
 
+import org.gradle.api.logging.configuration.ConsoleOutput
 import org.gradle.integtests.fixtures.RichConsoleStyling
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.integtests.fixtures.publish.maven.AbstractMavenPublishIntegTest
 import org.gradle.test.fixtures.ConcurrentTestUtil
 import org.gradle.test.fixtures.server.http.BlockingHttpServer
 import org.junit.Rule
 
-class MavenPublishConsoleIntegrationTest extends AbstractMavenPublishIntegTest implements RichConsoleStyling {
+class MavenPublishConsoleIntegrationTest extends AbstractMavenPublishIntegTest {
     @Rule
     BlockingHttpServer server = new BlockingHttpServer()
 
@@ -30,6 +32,7 @@ class MavenPublishConsoleIntegrationTest extends AbstractMavenPublishIntegTest i
         server.start()
     }
 
+    @ToBeFixedForConfigurationCache
     def "shows work-in-progress during publication"() {
         def m1 = mavenRepo.module("org.test", "test", "1.2")
 
@@ -58,23 +61,33 @@ class MavenPublishConsoleIntegrationTest extends AbstractMavenPublishIntegTest i
         def putJar = server.expectAndBlock(server.put(m1.artifact.path))
         def putJarSha = server.expectAndBlock(server.put(m1.artifact.path + ".sha1"))
         server.expect(server.put(m1.artifact.path + ".md5"))
+        server.expect(server.put(m1.artifact.path + ".sha256"))
+        server.expect(server.put(m1.artifact.path + ".sha512"))
         def putPom = server.expectAndBlock(server.put(m1.pom.path))
         def putPomSha = server.expectAndBlock(server.put(m1.pom.path + ".sha1"))
         server.expect(server.put(m1.pom.path + ".md5"))
+        server.expect(server.put(m1.pom.path + ".sha256"))
+        server.expect(server.put(m1.pom.path + ".sha512"))
         def putModule = server.expectAndBlock(server.put(m1.moduleMetadata.path))
         server.expect(server.put(m1.moduleMetadata.path + ".sha1"))
         server.expect(server.put(m1.moduleMetadata.path + ".md5"))
+        server.expect(server.put(m1.moduleMetadata.path + ".sha256"))
+        server.expect(server.put(m1.moduleMetadata.path + ".sha512"))
         def getMetaData = server.expectAndBlock(server.get(m1.rootMetaData.path).missing())
         def putMetaData = server.expectAndBlock(server.put(m1.rootMetaData.path))
         server.expect(server.put(m1.rootMetaData.path + ".sha1"))
         server.expect(server.put(m1.rootMetaData.path + ".md5"))
+        server.expect(server.put(m1.rootMetaData.path + ".sha256"))
+        server.expect(server.put(m1.rootMetaData.path + ".sha512"))
 
-        def build = executer.withTasks("publish").withArguments("--max-workers=2", "--console=rich").start()
+        executer.withTestConsoleAttached()
+        executer.withConsole(ConsoleOutput.Rich)
+        def build = executer.withTasks("publish").withArguments("--max-workers=2").start()
         putJar.waitForAllPendingCalls()
 
         then:
         ConcurrentTestUtil.poll {
-            assert build.standardOutput.contains(workInProgressLine("> :publishMavenPublicationToMavenRepository > test-1.2.jar"))
+            RichConsoleStyling.assertHasWorkInProgress(build, "> :publishMavenPublicationToMavenRepository > test-1.2.jar")
         }
 
         when:
@@ -83,7 +96,7 @@ class MavenPublishConsoleIntegrationTest extends AbstractMavenPublishIntegTest i
 
         then:
         ConcurrentTestUtil.poll {
-            assert build.standardOutput.contains(workInProgressLine("> :publishMavenPublicationToMavenRepository > test-1.2.jar.sha1"))
+            RichConsoleStyling.assertHasWorkInProgress(build, "> :publishMavenPublicationToMavenRepository > test-1.2.jar.sha1")
         }
 
         when:
@@ -92,7 +105,7 @@ class MavenPublishConsoleIntegrationTest extends AbstractMavenPublishIntegTest i
 
         then:
         ConcurrentTestUtil.poll {
-            assert build.standardOutput.contains(workInProgressLine("> :publishMavenPublicationToMavenRepository > test-1.2.pom"))
+            RichConsoleStyling.assertHasWorkInProgress(build, "> :publishMavenPublicationToMavenRepository > test-1.2.pom")
         }
 
         when:
@@ -101,7 +114,7 @@ class MavenPublishConsoleIntegrationTest extends AbstractMavenPublishIntegTest i
 
         then:
         ConcurrentTestUtil.poll {
-            assert build.standardOutput.contains(workInProgressLine("> :publishMavenPublicationToMavenRepository > test-1.2.pom.sha1"))
+            RichConsoleStyling.assertHasWorkInProgress(build, "> :publishMavenPublicationToMavenRepository > test-1.2.pom.sha1")
         }
 
         when:
@@ -110,7 +123,7 @@ class MavenPublishConsoleIntegrationTest extends AbstractMavenPublishIntegTest i
 
         then:
         ConcurrentTestUtil.poll {
-             assert build.standardOutput.contains(workInProgressLine("> :publishMavenPublicationToMavenRepository > test-1.2.module > 1 KB/1 KB uploaded"))
+            RichConsoleStyling.assertHasWorkInProgress(build, "> :publishMavenPublicationToMavenRepository > test-1.2.module > 1.8 KiB/1.8 KiB uploaded")
         }
 
         when:
@@ -120,7 +133,7 @@ class MavenPublishConsoleIntegrationTest extends AbstractMavenPublishIntegTest i
         then:
         ConcurrentTestUtil.poll {
             // TODO - where did this one go?
-//            assert build.standardOutput.contains(workInProgressLine("> :publishMavenPublicationToMavenRepository > maven-metadata.xml"))
+//            RichConsoleStyling.assertHasWorkInProgress(build, "> :publishMavenPublicationToMavenRepository > maven-metadata.xml")
         }
 
         when:
@@ -129,7 +142,7 @@ class MavenPublishConsoleIntegrationTest extends AbstractMavenPublishIntegTest i
 
         then:
         ConcurrentTestUtil.poll {
-            assert build.standardOutput.contains(workInProgressLine("> :publishMavenPublicationToMavenRepository > maven-metadata.xml"))
+            RichConsoleStyling.assertHasWorkInProgress(build, "> :publishMavenPublicationToMavenRepository > maven-metadata.xml")
         }
 
         putMetaData.releaseAll()

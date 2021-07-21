@@ -22,11 +22,14 @@ import org.hamcrest.Matcher
 import spock.lang.Unroll
 
 import static org.gradle.buildinit.plugins.internal.modifiers.BuildInitDsl.GROOVY
-import static org.hamcrest.Matchers.allOf
-import static org.hamcrest.Matchers.containsString
-import static org.hamcrest.Matchers.not
+import static org.hamcrest.CoreMatchers.allOf
+import static org.hamcrest.CoreMatchers.containsString
+import static org.hamcrest.CoreMatchers.not
 
 class BuildInitPluginIntegrationTest extends AbstractInitIntegrationSpec {
+
+    @Override
+    String subprojectName() { 'app' }
 
     def "init shows up on tasks overview "() {
         given:
@@ -42,23 +45,22 @@ class BuildInitPluginIntegrationTest extends AbstractInitIntegrationSpec {
     @Unroll
     def "creates a simple project with #scriptDsl build scripts when no pom file present and no type specified"() {
         given:
-        def dslFixture = dslFixtureFor(scriptDsl)
+        def dslFixture = ScriptDslFixture.of(scriptDsl, targetDir, null)
 
         when:
         runInitWith scriptDsl
 
         then:
-        dslFixture.assertGradleFilesGenerated()
-        targetDir.file(".gitignore").assertIsFile()
+        commonFilesGenerated(scriptDsl, dslFixture)
 
         and:
         dslFixture.buildFile.assertContents(
             allOf(
                 containsString("This is a general purpose Gradle build"),
-                containsString("Learn how to create Gradle builds at")))
+                containsString("Learn more about Gradle by exploring our samples at")))
 
         expect:
-        succeeds 'tasks'
+        succeeds 'help'
 
         where:
         scriptDsl << ScriptDslFixture.SCRIPT_DSLS
@@ -67,14 +69,14 @@ class BuildInitPluginIntegrationTest extends AbstractInitIntegrationSpec {
     @Unroll
     def "#targetScriptDsl build file generation is skipped when #existingScriptDsl build file already exists"() {
         given:
-        def existingDslFixture = dslFixtureFor(existingScriptDsl)
-        def targetDslFixture = dslFixtureFor(targetScriptDsl)
+        def existingDslFixture = rootProjectDslFixtureFor(existingScriptDsl as BuildInitDsl)
+        def targetDslFixture = dslFixtureFor(targetScriptDsl as BuildInitDsl)
 
         and:
         existingDslFixture.buildFile.createFile()
 
         when:
-        runInitWith targetScriptDsl
+        runInitWith targetScriptDsl as BuildInitDsl
 
         then:
         result.assertTasksExecuted(":init")
@@ -91,14 +93,14 @@ class BuildInitPluginIntegrationTest extends AbstractInitIntegrationSpec {
     @Unroll
     def "#targetScriptDsl build file generation is skipped when #existingScriptDsl settings file already exists"() {
         given:
-        def existingDslFixture = dslFixtureFor(existingScriptDsl)
-        def targetDslFixture = dslFixtureFor(targetScriptDsl)
+        def existingDslFixture = dslFixtureFor(existingScriptDsl as BuildInitDsl)
+        def targetDslFixture = dslFixtureFor(targetScriptDsl as BuildInitDsl)
 
         and:
         existingDslFixture.settingsFile.createFile()
 
         when:
-        runInitWith targetScriptDsl
+        runInitWith targetScriptDsl as BuildInitDsl
 
         then:
         result.assertTasksExecuted(":init")
@@ -115,15 +117,14 @@ class BuildInitPluginIntegrationTest extends AbstractInitIntegrationSpec {
     @Unroll
     def "#targetScriptDsl build file generation is skipped when custom #existingScriptDsl build file exists"() {
         given:
-        def existingDslFixture = dslFixtureFor(existingScriptDsl)
-        def targetDslFixture = dslFixtureFor(targetScriptDsl)
+        def existingDslFixture = dslFixtureFor(existingScriptDsl as BuildInitDsl)
+        def targetDslFixture = dslFixtureFor(targetScriptDsl as BuildInitDsl)
 
         and:
-        def customBuildScript = existingDslFixture.scriptFile("customBuild").createFile()
+        def customBuildScript = existingDslFixture.scriptFile("build").createFile()
 
         when:
-        executer.usingBuildScript(customBuildScript)
-        runInitWith targetScriptDsl
+        runInitWith targetScriptDsl as BuildInitDsl
 
         then:
         result.assertTasksExecuted(":init")
@@ -141,18 +142,19 @@ class BuildInitPluginIntegrationTest extends AbstractInitIntegrationSpec {
     @Unroll
     def "#targetScriptDsl build file generation is skipped when part of a multi-project build with non-standard #existingScriptDsl settings file location"() {
         given:
-        def existingDslFixture = dslFixtureFor(existingScriptDsl)
-        def targetDslFixture = dslFixtureFor(targetScriptDsl)
+        def existingDslFixture = dslFixtureFor(existingScriptDsl as BuildInitDsl)
+        def targetDslFixture = dslFixtureFor(targetScriptDsl as BuildInitDsl)
 
         and:
         def customSettings = existingDslFixture.scriptFile("customSettings")
         customSettings << """
-include("child")
-"""
+            include("child")
+        """
 
         when:
         executer.usingSettingsFile(customSettings)
-        runInitWith targetScriptDsl
+        executer.expectDocumentedDeprecationWarning("Specifying custom settings file location has been deprecated. This is scheduled to be removed in Gradle 8.0. Consult the upgrading guide for further information: https://docs.gradle.org/current/userguide/upgrading_version_7.html#configuring_custom_build_layout");
+        runInitWith targetScriptDsl as BuildInitDsl
 
         then:
         result.assertTasksExecuted(":init")
@@ -175,7 +177,7 @@ include("child")
         run('init')
 
         then:
-        pomValuesUsed(dslFixtureFor(GROOVY))
+        pomValuesUsed(rootProjectDslFixtureFor(GROOVY))
     }
 
     @Unroll
@@ -184,7 +186,7 @@ include("child")
         pom()
 
         when:
-        succeeds('init', '--type', 'java-library', '--dsl', scriptDsl.id)
+        succeeds('init', '--type', 'java-application', '--dsl', scriptDsl.id)
 
         then:
         pomValuesNotUsed(dslFixtureFor(scriptDsl))
@@ -198,17 +200,21 @@ include("child")
         fails('init', '--type', 'some-unknown-library')
 
         then:
-        failure.assertHasCause("""The requested build setup type 'some-unknown-library' is not supported. Supported types:
+        failure.assertHasCause("""The requested build type 'some-unknown-library' is not supported. Supported types:
   - 'basic'
   - 'cpp-application'
   - 'cpp-library'
   - 'groovy-application'
+  - 'groovy-gradle-plugin'
   - 'groovy-library'
   - 'java-application'
+  - 'java-gradle-plugin'
   - 'java-library'
   - 'kotlin-application'
+  - 'kotlin-gradle-plugin'
   - 'kotlin-library'
   - 'pom'
+  - 'scala-application'
   - 'scala-library'""")
     }
 
@@ -227,7 +233,7 @@ include("child")
         fails('init', '--type', 'basic', '--test-framework', 'fake')
 
         then:
-        failure.assertHasCause("""The requested test framework 'fake' is not supported for 'basic' setup type. Supported frameworks:
+        failure.assertHasCause("""The requested test framework 'fake' is not supported for 'basic' build type. Supported frameworks:
   - 'none'""")
     }
 
@@ -236,7 +242,7 @@ include("child")
         fails('init', '--type', 'basic', '--test-framework', 'spock')
 
         then:
-        failure.assertHasCause("""The requested test framework 'spock' is not supported for 'basic' setup type. Supported frameworks:
+        failure.assertHasCause("""The requested test framework 'spock' is not supported for 'basic' build type. Supported frameworks:
   - 'none'""")
     }
 
@@ -245,7 +251,7 @@ include("child")
         fails('init', '--type', 'pom', '--project-name', 'thing')
 
         then:
-        failure.assertHasCause("Project name is not supported for 'pom' setup type.")
+        failure.assertHasCause("Project name is not supported for 'pom' build type.")
     }
 
     def "gives decent error message when package name option is not supported by specific type"() {
@@ -253,7 +259,7 @@ include("child")
         fails('init', '--type', 'basic', '--package', 'thing')
 
         then:
-        failure.assertHasCause("Package name is not supported for 'basic' setup type.")
+        failure.assertHasCause("Package name is not supported for 'basic' build type.")
     }
 
     def "displays all build types and modifiers in help command output"() {
@@ -271,9 +277,12 @@ include("child")
 
      --project-name     Set the project name.
 
+     --split-project     Split functionality across multiple subprojects?
+
      --test-framework     Set the test framework to be used.
                           Available values are:
                                junit
+                               junit-jupiter
                                kotlintest
                                scalatest
                                spock
@@ -285,12 +294,16 @@ include("child")
                      cpp-application
                      cpp-library
                      groovy-application
+                     groovy-gradle-plugin
                      groovy-library
                      java-application
+                     java-gradle-plugin
                      java-library
                      kotlin-application
+                     kotlin-gradle-plugin
                      kotlin-library
                      pom
+                     scala-application
                      scala-library""")
     }
 

@@ -21,23 +21,23 @@ import org.gradle.integtests.fixtures.AbstractTaskRelocationIntegrationTest
 import org.gradle.integtests.fixtures.AvailableJavaHomes
 import org.gradle.internal.jvm.Jvm
 import org.gradle.util.Requires
-import org.gradle.util.TextUtil
+import org.gradle.util.internal.TextUtil
 
-import static org.gradle.util.TextUtil.normaliseLineSeparators
+import static org.gradle.util.internal.TextUtil.normaliseLineSeparators
 
-@Requires(adhoc = { AvailableJavaHomes.getAvailableJdks(JavaVersion.VERSION_1_7).size() > 1 })
+@Requires(adhoc = { AvailableJavaHomes.getAvailableJdks(JavaVersion.VERSION_1_8).size() > 1 })
 class TestTaskJdkRelocationIntegrationTest extends AbstractTaskRelocationIntegrationTest {
 
     private File getOriginalJavaExecutable() {
-        getAvailableJdk7s()[0].javaExecutable
+        getAvailableJdk8s()[0].javaExecutable
     }
 
     private File getDifferentJavaExecutable() {
-        getAvailableJdk7s()[1].javaExecutable
+        getAvailableJdk8s()[1].javaExecutable
     }
 
-    private List<Jvm> getAvailableJdk7s() {
-        AvailableJavaHomes.getAvailableJdks(JavaVersion.VERSION_1_7)
+    private List<Jvm> getAvailableJdk8s() {
+        AvailableJavaHomes.getAvailableJdks(JavaVersion.VERSION_1_8)
     }
 
     @Override
@@ -65,7 +65,7 @@ class TestTaskJdkRelocationIntegrationTest extends AbstractTaskRelocationIntegra
             ${mavenCentralRepository()}
 
             dependencies {
-                testCompile "junit:junit:4.12"
+                testImplementation "junit:junit:4.13"
             }
 
             sourceCompatibility = "1.7"

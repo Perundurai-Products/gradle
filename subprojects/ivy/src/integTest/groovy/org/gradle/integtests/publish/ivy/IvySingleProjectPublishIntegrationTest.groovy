@@ -16,9 +16,14 @@
 
 package org.gradle.integtests.publish.ivy
 
-import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 
-class IvySingleProjectPublishIntegrationTest extends AbstractIntegrationSpec {
+class IvySingleProjectPublishIntegrationTest extends AbstractLegacyIvyPublishTest {
+    def setup() {
+        configureUploadTask("publish")
+    }
+
+    @ToBeFixedForConfigurationCache
     def "publish multiple artifacts in single configuration"() {
         settingsFile << "rootProject.name = 'publishTest'"
         file("file1") << "some content"
@@ -33,12 +38,12 @@ version = 1.9
 configurations { publish }
 
 task jar1(type: Jar) {
-    baseName = "jar1"
+    archiveBaseName = "jar1"
     from "file1"
 }
 
 task jar2(type: Jar) {
-    baseName = "jar2"
+    archiveBaseName = "jar2"
     from "file2"
 }
 
@@ -56,6 +61,7 @@ uploadPublish {
         """
 
         when:
+        expectUploadTaskDeprecationWarning('uploadPublish')
         run "uploadPublish"
 
         then:
@@ -70,6 +76,7 @@ uploadPublish {
         ivyDescriptor.expectArtifact("jar2").conf == ["publish"]
     }
 
+    @ToBeFixedForConfigurationCache
     def "publish classified artifact"() {
         settingsFile << "rootProject.name = 'publishTest'"
         file("file1") << "some content"
@@ -83,8 +90,8 @@ version = 1.9
 configurations { publish }
 
 task jar1(type: Jar) {
-    baseName = "jar1"
-    classifier = "classy"
+    archiveBaseName = "jar1"
+    archiveClassifier = "classy"
     from "file1"
 }
 
@@ -102,6 +109,7 @@ uploadPublish {
         """
 
         when:
+        expectUploadTaskDeprecationWarning('uploadPublish')
         run "uploadPublish"
 
         then:
@@ -113,7 +121,10 @@ uploadPublish {
         ivyDescriptor.expectArtifact("jar1").classifier == "classy"
     }
 
+    @ToBeFixedForConfigurationCache
     def "publish multiple artifacts in separate configurations"() {
+        configureUploadTask('publish1')
+        configureUploadTask('publish2')
         file("settings.gradle") << "rootProject.name = 'publishTest'"
         file("file1") << "some content"
         file("file2") << "other content"
@@ -127,12 +138,12 @@ version = 1.9
 configurations { publish1; publish2 }
 
 task jar1(type: Jar) {
-    baseName = "jar1"
+    archiveBaseName = "jar1"
     from "file1"
 }
 
 task jar2(type: Jar) {
-    baseName = "jar2"
+    archiveBaseName = "jar2"
     from "file2"
 }
 
@@ -151,6 +162,7 @@ tasks.withType(Upload) {
         """
 
         when:
+        expectUploadTaskDeprecationWarning("uploadPublish$n")
         run "uploadPublish$n"
 
         then:

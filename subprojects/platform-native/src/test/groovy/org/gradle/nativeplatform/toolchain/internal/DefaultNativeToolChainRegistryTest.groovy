@@ -26,11 +26,11 @@ import org.gradle.util.TestUtil
 import org.junit.Rule
 import spock.lang.Specification
 
-import static org.gradle.util.TextUtil.toPlatformLineSeparators
+import static org.gradle.util.internal.TextUtil.toPlatformLineSeparators
 
 class DefaultNativeToolChainRegistryTest extends Specification {
     @Rule
-    TestNameTestDirectoryProvider testDir = new TestNameTestDirectoryProvider()
+    TestNameTestDirectoryProvider testDir = new TestNameTestDirectoryProvider(getClass())
 
     def project = TestUtil.create(testDir).rootProject()
 
@@ -122,7 +122,7 @@ class DefaultNativeToolChainRegistryTest extends Specification {
 
         then:
         GradleException e = thrown()
-        e.message == toPlatformLineSeparators("""No tool chain is available to build C++ for platform 'platform':
+        e.message == toPlatformLineSeparators("""No tool chain has support to build C++ for platform 'platform':
   - Tool chain 'test': nope
   - Tool chain 'test2': not me
   - Tool chain 'test3': not me either""")

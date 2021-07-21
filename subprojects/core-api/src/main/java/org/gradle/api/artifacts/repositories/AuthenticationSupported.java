@@ -97,6 +97,33 @@ public interface AuthenticationSupported {
     <T extends Credentials> void credentials(Class<T> credentialsType, Action<? super T> action);
 
     /**
+     * Configures the credentials for this repository that will be provided by the build.
+     * <p>
+     * Credentials will be provided from Gradle properties based on the repository name.
+     * If credentials for this repository can not be resolved and the repository will be used in the current build, then the build will fail to start and point to the missing configuration.
+     * <pre class='autoTested'>
+     * repositories {
+     *     maven {
+     *         url "${url}"
+     *         credentials(PasswordCredentials)
+     *     }
+     * }
+     * </pre>
+     * <p>
+     * The following credential types are currently supported for the {@code credentialsType} argument:
+     * <ul>
+     * <li>{@link org.gradle.api.credentials.PasswordCredentials}</li>
+     * <li>{@link org.gradle.api.credentials.AwsCredentials}</li>
+     * <li>{@link org.gradle.api.credentials.HttpHeaderCredentials}</li>
+     * </ul>
+     *
+     * @throws IllegalArgumentException if {@code credentialsType} is not of a supported type
+     *
+     * @since 6.6
+     */
+    void credentials(Class<? extends Credentials> credentialsType);
+
+    /**
      * <p>Configures the authentication schemes for this repository.
      *
      * <p>This method executes the given action against the {@link AuthenticationContainer} for this project. The {@link

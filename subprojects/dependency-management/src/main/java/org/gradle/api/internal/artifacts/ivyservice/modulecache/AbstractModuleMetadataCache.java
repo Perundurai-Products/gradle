@@ -18,7 +18,7 @@ package org.gradle.api.internal.artifacts.ivyservice.modulecache;
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier;
 import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.ModuleComponentRepository;
 import org.gradle.internal.component.external.model.ModuleComponentResolveMetadata;
-import org.gradle.util.BuildCommencedTimeProvider;
+import org.gradle.util.internal.BuildCommencedTimeProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -30,11 +30,13 @@ public abstract class AbstractModuleMetadataCache implements ModuleMetadataCache
         this.timeProvider = timeProvider;
     }
 
+    @Override
     public CachedMetadata getCachedModuleDescriptor(ModuleComponentRepository repository, ModuleComponentIdentifier id) {
         final ModuleComponentAtRepositoryKey key = createKey(repository, id);
         return get(key);
     }
 
+    @Override
     public CachedMetadata cacheMissing(ModuleComponentRepository repository, ModuleComponentIdentifier id) {
         LOGGER.debug("Recording absence of module descriptor in cache: {} [changing = {}]", id, false);
         ModuleComponentAtRepositoryKey key = createKey(repository, id);
@@ -44,13 +46,13 @@ public abstract class AbstractModuleMetadataCache implements ModuleMetadataCache
         return cachedMetaData;
     }
 
+    @Override
     public CachedMetadata cacheMetaData(ModuleComponentRepository repository, ModuleComponentIdentifier id, final ModuleComponentResolveMetadata metadata) {
         LOGGER.debug("Recording module descriptor in cache: {} [changing = {}]", metadata.getId(), metadata.isChanging());
         final ModuleComponentAtRepositoryKey key = createKey(repository, id);
         ModuleMetadataCacheEntry entry = createEntry(metadata);
         DefaultCachedMetadata cachedMetaData = new DefaultCachedMetadata(entry, metadata, timeProvider);
-        store(key, entry, cachedMetaData);
-        return cachedMetaData;
+        return store(key, entry, cachedMetaData);
     }
 
     protected ModuleComponentAtRepositoryKey createKey(ModuleComponentRepository repository, ModuleComponentIdentifier id) {
@@ -61,7 +63,7 @@ public abstract class AbstractModuleMetadataCache implements ModuleMetadataCache
         return ModuleMetadataCacheEntry.forMetaData(metaData, timeProvider.getCurrentTime());
     }
 
-    protected abstract void store(ModuleComponentAtRepositoryKey key, ModuleMetadataCacheEntry entry, CachedMetadata cachedMetaData);
+    protected abstract CachedMetadata store(ModuleComponentAtRepositoryKey key, ModuleMetadataCacheEntry entry, CachedMetadata cachedMetaData);
 
     protected abstract CachedMetadata get(ModuleComponentAtRepositoryKey key);
 }

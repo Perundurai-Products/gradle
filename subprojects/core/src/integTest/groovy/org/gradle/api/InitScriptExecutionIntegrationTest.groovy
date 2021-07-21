@@ -16,13 +16,11 @@
 package org.gradle.api
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.integtests.fixtures.UnsupportedWithConfigurationCache
 import org.gradle.integtests.fixtures.executer.ArtifactBuilder
 import org.gradle.integtests.fixtures.timeout.IntegrationTestTimeout
 import org.gradle.test.fixtures.file.TestFile
-import org.gradle.util.Requires
 import spock.lang.Issue
-
-import static org.gradle.util.TestPrecondition.KOTLIN_SCRIPT
 
 @IntegrationTestTimeout(300)
 class InitScriptExecutionIntegrationTest extends AbstractIntegrationSpec {
@@ -132,7 +130,6 @@ try {
         notThrown(Throwable)
     }
 
-    @Requires([KOTLIN_SCRIPT])
     def "each Kotlin init script has independent ClassLoader"() {
         given:
         createExternalJar()
@@ -166,7 +163,6 @@ try {
         outputContains("BuildClass not found as expected")
     }
 
-    @Requires([KOTLIN_SCRIPT])
     def "executes Kotlin init scripts from init.d directory in user home dir in alphabetical order"() {
         given:
         executer.requireOwnGradleUserHomeDir()
@@ -245,12 +241,13 @@ initscript {
     }
 
     @Issue("https://github.com/gradle/gradle-native/issues/962")
+    @UnsupportedWithConfigurationCache
     def "init script can register all projects hook from within the projects loaded callback of build listener"() {
         given:
         executer.requireOwnGradleUserHomeDir()
 
         and:
-        file("buildSrc").mkdir()
+        file("buildSrc/settings.gradle").createFile()
 
         and:
         executer.gradleUserHomeDir.file('init.d/a.gradle') << '''
@@ -272,6 +269,19 @@ initscript {
         then:
         output.contains("Project 'buildSrc'")
         output.contains("Project 'root'")
+    }
+
+    @Issue("https://github.com/gradle/gradle/issues/17555")
+    def "init script file is a dotfile"() {
+        def initScript = file('.empty')
+        initScript << 'println "greetings from empty init script"'
+        executer.withArguments('--init-script', initScript.absolutePath)
+
+        when:
+        run()
+
+        then:
+        output.contains("greetings from empty init script")
     }
 
     private def createExternalJar() {

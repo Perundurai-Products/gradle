@@ -17,77 +17,101 @@
 package org.gradle.api.reporting.internal;
 
 import groovy.lang.Closure;
-import org.gradle.api.Project;
-import org.gradle.api.provider.Property;
+import org.gradle.api.Describable;
+import org.gradle.api.file.FileSystemLocation;
+import org.gradle.api.file.FileSystemLocationProperty;
 import org.gradle.api.provider.Provider;
 import org.gradle.api.reporting.ConfigurableReport;
 import org.gradle.api.reporting.Report;
-import org.gradle.internal.Factory;
-import org.gradle.util.ConfigureUtil;
+import org.gradle.internal.deprecation.DeprecationLogger;
+import org.gradle.util.internal.ConfigureUtil;
 
 import java.io.File;
 
-public class SimpleReport implements ConfigurableReport {
+public abstract class SimpleReport implements ConfigurableReport {
+    private final String name;
+    private final Describable displayName;
+    private final OutputType outputType;
 
-    private String name;
-    private Factory<String> displayName;
-
-    private final Property<File> destination;
-    private final Property<Boolean> enabled;
-    private OutputType outputType;
-
-    public SimpleReport(String name, Factory<String> displayName, OutputType outputType, Project project) {
+    public SimpleReport(String name, Describable displayName, OutputType outputType) {
         this.name = name;
         this.displayName = displayName;
         this.outputType = outputType;
-        destination = project.getObjects().property(File.class);
-        enabled = project.getObjects().property(Boolean.class).value(false);
     }
 
+    @Override
     public String getName() {
         return name;
     }
 
+    @Override
     public String getDisplayName() {
-        return displayName.create();
+        return displayName.getDisplayName();
     }
 
     public String toString() {
         return "Report " + getName();
     }
 
+    @Override
+    public abstract FileSystemLocationProperty<? extends FileSystemLocation> getOutputLocation();
+
+    @Override
+    @Deprecated
     public File getDestination() {
-        return destination.getOrNull();
+        DeprecationLogger.deprecateProperty(Report.class, "destination")
+            .replaceWith("outputLocation")
+            .willBeRemovedInGradle8()
+            .withDslReference()
+            .nagUser();
+
+        return getOutputLocation().getAsFile().getOrNull();
     }
 
     @Override
     public void setDestination(File file) {
-        this.destination.set(file);
+        getOutputLocation().fileValue(file);
     }
 
     @Override
     public void setDestination(Provider<File> provider) {
-        this.destination.set(provider);
+        getOutputLocation().fileProvider(provider);
     }
 
+    @Override
     public OutputType getOutputType() {
         return outputType;
     }
 
+    @Override
     public Report configure(Closure configure) {
         return ConfigureUtil.configureSelf(configure, this);
     }
 
+    @Override
     public boolean isEnabled() {
-        return enabled.get();
+        DeprecationLogger.deprecateProperty(Report.class, "enabled")
+            .replaceWith("required")
+            .willBeRemovedInGradle8()
+            .withDslReference()
+            .nagUser();
+
+        return getRequired().get();
     }
 
+    @Override
     public void setEnabled(boolean enabled) {
-        this.enabled.set(enabled);
+        DeprecationLogger.deprecateProperty(Report.class, "enabled")
+            .replaceWith("required")
+            .willBeRemovedInGradle8()
+            .withDslReference()
+            .nagUser();
+
+        getRequired().set(enabled);
     }
 
     @Override
     public void setEnabled(Provider<Boolean> enabled) {
-        this.enabled.set(enabled);
+        getRequired().set(enabled);
     }
 }

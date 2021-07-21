@@ -16,111 +16,62 @@
 
 package org.gradle.api.plugins.internal;
 
-import org.gradle.api.Project;
-import org.gradle.api.internal.file.FileLookup;
-import org.gradle.api.internal.project.ProjectInternal;
+import org.gradle.api.file.DirectoryProperty;
 import org.gradle.api.plugins.BasePluginConvention;
+import org.gradle.api.plugins.BasePluginExtension;
 import org.gradle.api.reflect.HasPublicType;
 import org.gradle.api.reflect.TypeOf;
-import org.gradle.util.DeprecationLogger;
 
-import java.io.File;
-
-import static org.gradle.api.reflect.TypeOf.typeOf;
-
+@Deprecated
 public class DefaultBasePluginConvention extends BasePluginConvention implements HasPublicType {
-    private ProjectInternal project;
 
-    private String distsDirName;
+    private BasePluginExtension extension;
 
-    private String libsDirName;
-
-    // cached resolved values
-    private File buildDir;
-    private File libsDir;
-    private File distsDir;
-
-    private String archivesBaseName;
-
-    public DefaultBasePluginConvention(Project project) {
-        this.project = (ProjectInternal) project;
-        archivesBaseName = project.getName();
-        distsDirName = "distributions";
-        libsDirName = "libs";
+    public DefaultBasePluginConvention(BasePluginExtension extension) {
+        this.extension = extension;
     }
-
     @Override
     public TypeOf<?> getPublicType() {
-        return typeOf(BasePluginConvention.class);
+        return TypeOf.typeOf(BasePluginConvention.class);
     }
 
     @Override
-    @Deprecated
-    public File getDistsDir() {
-        DeprecationLogger.nagUserOfDiscontinuedMethod("distsDir");
-        File curProjectBuildDir = project.getBuildDir();
-        if (distsDir != null && curProjectBuildDir.equals(buildDir)) {
-            return distsDir;
-        }
-        buildDir = curProjectBuildDir;
-        File dir = project.getServices().get(FileLookup.class).getFileResolver(curProjectBuildDir).resolve(distsDirName);
-        distsDir = dir;
-        return dir;
+    public DirectoryProperty getDistsDirectory() {
+        return extension.getDistsDirectory();
     }
 
     @Override
-    @Deprecated
-    public File getLibsDir() {
-        DeprecationLogger.nagUserOfDiscontinuedMethod("libsDir");
-        File curProjectBuildDir = project.getBuildDir();
-        if (libsDir != null && curProjectBuildDir.equals(buildDir)) {
-            return libsDir;
-        }
-        buildDir = curProjectBuildDir;
-        File dir = project.getServices().get(FileLookup.class).getFileResolver(curProjectBuildDir).resolve(libsDirName);
-        libsDir = dir;
-        return dir;
-    }
-
-    @Override
-    public ProjectInternal getProject() {
-        return project;
-    }
-
-    @Override
-    public void setProject(ProjectInternal project) {
-        this.project = project;
+    public DirectoryProperty getLibsDirectory() {
+        return extension.getLibsDirectory();
     }
 
     @Override
     public String getDistsDirName() {
-        return distsDirName;
+        return extension.getDistsDirName();
     }
 
     @Override
     public void setDistsDirName(String distsDirName) {
-        this.distsDirName = distsDirName;
-        this.distsDir = null;
+        extension.setDistsDirName(distsDirName);
     }
 
     @Override
     public String getLibsDirName() {
-        return libsDirName;
+        return extension.getLibsDirName();
     }
 
     @Override
     public void setLibsDirName(String libsDirName) {
-        this.libsDirName = libsDirName;
-        this.libsDir = null;
+        extension.setLibsDirName(libsDirName);
     }
 
     @Override
     public String getArchivesBaseName() {
-        return archivesBaseName;
+        return extension.getArchivesBaseName();
     }
 
     @Override
     public void setArchivesBaseName(String archivesBaseName) {
-        this.archivesBaseName = archivesBaseName;
+        extension.setArchivesBaseName(archivesBaseName);
     }
 }

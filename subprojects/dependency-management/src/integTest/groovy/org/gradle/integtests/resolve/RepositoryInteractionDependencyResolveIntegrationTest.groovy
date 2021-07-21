@@ -30,6 +30,16 @@ class RepositoryInteractionDependencyResolveIntegrationTest extends AbstractHttp
         'api':              'configurations.conf.attributes.attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage, Usage.JAVA_API))',
     ]
 
+    def setup() {
+        // apply Java ecosystem rules
+        buildFile << """
+            org.gradle.api.internal.artifacts.JavaEcosystemSupport.configureSchema(
+                dependencies.attributesSchema,
+                project.objects
+            )
+        """
+    }
+
     private static boolean leaksRuntime(testVariant, repoType, prevRepoType = null) {
         if (testVariant == 'runtime' || testVariant == 'default') {
             // the runtime variant is supposed to include everything
@@ -348,7 +358,7 @@ class RepositoryInteractionDependencyResolveIntegrationTest extends AbstractHttp
         repository('ivy') {
             "org:ivy:1.0" {
                 withModule(IvyModule) {
-                    dependsOn([organisation: 'org', module: targetRepoName, revision: '1.0', conf: 'compile->compile'])
+                    dependsOn([organisation: 'org', module: targetRepoName, revision: '1.0', conf: 'runtime->compile'])
                 }
             }
         }

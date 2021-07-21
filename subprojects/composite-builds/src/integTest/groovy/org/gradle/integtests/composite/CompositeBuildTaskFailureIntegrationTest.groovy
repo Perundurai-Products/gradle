@@ -115,9 +115,9 @@ class CompositeBuildTaskFailureIntegrationTest extends AbstractCompositeBuildInt
 
         buildA.buildFile << """
             task broken {
-                doLast { 
+                doLast {
                     ${server.callFromBuild('buildA')}
-                    throw new RuntimeException("broken") 
+                    throw new RuntimeException("broken")
                 }
             }
             processResources.dependsOn(broken)
@@ -125,9 +125,9 @@ class CompositeBuildTaskFailureIntegrationTest extends AbstractCompositeBuildInt
         dependency("org.test:buildB:1.0")
         buildB.buildFile << """
             task broken {
-                doLast { 
+                doLast {
                     ${server.callFromBuild('buildB')}
-                    throw new RuntimeException("broken") 
+                    throw new RuntimeException("broken")
                 }
             }
             processResources.dependsOn(broken)
@@ -143,5 +143,25 @@ class CompositeBuildTaskFailureIntegrationTest extends AbstractCompositeBuildInt
         failure.assertHasFailures(2)
         failure.assertHasDescription("Execution failed for task ':broken'.")
         failure.assertHasDescription("Execution failed for task ':buildB:broken'.")
+    }
+
+    def "build fails when task in root build fails"() {
+        buildA.buildFile << """
+            task broken {
+                doLast {
+                    throw new RuntimeException("broken")
+                }
+            }
+            processResources.dependsOn(broken)
+        """
+        dependency("org.test:buildB:1.0")
+
+        when:
+        fails(buildA, "assemble")
+
+        then:
+        result.assertTaskExecuted(":broken")
+        failure.assertHasFailures(1)
+        failure.assertHasDescription("Execution failed for task ':broken'.")
     }
 }

@@ -15,6 +15,7 @@
  */
 package org.gradle.integtests.fixtures
 
+import org.gradle.integtests.fixtures.compatibility.CrossVersionTest
 import org.gradle.integtests.fixtures.executer.GradleDistribution
 import org.gradle.integtests.fixtures.executer.GradleExecuter
 import org.gradle.integtests.fixtures.executer.IntegrationTestBuildContext
@@ -23,16 +24,15 @@ import org.gradle.test.fixtures.file.TestFile
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.gradle.test.fixtures.maven.MavenFileRepository
 import org.junit.Rule
-import org.junit.runner.RunWith
 import spock.lang.Retry
 import spock.lang.Specification
 
 import static spock.lang.Retry.Mode.SETUP_FEATURE_CLEANUP
 
-@RunWith(CrossVersionTestRunner)
+@CrossVersionTest
 @Retry(condition = { RetryConditions.onIssueWithReleasedGradleVersion(instance, failure) }, mode = SETUP_FEATURE_CLEANUP, count = 2)
 abstract class CrossVersionIntegrationSpec extends Specification {
-    @Rule TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider()
+    @Rule TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider(getClass())
     private final List<GradleExecuter> executers = []
     final GradleDistribution current = new UnderDevelopmentGradleDistribution()
     static GradleDistribution previous

@@ -17,69 +17,76 @@
 package org.gradle.composite.internal;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.Sets;
 import org.gradle.api.Action;
-import org.gradle.api.Project;
 import org.gradle.api.Transformer;
 import org.gradle.api.artifacts.DependencySubstitutions;
-import org.gradle.api.artifacts.ModuleVersionIdentifier;
 import org.gradle.api.artifacts.component.BuildIdentifier;
-import org.gradle.api.artifacts.component.ProjectComponentIdentifier;
-import org.gradle.api.initialization.ConfigurableIncludedBuild;
 import org.gradle.api.internal.BuildDefinition;
 import org.gradle.api.internal.GradleInternal;
 import org.gradle.api.internal.SettingsInternal;
-import org.gradle.api.internal.artifacts.DefaultProjectComponentIdentifier;
-import org.gradle.api.internal.artifacts.ForeignBuildIdentifier;
-import org.gradle.api.internal.artifacts.ivyservice.projectmodule.LocalComponentRegistry;
-import org.gradle.api.internal.project.ProjectInternal;
-import org.gradle.api.invocation.Gradle;
+import org.gradle.api.internal.project.ProjectStateRegistry;
 import org.gradle.api.tasks.TaskReference;
-import org.gradle.initialization.GradleLauncher;
 import org.gradle.initialization.IncludedBuildSpec;
-import org.gradle.initialization.NestedBuildFactory;
-import org.gradle.internal.ImmutableActionSet;
-import org.gradle.internal.Pair;
-import org.gradle.internal.build.AbstractBuildState;
+import org.gradle.internal.build.BuildLifecycleController;
+import org.gradle.internal.build.BuildLifecycleControllerFactory;
 import org.gradle.internal.build.BuildState;
+import org.gradle.internal.build.BuildWorkGraph;
+import org.gradle.internal.build.DefaultBuildWorkGraph;
+import org.gradle.internal.build.ExecutionResult;
 import org.gradle.internal.build.IncludedBuildState;
-import org.gradle.internal.component.local.model.DefaultLocalComponentMetadata;
+import org.gradle.internal.buildtree.BuildTreeState;
+import org.gradle.internal.composite.IncludedBuildInternal;
 import org.gradle.internal.concurrent.Stoppable;
-import org.gradle.internal.work.WorkerLeaseRegistry;
-import org.gradle.internal.work.WorkerLeaseService;
+import org.gradle.internal.reflect.Instantiator;
+import org.gradle.internal.service.scopes.BuildScopeServices;
 import org.gradle.util.Path;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.File;
-import java.util.Set;
 
-public class DefaultIncludedBuild extends AbstractBuildState implements IncludedBuildState, ConfigurableIncludedBuild, Stoppable {
-    private static final Logger LOGGER = LoggerFactory.getLogger(DefaultIncludedBuild.class);
-
+public class DefaultIncludedBuild extends AbstractCompositeParticipantBuildState implements IncludedBuildState, Stoppable {
     private final BuildIdentifier buildIdentifier;
     private final Path identityPath;
     private final BuildDefinition buildDefinition;
     private final boolean isImplicit;
     private final BuildState owner;
-    private final WorkerLeaseRegistry.WorkerLease parentLease;
-    private ImmutableActionSet<DependencySubstitutions> dependencySubstitutionActions = ImmutableActionSet.empty();
+    private final ProjectStateRegistry projectStateRegistry;
 
-    private boolean resolvedDependencySubstitutions;
+    private final BuildLifecycleController buildLifecycleController;
+    private final IncludedBuildImpl model;
+    private final DefaultBuildWorkGraph workGraph;
 
-    private final GradleLauncher gradleLauncher;
-    private String name;
-    private Set<Pair<ModuleVersionIdentifier, ProjectComponentIdentifier>> availableModules;
-
-    public DefaultIncludedBuild(BuildIdentifier buildIdentifier, Path identityPath, BuildDefinition buildDefinition, boolean isImplicit, BuildState owner, WorkerLeaseRegistry.WorkerLease parentLease) {
+    public DefaultIncludedBuild(
+        BuildIdentifier buildIdentifier,
+        Path identityPath,
+        BuildDefinition buildDefinition,
+        boolean isImplicit,
+        BuildState owner,
+        BuildTreeState buildTree,
+        BuildLifecycleControllerFactory buildLifecycleControllerFactory,
+        ProjectStateRegistry projectStateRegistry,
+        Instantiator instantiator
+    ) {
         this.buildIdentifier = buildIdentifier;
         this.identityPath = identityPath;
         this.buildDefinition = buildDefinition;
         this.isImplicit = isImplicit;
         this.owner = owner;
-        this.parentLease = parentLease;
+        this.projectStateRegistry = projectStateRegistry;
+        BuildScopeServices buildScopeServices = new BuildScopeServices(buildTree.getServices());
         // Use a defensive copy of the build definition, as it may be mutated during build execution
-        gradleLauncher = owner.getNestedBuildFactory().nestedInstance(buildDefinition.newInstance(), this);
+        this.buildLifecycleController = buildLifecycleControllerFactory.newInstance(buildDefinition.newInstance(), this, owner.getMutableModel(), buildScopeServices);
+        this.workGraph = new DefaultBuildWorkGraph(buildLifecycleController.getGradle().getTaskGraph(), projectStateRegistry, buildLifecycleController);
+        this.model = instantiator.newInstance(IncludedBuildImpl.class, this);
+    }
+
+    @Override
+    protected BuildLifecycleController getBuildController() {
+        return buildLifecycleController;
+    }
+
+    @Override
+    protected ProjectStateRegistry getProjectStateRegistry() {
+        return projectStateRegistry;
     }
 
     @Override
@@ -103,32 +110,27 @@ public class DefaultIncludedBuild extends AbstractBuildState implements Included
     }
 
     @Override
-    public ConfigurableIncludedBuild getModel() {
-        return this;
+    public boolean isImportableBuild() {
+        return !isImplicit;
     }
 
     @Override
-    public File getProjectDir() {
+    public IncludedBuildInternal getModel() {
+        return model;
+    }
+
+    @Override
+    public boolean isPluginBuild() {
+        return buildDefinition.isPluginBuild();
+    }
+
+    File getProjectDir() {
         return buildDefinition.getBuildRootDir();
     }
 
     @Override
-    public TaskReference task(String path) {
-        Preconditions.checkArgument(path.startsWith(":"), "Task path '%s' is not a qualified task path (e.g. ':task' or ':project:task').", path);
-        return new IncludedBuildTaskReference(this, path);
-    }
-
-    @Override
     public String getName() {
-        if (name == null) {
-            name = getLoadedSettings().getRootProject().getName();
-        }
-        return name;
-    }
-
-    @Override
-    public NestedBuildFactory getNestedBuildFactory() {
-        return gradleLauncher.getGradle().getServices().get(NestedBuildFactory.class);
+        return identityPath.getName();
     }
 
     @Override
@@ -140,113 +142,106 @@ public class DefaultIncludedBuild extends AbstractBuildState implements Included
     }
 
     @Override
+    public File getBuildRootDir() {
+        return buildDefinition.getBuildRootDir();
+    }
+
+    @Override
     public Path getCurrentPrefixForProjectsInChildBuilds() {
-        if (name != null) {
-            return owner.getCurrentPrefixForProjectsInChildBuilds().child(name);
-        } else {
-            return owner.getCurrentPrefixForProjectsInChildBuilds().child(buildIdentifier.getName());
-        }
+        return owner.getCurrentPrefixForProjectsInChildBuilds().child(buildIdentifier.getName());
     }
 
     @Override
     public Path getIdentityPathForProject(Path projectPath) {
-        GradleInternal parentBuild = getLoadedSettings().getGradle().getParent();
-        Path rootPath;
-        if (parentBuild == null) {
-            rootPath = Path.ROOT.child(getName());
-        } else {
-            rootPath = parentBuild.getIdentityPath().child(getName());
-        }
-        return rootPath.append(projectPath);
+        return getIdentityPath().append(projectPath);
     }
 
     @Override
-    public void dependencySubstitution(Action<? super DependencySubstitutions> action) {
-        if (resolvedDependencySubstitutions) {
-            throw new IllegalStateException("Cannot configure included build after dependency substitutions are resolved.");
-        }
-        dependencySubstitutionActions = dependencySubstitutionActions.add(action);
+    public Action<? super DependencySubstitutions> getRegisteredDependencySubstitutions() {
+        return buildDefinition.getDependencySubstitutions();
     }
 
     @Override
-    public Action<DependencySubstitutions> getRegisteredDependencySubstitutions() {
-        resolvedDependencySubstitutions = true;
-        return dependencySubstitutionActions;
+    public boolean hasInjectedSettingsPlugins() {
+        return !buildDefinition.getInjectedPluginRequests().isEmpty();
     }
 
     @Override
-    public synchronized Set<Pair<ModuleVersionIdentifier, ProjectComponentIdentifier>> getAvailableModules() {
-        if (availableModules == null) {
-            Gradle gradle = getConfiguredBuild();
-            availableModules = Sets.newLinkedHashSet();
-            for (Project project : gradle.getRootProject().getAllprojects()) {
-                registerProject(availableModules, (ProjectInternal) project);
-            }
-        }
-        return availableModules;
-    }
-
-    private void registerProject(Set<Pair<ModuleVersionIdentifier, ProjectComponentIdentifier>> availableModules, ProjectInternal project) {
-        LocalComponentRegistry localComponentRegistry = project.getServices().get(LocalComponentRegistry.class);
-        ProjectComponentIdentifier projectIdentifier = new DefaultProjectComponentIdentifier(buildIdentifier, project.getIdentityPath(), project.getProjectPath(), project.getName());
-        DefaultLocalComponentMetadata originalComponent = (DefaultLocalComponentMetadata) localComponentRegistry.getComponent(projectIdentifier);
-        ModuleVersionIdentifier moduleId = originalComponent.getModuleVersionId();
-        LOGGER.info("Registering " + project + " in composite build. Will substitute for module '" + moduleId.getModule() + "'.");
-        availableModules.add(Pair.of(moduleId, projectIdentifier));
-    }
-
-    @Override
-    public ProjectComponentIdentifier idToReferenceProjectFromAnotherBuild(ProjectComponentIdentifier identifier) {
-        // Need to use a 'foreign' build id to make BuildIdentifier.isCurrentBuild and BuildIdentifier.name work in dependency results
-        DefaultProjectComponentIdentifier original = (DefaultProjectComponentIdentifier) identifier;
-        return new DefaultProjectComponentIdentifier(new ForeignBuildIdentifier(buildIdentifier.getName(), getName()), original.getIdentityPath(), original.projectPath(), original.getProjectName());
-    }
-
-    @Override
-    public void loadSettings() {
-        gradleLauncher.getLoadedSettings();
+    public SettingsInternal loadSettings() {
+        return buildLifecycleController.getLoadedSettings();
     }
 
     @Override
     public SettingsInternal getLoadedSettings() {
-        return gradleLauncher.getGradle().getSettings();
+        return getGradle().getSettings();
     }
 
     @Override
     public GradleInternal getConfiguredBuild() {
-        return gradleLauncher.getConfiguredBuild();
+        return buildLifecycleController.getConfiguredBuild();
+    }
+
+    @Override
+    public GradleInternal getBuild() {
+        return getConfiguredBuild();
     }
 
     @Override
     public <T> T withState(Transformer<T, ? super GradleInternal> action) {
         // This should apply some locking, but most access to the build state does not happen via this method yet
-        return action.transform(gradleLauncher.getGradle());
+        return action.transform(getGradle());
     }
 
     @Override
-    public void finishBuild() {
-        gradleLauncher.finishBuild();
-    }
-
-    public synchronized void addTasks(Iterable<String> taskPaths) {
-        gradleLauncher.scheduleTasks(taskPaths);
+    public ExecutionResult<Void> finishBuild() {
+        return buildLifecycleController.finishBuild(null);
     }
 
     @Override
-    public synchronized void execute(final Iterable<String> tasks, final Object listener) {
-        gradleLauncher.addListener(listener);
-        gradleLauncher.scheduleTasks(tasks);
-        WorkerLeaseService workerLeaseService = gradleLauncher.getGradle().getServices().get(WorkerLeaseService.class);
-        workerLeaseService.withSharedLease(parentLease, new Runnable() {
-            @Override
-            public void run() {
-                gradleLauncher.executeTasks();
-            }
-        });
+    public BuildWorkGraph getWorkGraph() {
+        return workGraph;
     }
 
     @Override
     public void stop() {
-        gradleLauncher.stop();
+        buildLifecycleController.stop();
+    }
+
+    protected GradleInternal getGradle() {
+        return buildLifecycleController.getGradle();
+    }
+
+    @Override
+    public GradleInternal getMutableModel() {
+        return buildLifecycleController.getGradle();
+    }
+
+    public static class IncludedBuildImpl implements IncludedBuildInternal {
+        private final DefaultIncludedBuild buildState;
+
+        public IncludedBuildImpl(DefaultIncludedBuild buildState) {
+            this.buildState = buildState;
+        }
+
+        @Override
+        public String getName() {
+            return buildState.getName();
+        }
+
+        @Override
+        public File getProjectDir() {
+            return buildState.getProjectDir();
+        }
+
+        @Override
+        public TaskReference task(String path) {
+            Preconditions.checkArgument(path.startsWith(":"), "Task path '%s' is not a qualified task path (e.g. ':task' or ':project:task').", path);
+            return new IncludedBuildTaskReference(buildState, path);
+        }
+
+        @Override
+        public BuildState getTarget() {
+            return buildState;
+        }
     }
 }

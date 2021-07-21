@@ -33,7 +33,7 @@ import org.gradle.tooling.model.Task;
  * Example:
  * <pre class='autoTested'>
  * ProjectConnection connection = GradleConnector.newConnector()
- *    .forProjectDirectory(new File("someFolder"))
+ *    .forProjectDirectory(new File("some-folder"))
  *    .connect();
  *
  * try {
@@ -43,7 +43,7 @@ import org.gradle.tooling.model.Task;
  *    build.forTasks("clean", "test");
  *
  *    //include some build arguments:
- *    build.withArguments("-i", "--project-dir", "someProjectDir");
+ *    build.withArguments("-i", "--project-dir", "some-project-dir");
  *
  *    //configure the standard input:
  *    build.setStandardInput(new ByteArrayInputStream("consume this!".getBytes()));
@@ -64,6 +64,9 @@ import org.gradle.tooling.model.Task;
  *    connection.close();
  * }
  * </pre>
+ *
+ * <p>If the target Gradle version is &gt;=6.8 then you can use {@code BuildLauncher} to execute tasks from included builds. You can target tasks from included builds by specifying the task
+ * identity path (i.e. {@code ':included-build-name:subproject-name:taskName'}).</p>
  *
  * @since 1.0-milestone-3
  */

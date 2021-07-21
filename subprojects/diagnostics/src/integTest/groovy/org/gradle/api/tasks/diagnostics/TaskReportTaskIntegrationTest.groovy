@@ -45,12 +45,11 @@ wrapper - Generates Gradle wrapper files.
 Help tasks
 ----------
 buildEnvironment - Displays all buildscript dependencies declared in root project '$projectName'.
-components - Displays the components produced by root project '$projectName'. [incubating]
 dependencies - Displays all dependencies declared in root project '$projectName'.
 dependencyInsight - Displays the insight into a specific dependency in root project '$projectName'.
-dependentComponents - Displays the dependent components of components in root project '$projectName'. [incubating]
 help - Displays a help message.
-model - Displays the configuration model of root project '$projectName'. [incubating]
+javaToolchains - Displays the detected java toolchains.
+outgoingVariants - Displays the outgoing variants of root project '$projectName'.
 projects - Displays the sub-projects of root project '$projectName'.
 properties - Displays the properties of root project '$projectName'.
 tasks - Displays the tasks runnable from root project '$projectName'.""")
@@ -175,6 +174,7 @@ b
     }
 
     def "renders only tasks in help group running [tasks, --group=build setup"() {
+        settingsFile << "rootProject.name = 'test'"
         buildFile << """
             task mytask {
                 group = "custom"
@@ -186,7 +186,7 @@ b
         then:
         output.contains("""
 ------------------------------------------------------------
-Tasks runnable from root project
+Tasks runnable from root project 'test'
 ------------------------------------------------------------
 
 Build Setup tasks
@@ -383,6 +383,7 @@ b
     @Unroll
     def "renders tasks with dependencies created by model rules running #tasks"() {
         when:
+        settingsFile << "rootProject.name = 'test-project'"
         buildScript """
             model {
                 tasks {
@@ -413,7 +414,10 @@ $otherGroupHeader
 a
 b
 c
+components - Displays the components produced by root project 'test-project'. [deprecated]
 d
+dependentComponents - Displays the dependent components of components in root project 'test-project'. [deprecated]
+model - Displays the configuration model of root project 'test-project'. [deprecated]
 """) == rendersTasks
 
         where:

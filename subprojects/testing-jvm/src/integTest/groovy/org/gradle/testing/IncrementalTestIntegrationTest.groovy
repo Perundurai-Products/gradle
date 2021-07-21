@@ -101,7 +101,7 @@ public class BarTest {
         file("build.gradle") << """
             apply plugin: 'java'
             ${mavenCentralRepository()}
-            dependencies { testCompile 'junit:junit:4.12' }
+            dependencies { testImplementation 'junit:junit:4.13' }
             test.beforeTest { println "executed " + it }
         """
 
@@ -125,5 +125,29 @@ public class BarTest {
 
         then:
         result.assertTaskSkipped(":test")
+    }
+
+    def "does not re-run tests when parameter of disabled report changes"() {
+        buildFile << """
+            test {
+                reports.html {
+                    required = true
+                }
+                reports.junitXml {
+                    required = false
+                    outputPerTestCase = Boolean.parseBoolean(project.property('outputPerTestCase'))
+                }
+            }
+        """
+
+        when:
+        succeeds("test", "-PoutputPerTestCase=true")
+        then:
+        executedAndNotSkipped(":test")
+
+        when:
+        succeeds("test", "-PoutputPerTestCase=false")
+        then:
+        skipped(":test")
     }
 }

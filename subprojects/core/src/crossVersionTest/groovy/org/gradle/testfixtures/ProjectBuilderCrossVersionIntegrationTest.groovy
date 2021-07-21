@@ -18,44 +18,36 @@ package org.gradle.testfixtures
 
 import org.gradle.integtests.fixtures.MultiVersionIntegrationSpec
 import org.gradle.integtests.fixtures.TargetVersions
+import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
 import org.gradle.integtests.fixtures.executer.GradleExecuter
 import org.gradle.test.fixtures.file.TestFile
 import org.gradle.util.Requires
+import spock.lang.IgnoreIf
 import spock.lang.Issue
 
 import static org.gradle.integtests.fixtures.RepoScriptBlockUtil.mavenCentralRepositoryDefinition
-import static org.gradle.util.TestPrecondition.JDK8_OR_EARLIER
+import static org.gradle.util.TestPrecondition.JDK11_OR_EARLIER
 
 @Issue("GRADLE-3558")
-@TargetVersions(['2.0', '2.7']) // Pick first incompatible version and oldest version of Gradle 2.x. Avoid testing version range in favor of better coverage build performance.
-@Requires(JDK8_OR_EARLIER) // Versions < 2.10 fail to compile the plugin with Java 9 (Could not determine java version from '9-ea')
+@Requires(JDK11_OR_EARLIER)
+// Avoid testing version range in favor of better coverage build performance.
+@TargetVersions(['5.0', '6.8'])
 class ProjectBuilderCrossVersionIntegrationTest extends MultiVersionIntegrationSpec {
 
-    public static final List<String> BROKEN_GRADLE_VERSIONS = ['3.0', '3.1']
     public static final String TEST_TASK_NAME = 'test'
 
     private final List<GradleExecuter> executers = []
-
-    def setup() {
-        writeSourceFiles()
-    }
 
     def cleanup() {
         executers.each { it.cleanup() }
     }
 
+    // Requires a Gradle distribution on the test-under-test classpath, but gradleApi() does not offer the full distribution
+    @IgnoreIf({ GradleContextualExecuter.embedded })
     def "can apply plugin using ProjectBuilder in a test running with Gradle version under development"() {
+        writeSourceFiles()
         expect:
-        run(TEST_TASK_NAME)
-    }
-
-    def "cannot apply plugin using ProjectBuilder in a test running with broken Gradle versions"() {
-        expect:
-        BROKEN_GRADLE_VERSIONS.each {
-            def executionFailure = createGradleExecutor(it, TEST_TASK_NAME).runWithFailure()
-            executionFailure.assertTestsFailed()
-            executionFailure.assertOutputContains('Caused by: java.lang.ClassNotFoundException at PluginTest.java:21')
-        }
+        run TEST_TASK_NAME
     }
 
     private void writeSourceFiles() {
@@ -90,7 +82,7 @@ class ProjectBuilderCrossVersionIntegrationTest extends MultiVersionIntegrationS
                 class HelloWorld extends DefaultTask {
                     @TaskAction
                     void printHelloWorld() {
-                        println 'Hello world!'
+                        System.out.println 'Hello world!'
                     }
                 }
             """
@@ -157,9 +149,9 @@ class ProjectBuilderCrossVersionIntegrationTest extends MultiVersionIntegrationS
             version = '1.0'
 
             dependencies {
-                compile gradleApi()
-                compile 'org.gradle:hello:1.0'
-                testCompile 'junit:junit:4.12'
+                'implementation' gradleApi()
+                'implementation' 'org.gradle:hello:1.0'
+                'testImplementation' 'junit:junit:4.13'
             }
 
             repositories {

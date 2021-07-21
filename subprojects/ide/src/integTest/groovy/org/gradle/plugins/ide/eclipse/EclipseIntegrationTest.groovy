@@ -21,9 +21,10 @@ import org.custommonkey.xmlunit.ElementNameAndAttributeQualifier
 import org.custommonkey.xmlunit.XMLAssert
 import org.gradle.api.JavaVersion
 import org.gradle.api.internal.artifacts.ivyservice.CacheLayout
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.integtests.fixtures.TestResources
 import org.gradle.test.fixtures.file.TestFile
-import org.gradle.util.TextUtil
+import org.gradle.util.internal.TextUtil
 import org.junit.ComparisonFailure
 import org.junit.Rule
 import org.junit.Test
@@ -38,10 +39,10 @@ class EclipseIntegrationTest extends AbstractEclipseIntegrationTest {
     public final TestResources testResources = new TestResources(testDirectoryProvider)
 
     @Test
+    @ToBeFixedForConfigurationCache
     void canCreateAndDeleteMetaData() {
         when:
-        File buildFile = testFile("master/build.gradle")
-        usingBuildFile(buildFile).withTasks("eclipse").run()
+        executer.withTasks("eclipse").run()
 
         assertHasExpectedContents(getClasspathFile(project:"api"), "apiClasspath.xml")
         assertHasExpectedContents(getProjectFile(project:"api"), "apiProject.xml")
@@ -63,8 +64,7 @@ class EclipseIntegrationTest extends AbstractEclipseIntegrationTest {
         assertHasExpectedContents(getProjectFile(project:"javabaseproject"), "javabaseprojectProject.xml")
         assertHasExpectedProperties(getJdtPropertiesFile(project:"javabaseproject"), "javabaseprojectJdt.properties")
 
-
-        assertHasExpectedContents(getProjectFile(project:"master"), "masterProject.xml")
+        assertHasExpectedContents(getProjectFile(), "masterProject.xml")
 
         assertHasExpectedContents(getClasspathFile(project:"webAppJava6"), "webAppJava6Classpath.xml")
         assertHasExpectedContents(getProjectFile(project:"webAppJava6"), "webAppJava6Project.xml")
@@ -84,10 +84,11 @@ class EclipseIntegrationTest extends AbstractEclipseIntegrationTest {
         assertHasExpectedContents(getFacetFile(project:"webservice"), "webserviceWtpFacet.xml")
         assertHasExpectedProperties(getJdtPropertiesFile(project:"webservice"), "webserviceJdt.properties")
 
-        usingBuildFile(buildFile).withTasks("cleanEclipse").run()
+        executer.withTasks("cleanEclipse").run()
     }
 
     @Test
+    @ToBeFixedForConfigurationCache
     void sourceEntriesInClasspathFileAreSortedAsPerUsualConvention() {
         def expectedOrder = [
             "src/main/java",
@@ -123,6 +124,7 @@ sourceSets {
     }
 
     @Test
+    @ToBeFixedForConfigurationCache
     void outputDirDefaultsToEclipseDefault() {
         runEclipseTask("apply plugin: 'java'; apply plugin: 'eclipse'")
 
@@ -136,6 +138,7 @@ sourceSets {
     }
 
     @Test
+    @ToBeFixedForConfigurationCache
     void canHandleCircularModuleDependencies() {
         def artifact1 = mavenRepo.module("myGroup", "myArtifact1", "1.0").dependsOn("myGroup", "myArtifact2", "1.0").publish().artifactFile
         def artifact2 = mavenRepo.module("myGroup", "myArtifact2", "1.0").dependsOn("myGroup", "myArtifact1", "1.0").publish().artifactFile
@@ -149,7 +152,7 @@ repositories {
 }
 
 dependencies {
-    compile "myGroup:myArtifact1:1.0"
+    implementation "myGroup:myArtifact1:1.0"
 }
         """
 
@@ -157,6 +160,7 @@ dependencies {
     }
 
     @Test
+    @ToBeFixedForConfigurationCache
     void canConfigureTargetRuntimeName() {
 
         runEclipseTask """
@@ -177,6 +181,7 @@ eclipse {
     }
 
     @Test
+    @ToBeFixedForConfigurationCache
     void eclipseFilesAreWrittenWithUtf8Encoding() {
         runEclipseTask """
 apply plugin: "war"
@@ -206,6 +211,7 @@ eclipse {
     }
 
     @Test
+    @ToBeFixedForConfigurationCache
     void triggersBeforeAndWhenConfigurationHooks() {
         //this test is a bit peculiar as it has assertions inside the gradle script
         //couldn't find a better way of asserting on before/when configured hooks
@@ -256,8 +262,8 @@ eclipse {
 
 tasks.eclipse {
     doLast {
-        assert beforeConfiguredObjects == 5 : "beforeConfigured() hooks shoold be fired for domain model objects"
-        assert whenConfiguredObjects == 5 : "whenConfigured() hooks shoold be fired for domain model objects"
+        assert beforeConfiguredObjects == 5 : "beforeConfigured() hooks should be fired for domain model objects"
+        assert whenConfiguredObjects == 5 : "whenConfigured() hooks should be fired for domain model objects"
     }
 }
 ''')
@@ -265,6 +271,7 @@ tasks.eclipse {
     }
 
     @Test
+    @ToBeFixedForConfigurationCache
     void respectsPerConfigurationExcludes() {
         def artifact1 = mavenRepo.module("myGroup", "myArtifact1", "1.0").dependsOn("myGroup", "myArtifact2", "1.0").publish().artifactFile
         mavenRepo.module("myGroup", "myArtifact2", "1.0").publish()
@@ -278,11 +285,11 @@ repositories {
 }
 
 configurations {
-    compile.exclude module: 'myArtifact2'
+    implementation.exclude module: 'myArtifact2'
 }
 
 dependencies {
-    compile "myGroup:myArtifact1:1.0"
+    implementation "myGroup:myArtifact1:1.0"
 }
         """
 
@@ -290,6 +297,7 @@ dependencies {
     }
 
     @Test
+    @ToBeFixedForConfigurationCache
     void respectsPerDependencyExcludes() {
         def artifact1 = mavenRepo.module("myGroup", "myArtifact1", "1.0").dependsOn("myGroup", "myArtifact2", "1.0").publish().artifactFile
         mavenRepo.module("myGroup", "myArtifact2", "1.0").publish()
@@ -303,7 +311,7 @@ repositories {
 }
 
 dependencies {
-    compile("myGroup:myArtifact1:1.0") {
+    implementation("myGroup:myArtifact1:1.0") {
         exclude module: "myArtifact2"
     }
 }
@@ -320,6 +328,7 @@ dependencies {
     }
 
     @Test
+    @ToBeFixedForConfigurationCache
     void addsLinkToTheProjectFile() {
         runEclipseTask '''
 apply plugin: 'java'
@@ -342,6 +351,7 @@ eclipse.project {
     }
 
     @Test
+    @ToBeFixedForConfigurationCache
     void allowsConfiguringJavaVersionWithSimpleTypes() {
         runEclipseTask '''
 apply plugin: 'java'
@@ -359,6 +369,7 @@ eclipse.jdt {
     }
 
     @Test
+    @ToBeFixedForConfigurationCache
     void sourceAndTargetCompatibilityDefaultIsCurrentJavaVersion() {
         runEclipseTask '''
 apply plugin: 'java'
@@ -372,6 +383,7 @@ apply plugin: 'eclipse'
     }
 
     @Test
+    @ToBeFixedForConfigurationCache
     void sourceAndTargetCompatibilityDefinedInPluginConvention() {
         runEclipseTask '''
 apply plugin: 'java'
@@ -385,6 +397,7 @@ apply plugin: 'eclipse'
     }
 
     @Test
+    @ToBeFixedForConfigurationCache
     void jdtSettingsHasPrecedenceOverJavaPluginConvention() {
         runEclipseTask '''
 apply plugin: 'java'
@@ -404,6 +417,7 @@ eclipse {
     }
 
     @Test
+    @ToBeFixedForConfigurationCache
     void dslAllowsShortFormsForProject() {
         runEclipseTask '''
 apply plugin: 'java'
@@ -426,6 +440,7 @@ eclipse.project {
     }
 
     @Test
+    @ToBeFixedForConfigurationCache
     void dslAllowsShortForms() {
         runEclipseTask '''
 apply plugin: 'java'
@@ -446,6 +461,7 @@ eclipse {
 
     @Test
     @Issue("GRADLE-1157")
+    @ToBeFixedForConfigurationCache
     void canHandleDependencyWithoutSourceJarInFlatDirRepo() {
         def repoDir = testDirectory.createDir("repo")
         repoDir.createFile("lib-1.0.jar")
@@ -459,13 +475,14 @@ repositories {
 }
 
 dependencies {
-	compile "some:lib:1.0"
+	implementation "some:lib:1.0"
 }
         """
     }
 
     @Test
     @Issue("GRADLE-1706") // doesn't prove that the issue is fixed because the test also passes with 1.0-milestone-4
+    @ToBeFixedForConfigurationCache
     void canHandleDependencyWithoutSourceJarInMavenRepo() {
         mavenRepo.module("some", "lib", "1.0").publish()
 
@@ -478,7 +495,7 @@ repositories {
 }
 
 dependencies {
-	compile "some:lib:1.0"
+	implementation "some:lib:1.0"
 }
         """
     }
@@ -496,7 +513,7 @@ dependencies {
         } catch (AssertionFailedError error) {
             println "EXPECTED:\n${expectedXml}"
             println "ACTUAL:\n${actualXml}"
-            throw new ComparisonFailure("Comparison filure: expected: $expectedFile, actual: $actualFile"
+            throw new ComparisonFailure("Comparison failure: expected: $expectedFile, actual: $actualFile"
                 + "\nUnexpected content for generated actualFile: ${error.message}", expectedXml, actualXml).initCause(error)
         }
     }

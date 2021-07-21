@@ -16,6 +16,9 @@
 package org.gradle.internal.component.external.model;
 
 import com.google.common.base.Objects;
+import org.gradle.api.capabilities.Capability;
+
+import javax.annotation.Nullable;
 
 public class ImmutableCapability implements CapabilityInternal {
 
@@ -25,14 +28,12 @@ public class ImmutableCapability implements CapabilityInternal {
     private final int hashCode;
     private final String cachedId;
 
-    public ImmutableCapability(String group, String name, String version) {
+    public ImmutableCapability(String group, String name, @Nullable String version) {
         this.group = group;
         this.name = name;
         this.version = version;
 
-        // Do NOT change the order of members used in hash code here, it's been empirically
-        // tested to reduce the number of collisions on a large dependency graph (performance test)
-        this.hashCode = Objects.hashCode(version, name, group);
+        this.hashCode = computeHashcode(group, name, version);
 
         // Using a string instead of a plain ID here might look strange, but this turned out to be
         // the fastest of several experiments, including:
@@ -46,6 +47,19 @@ public class ImmutableCapability implements CapabilityInternal {
         this.cachedId = group + ":" + name;
     }
 
+    private int computeHashcode(String group, String name, @Nullable String version) {
+        // Do NOT change the order of members used in hash code here, it's been empirically
+        // tested to reduce the number of collisions on a large dependency graph (performance test)
+        int hash = safeHash(version);
+        hash = 31 * hash + name.hashCode();
+        hash = 31 * hash + group.hashCode();
+        return  hash;
+    }
+
+    private static int safeHash(@Nullable String o) {
+        return o == null ? 0 : o.hashCode();
+    }
+
     @Override
     public String getGroup() {
         return group;
@@ -57,6 +71,7 @@ public class ImmutableCapability implements CapabilityInternal {
     }
 
     @Override
+    @Nullable
     public String getVersion() {
         return version;
     }
@@ -66,13 +81,13 @@ public class ImmutableCapability implements CapabilityInternal {
         if (this == o) {
             return true;
         }
-        if (o == null || getClass() != o.getClass()) {
+        if (!(o instanceof Capability)) {
             return false;
         }
-        ImmutableCapability that = (ImmutableCapability) o;
-        return Objects.equal(group, that.group)
-            && Objects.equal(name, that.name)
-            && Objects.equal(version, that.version);
+        Capability that = (Capability) o;
+        return Objects.equal(group, that.getGroup())
+            && Objects.equal(name, that.getName())
+            && Objects.equal(version, that.getVersion());
     }
 
     @Override

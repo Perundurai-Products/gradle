@@ -16,7 +16,7 @@
 package org.gradle.nativeplatform.toolchain.internal.msvcpp;
 
 import net.rubygrapefruit.platform.WindowsRegistry;
-import org.gradle.util.VersionNumber;
+import org.gradle.util.internal.VersionNumber;
 
 import java.io.File;
 
@@ -28,6 +28,7 @@ public class DefaultUcrtLocator extends AbstractWindowsKitComponentLocator<UcrtI
         super(windowsRegistry);
     }
 
+    @Override
     public String getComponentName() {
         return COMPONENT_NAME;
     }

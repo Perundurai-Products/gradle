@@ -17,8 +17,11 @@
 package org.gradle.integtests.fixtures.executer;
 
 import org.gradle.api.Action;
+import org.gradle.api.JavaVersion;
+import org.gradle.api.internal.artifacts.ivyservice.ArtifactCachesProvider;
 import org.gradle.api.internal.file.TestFiles;
 import org.gradle.internal.Factory;
+import org.gradle.internal.jvm.JpmsConfiguration;
 import org.gradle.internal.jvm.Jvm;
 import org.gradle.internal.os.OperatingSystem;
 import org.gradle.process.internal.AbstractExecHandleBuilder;
@@ -53,6 +56,7 @@ public class NoDaemonGradleExecuter extends AbstractGradleExecuter {
         super(distribution, testDirectoryProvider, gradleVersion, buildContext);
     }
 
+    @Override
     public void assertCanExecute() throws AssertionError {
         if (!getDistribution().isSupportsSpacesInGradleAndJavaOpts()) {
             Map<String, String> environmentVars = buildInvocation().environmentVars;
@@ -114,10 +118,19 @@ public class NoDaemonGradleExecuter extends AbstractGradleExecuter {
 
     @Override
     protected List<String> getAllArgs() {
-        List<String> args = new ArrayList<String>();
-        args.addAll(super.getAllArgs());
+        List<String> args = new ArrayList<>(super.getAllArgs());
         addPropagatedSystemProperties(args);
         return args;
+    }
+
+    @Override
+    protected List<String> getImplicitBuildJvmArgs() {
+        List<String> buildJvmOptions = super.getImplicitBuildJvmArgs();
+        final Jvm current = Jvm.current();
+        if (getJavaHome().equals(current.getJavaHome()) && JavaVersion.current().isJava9Compatible() && !isUseDaemon()) {
+            buildJvmOptions.addAll(JpmsConfiguration.GRADLE_DAEMON_JPMS_ARGS);
+        }
+        return buildJvmOptions;
     }
 
     private void addPropagatedSystemProperties(List<String> args) {
@@ -129,6 +142,7 @@ public class NoDaemonGradleExecuter extends AbstractGradleExecuter {
         }
     }
 
+    @Override
     protected boolean supportsWhiteSpaceInEnvVars() {
         final Jvm current = Jvm.current();
         if (getJavaHome().equals(current.getJavaHome())) {
@@ -148,11 +162,12 @@ public class NoDaemonGradleExecuter extends AbstractGradleExecuter {
 
     protected Factory<? extends AbstractExecHandleBuilder> getExecHandleFactory() {
         return new Factory<DefaultExecHandleBuilder>() {
+            @Override
             public DefaultExecHandleBuilder create() {
                 TestFile gradleHomeDir = getDistribution().getGradleHomeDir();
-                if (!gradleHomeDir.isDirectory()) {
+                if (gradleHomeDir != null && !gradleHomeDir.isDirectory()) {
                     fail(gradleHomeDir + " is not a directory.\n"
-                        + "If you are running tests from IDE make sure that gradle tasks that prepare the test image were executed. Last time it was 'intTestImage' task.");
+                        + "The test is most likely not written in a way that it can run with the embedded executer.");
                 }
 
                 NativeServicesTestFixture.initialize();
@@ -170,6 +185,7 @@ public class NoDaemonGradleExecuter extends AbstractGradleExecuter {
                 builder.environment("JAVA_HOME", "");
                 builder.environment("GRADLE_OPTS", "");
                 builder.environment("JAVA_OPTS", "");
+                builder.environment(ArtifactCachesProvider.READONLY_CACHE_ENV_VAR, "");
 
                 GradleInvocation invocation = buildInvocation();
 
@@ -191,12 +207,14 @@ public class NoDaemonGradleExecuter extends AbstractGradleExecuter {
         return new ForkingGradleHandle(getStdinPipe(), isUseDaemon(), resultAssertion, encoding, execHandleFactory, getDurationMeasurement());
     }
 
+    @Override
     protected ExecutionResult doRun() {
-        return startHandle().waitForFinish();
+        return createGradleHandle().waitForFinish();
     }
 
+    @Override
     protected ExecutionFailure doRunWithFailure() {
-        return start().waitForFailure();
+        return createGradleHandle().waitForFailure();
     }
 
     private interface ExecHandlerConfigurer {
@@ -204,6 +222,7 @@ public class NoDaemonGradleExecuter extends AbstractGradleExecuter {
     }
 
     private class WindowsConfigurer implements ExecHandlerConfigurer {
+        @Override
         public void configure(ExecHandleBuilder builder) {
             String cmd;
             if (getExecutable() != null) {
@@ -234,6 +253,7 @@ public class NoDaemonGradleExecuter extends AbstractGradleExecuter {
     }
 
     private class UnixConfigurer implements ExecHandlerConfigurer {
+        @Override
         public void configure(ExecHandleBuilder builder) {
             if (getExecutable() != null) {
                 File exe = new File(getExecutable());

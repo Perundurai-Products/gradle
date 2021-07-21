@@ -16,17 +16,28 @@
 
 package org.gradle.api.plugins;
 
-import org.gradle.api.Incubating;
 import org.gradle.api.file.CopySpec;
+import org.gradle.api.model.ReplacedBy;
+import org.gradle.api.provider.Property;
 
 /**
  * Configuration for a Java application, defining how to assemble the application.
+ * <p>
+ * An instance of this type is added as a project extension by the Java application plugin
+ * under the name 'application'.
  *
- * <p>An instance of this type is added as a project extension by the Java application plugin.</p>
+ * <pre class='autoTested'>
+ * plugins {
+ *     id 'application'
+ * }
+ *
+ * application {
+ *   mainClass.set("com.foo.bar.FooBar")
+ * }
+ * </pre>
  *
  * @since 4.10
  */
-@Incubating
 public interface JavaApplication {
     /**
      * The name of the application.
@@ -39,13 +50,34 @@ public interface JavaApplication {
     void setApplicationName(String applicationName);
 
     /**
-     * The fully qualified name of the application's main class.
+     * The name of the application's Java module if it should run as a module.
+     *
+     * @since 6.4
      */
+    Property<String> getMainModule();
+
+    /**
+     * The fully qualified name of the application's main class.
+     *
+     * @since 6.4
+     */
+    Property<String> getMainClass();
+
+    /**
+     * The fully qualified name of the application's main class.
+     *
+     * @deprecated Use {@link #getMainClass()} instead.
+     */
+    @Deprecated
+    @ReplacedBy("mainClass")
     String getMainClassName();
 
     /**
      * The fully qualified name of the application's main class.
+     *
+     * @deprecated Set via {@link #getMainClass()} instead.
      */
+    @Deprecated
     void setMainClassName(String mainClassName);
 
     /**
@@ -73,7 +105,9 @@ public interface JavaApplication {
      * <p>
      * Use this {@link org.gradle.api.file.CopySpec} to include extra files/resource in the application distribution.
      * <pre class='autoTested'>
-     * apply plugin: 'application'
+     * plugins {
+     *     id 'application'
+     * }
      *
      * applicationDistribution.from("some/dir") {
      *   include "*.txt"

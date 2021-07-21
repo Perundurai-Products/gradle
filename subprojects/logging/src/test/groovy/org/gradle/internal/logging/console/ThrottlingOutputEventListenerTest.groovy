@@ -21,7 +21,7 @@ import org.gradle.internal.logging.events.FlushOutputEvent
 import org.gradle.internal.logging.events.OutputEventListener
 import org.gradle.internal.logging.events.UpdateNowEvent
 import org.gradle.internal.time.MockClock
-import org.gradle.util.MockExecutor
+import org.gradle.util.internal.MockExecutor
 import spock.lang.Subject
 
 class ThrottlingOutputEventListenerTest extends OutputSpecification {
@@ -100,6 +100,22 @@ class ThrottlingOutputEventListenerTest extends OutputSpecification {
         1 * listener.onOutput(event3)
         1 * listener.onOutput(flush)
         0 * _
+    }
+
+    def "flushes events when queue gets too big"() {
+        when:
+        (1..9999).each {
+            renderer.onOutput(event("Event $it"))
+        }
+
+        then:
+        0 * _
+
+        when:
+        renderer.onOutput(event("Event 10_000"))
+
+        then:
+        10_000 * listener.onOutput(_)
     }
 
     def "background flush does nothing when events already flushed"() {

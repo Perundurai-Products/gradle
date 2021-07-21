@@ -18,17 +18,26 @@ package org.gradle.api.internal.tasks.compile.daemon;
 
 import com.google.common.collect.Iterables;
 import org.gradle.api.internal.ClassPathRegistry;
+import org.gradle.api.internal.tasks.compile.ApiCompilerResult;
 import org.gradle.api.internal.tasks.compile.BaseForkOptionsConverter;
 import org.gradle.api.internal.tasks.compile.GroovyJavaJointCompileSpec;
-import org.gradle.api.tasks.compile.ForkOptions;
-import org.gradle.api.tasks.compile.GroovyForkOptions;
-import org.gradle.internal.file.PathToFileResolver;
-import org.gradle.internal.jvm.GroovyJpmsWorkarounds;
+import org.gradle.api.internal.tasks.compile.incremental.compilerapi.constants.ConstantsAnalysisResult;
+import org.gradle.api.internal.tasks.compile.incremental.processing.AnnotationProcessingResult;
+import org.gradle.api.internal.tasks.compile.MinimalJavaCompilerDaemonForkOptions;
+import org.gradle.api.internal.tasks.compile.MinimalGroovyCompilerDaemonForkOptions;
+import org.gradle.initialization.ClassLoaderRegistry;
+import org.gradle.internal.classloader.FilteringClassLoader;
+import org.gradle.internal.classloader.VisitableURLClassLoader;
+import org.gradle.internal.classpath.DefaultClassPath;
+import org.gradle.internal.jvm.JpmsConfiguration;
 import org.gradle.internal.jvm.inspection.JvmVersionDetector;
 import org.gradle.language.base.internal.compile.Compiler;
 import org.gradle.process.JavaForkOptions;
+import org.gradle.process.internal.JavaForkOptionsFactory;
+import org.gradle.workers.internal.ActionExecutionSpecFactory;
 import org.gradle.workers.internal.DaemonForkOptions;
 import org.gradle.workers.internal.DaemonForkOptionsBuilder;
+import org.gradle.workers.internal.HierarchicalClassLoaderStructure;
 import org.gradle.workers.internal.KeepAliveMode;
 import org.gradle.workers.internal.WorkerFactory;
 
@@ -37,40 +46,118 @@ import java.util.Arrays;
 import java.util.Collection;
 
 public class DaemonGroovyCompiler extends AbstractDaemonCompiler<GroovyJavaJointCompileSpec> {
+    private final Class<? extends Compiler<GroovyJavaJointCompileSpec>> compilerClass;
     private final static Iterable<String> SHARED_PACKAGES = Arrays.asList("groovy", "org.codehaus.groovy", "groovyjarjarantlr", "groovyjarjarasm", "groovyjarjarcommonscli", "org.apache.tools.ant", "com.sun.tools.javac");
     private final ClassPathRegistry classPathRegistry;
-    private final PathToFileResolver fileResolver;
+    private final ClassLoaderRegistry classLoaderRegistry;
+    private final JavaForkOptionsFactory forkOptionsFactory;
     private final File daemonWorkingDir;
     private final JvmVersionDetector jvmVersionDetector;
 
-    public DaemonGroovyCompiler(File daemonWorkingDir, Compiler<GroovyJavaJointCompileSpec> delegate, ClassPathRegistry classPathRegistry, WorkerFactory workerFactory, PathToFileResolver fileResolver, JvmVersionDetector jvmVersionDetector) {
-        super(delegate, workerFactory);
+    public DaemonGroovyCompiler(File daemonWorkingDir, Class<? extends Compiler<GroovyJavaJointCompileSpec>> compilerClass, ClassPathRegistry classPathRegistry, WorkerFactory workerFactory, ClassLoaderRegistry classLoaderRegistry, JavaForkOptionsFactory forkOptionsFactory, JvmVersionDetector jvmVersionDetector, ActionExecutionSpecFactory actionExecutionSpecFactory) {
+        super(workerFactory, actionExecutionSpecFactory);
+        this.compilerClass = compilerClass;
         this.classPathRegistry = classPathRegistry;
-        this.fileResolver = fileResolver;
+        this.classLoaderRegistry = classLoaderRegistry;
+        this.forkOptionsFactory = forkOptionsFactory;
         this.daemonWorkingDir = daemonWorkingDir;
         this.jvmVersionDetector = jvmVersionDetector;
     }
 
     @Override
+    protected CompilerParameters getCompilerParameters(GroovyJavaJointCompileSpec spec) {
+
+        return new GroovyCompilerParameters(compilerClass.getName(), new Object[]{classPathRegistry.getClassPath("JAVA-COMPILER-PLUGIN").getAsFiles()}, spec);
+    }
+
+    @Override
     protected DaemonForkOptions toDaemonForkOptions(GroovyJavaJointCompileSpec spec) {
-        ForkOptions javaOptions = spec.getCompileOptions().getForkOptions();
-        GroovyForkOptions groovyOptions = spec.getGroovyCompileOptions().getForkOptions();
+        MinimalJavaCompilerDaemonForkOptions javaOptions = spec.getCompileOptions().getForkOptions();
+        MinimalGroovyCompilerDaemonForkOptions groovyOptions = spec.getGroovyCompileOptions().getForkOptions();
         // Ant is optional dependency of groovy(-all) module but mandatory dependency of Groovy compiler;
         // that's why we add it here. The following assumes that any Groovy compiler version supported by Gradle
         // is compatible with Gradle's current Ant version.
         Collection<File> antFiles = classPathRegistry.getClassPath("ANT").getAsFiles();
-        Iterable<File> groovyFiles = Iterables.concat(spec.getGroovyClasspath(), antFiles);
-        JavaForkOptions javaForkOptions = new BaseForkOptionsConverter(fileResolver).transform(mergeForkOptions(javaOptions, groovyOptions));
-        javaForkOptions.setWorkingDir(daemonWorkingDir);
-        if (jvmVersionDetector.getJavaVersion(javaForkOptions.getExecutable()).isJava9Compatible()) {
-            javaForkOptions.jvmArgs(GroovyJpmsWorkarounds.SUPPRESS_COMMON_GROOVY_WARNINGS);
+        Iterable<File> classpath = Iterables.concat(spec.getGroovyClasspath(), antFiles);
+        VisitableURLClassLoader.Spec targetGroovyClasspath = new VisitableURLClassLoader.Spec("worker-loader", DefaultClassPath.of(classpath).getAsURLs());
+
+        Collection<File> languageGroovyFiles = classPathRegistry.getClassPath("GROOVY-COMPILER").getAsFiles();
+        VisitableURLClassLoader.Spec compilerClasspath = new VisitableURLClassLoader.Spec("compiler-loader", DefaultClassPath.of(languageGroovyFiles).getAsURLs());
+
+        FilteringClassLoader.Spec gradleAndUserFilter = getMinimalGradleFilter();
+
+        for (String sharedPackage : SHARED_PACKAGES) {
+            gradleAndUserFilter.allowPackage(sharedPackage);
         }
 
-        return new DaemonForkOptionsBuilder(fileResolver)
+        HierarchicalClassLoaderStructure classLoaderStructure =
+            new HierarchicalClassLoaderStructure(classLoaderRegistry.getGradleWorkerExtensionSpec())
+                .withChild(getMinimalGradleFilter())
+                .withChild(targetGroovyClasspath)
+                .withChild(gradleAndUserFilter)
+                .withChild(compilerClasspath);
+
+        JavaForkOptions javaForkOptions = new BaseForkOptionsConverter(forkOptionsFactory).transform(mergeForkOptions(javaOptions, groovyOptions));
+        javaForkOptions.setWorkingDir(daemonWorkingDir);
+        javaForkOptions.setExecutable(javaOptions.getExecutable());
+        if (jvmVersionDetector.getJavaVersion(javaForkOptions.getExecutable()).isJava9Compatible()) {
+            javaForkOptions.jvmArgs(JpmsConfiguration.GROOVY_JPMS_ARGS);
+        }
+
+        return new DaemonForkOptionsBuilder(forkOptionsFactory)
             .javaForkOptions(javaForkOptions)
-            .classpath(groovyFiles)
-            .sharedPackages(SHARED_PACKAGES)
             .keepAliveMode(KeepAliveMode.SESSION)
+            .withClassLoaderStructure(classLoaderStructure)
             .build();
+    }
+
+    private static FilteringClassLoader.Spec getMinimalGradleFilter() {
+        // Allow only certain things from the underlying classloader
+        FilteringClassLoader.Spec gradleFilterSpec = new FilteringClassLoader.Spec();
+
+        // Logging
+        gradleFilterSpec.allowPackage("org.slf4j");
+
+        // Native Services
+        gradleFilterSpec.allowPackage("net.rubygrapefruit.platform");
+
+        // Inject
+        gradleFilterSpec.allowPackage("javax.inject");
+
+        // Gradle stuff
+        gradleFilterSpec.allowPackage("org.gradle");
+
+        // Guava
+        gradleFilterSpec.allowPackage("com.google");
+
+        // This should come from the compiler classpath only
+        gradleFilterSpec.disallowPackage("org.gradle.api.internal.tasks.compile");
+
+        /*
+         * This shouldn't be necessary, but currently is because the worker API handles return types differently
+         * depending on whether you use process isolation or classpath isolation. In the former case, the return
+         * value is serialized and deserialized, so the correct class is returned. In the latter case, the result
+         * is returned directly, which means it is not an instance of the expected class unless we allow that class
+         * to leak through here. Should be fixed in the worker API, so that it always serializes/deserializes results.
+         */
+        gradleFilterSpec.allowClass(ApiCompilerResult.class);
+        gradleFilterSpec.allowClass(AnnotationProcessingResult.class);
+        gradleFilterSpec.allowClass(ConstantsAnalysisResult.class);
+
+        return gradleFilterSpec;
+    }
+
+    public static class GroovyCompilerParameters extends CompilerParameters {
+        private final GroovyJavaJointCompileSpec compileSpec;
+
+        public GroovyCompilerParameters(String compilerClassName, Object[] compilerInstanceParameters, GroovyJavaJointCompileSpec compileSpec) {
+            super(compilerClassName, compilerInstanceParameters);
+            this.compileSpec = compileSpec;
+        }
+
+        @Override
+        public GroovyJavaJointCompileSpec getCompileSpec() {
+            return compileSpec;
+        }
     }
 }

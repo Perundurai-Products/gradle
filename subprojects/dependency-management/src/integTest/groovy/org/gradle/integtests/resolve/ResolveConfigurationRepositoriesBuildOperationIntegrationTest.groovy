@@ -39,15 +39,18 @@ class ResolveConfigurationRepositoriesBuildOperationIntegrationTest extends Abst
         buildFile << """
             apply plugin: 'java'
             ${repoBlock.replaceAll('<<URL>>', mavenHttpRepo.uri.toString())}
-            task resolve { doLast { configurations.compile.resolve() } }
+            task resolve { doLast { configurations.compileClasspath.resolve() } }
         """
+        if (deprecationWarning) {
+            executer.expectDocumentedDeprecationWarning(deprecationWarning)
+        }
 
         when:
         succeeds 'resolve'
 
         then:
         def op = operations.first(ResolveConfigurationDependenciesBuildOperationType)
-        op.details.configurationName == 'compile'
+        op.details.configurationName == 'compileClasspath'
         op.details.projectPath == ":"
         op.details.buildPath == ":"
         def repos = op.details.repositories
@@ -58,23 +61,23 @@ class ResolveConfigurationRepositoriesBuildOperationIntegrationTest extends Abst
         ])
 
         where:
-        repo                   | repoBlock                     | expectedRepo
-        'maven'                | mavenRepoBlock()              | expectedMavenRepo()
-        'ivy'                  | ivyRepoBlock()                | expectedIvyRepo()
-        'ivy-no-url'           | ivyRepoNoUrlBlock()           | expectedIvyRepoNoUrl()
-        'flat-dir'             | flatDirRepoBlock()            | expectedFlatDirRepo()
-        'local maven'          | mavenLocalRepoBlock()         | expectedMavenLocalRepo()
-        'maven central'        | mavenCentralRepoBlock()       | expectedMavenCentralRepo()
-        'jcenter'              | jcenterRepoBlock()            | expectedJcenterRepo()
-        'google'               | googleRepoBlock()             | expectedGoogleRepo()
-        'gradle plugin portal' | gradlePluginPortalRepoBlock() | expectedGradlePluginPortalRepo()
+        repo                   | repoBlock                     | expectedRepo                     | deprecationWarning
+        'maven'                | mavenRepoBlock()              | expectedMavenRepo()              | null
+        'ivy'                  | ivyRepoBlock()                | expectedIvyRepo()                | null
+        'ivy-no-url'           | ivyRepoNoUrlBlock()           | expectedIvyRepoNoUrl()           | null
+        'flat-dir'             | flatDirRepoBlock()            | expectedFlatDirRepo()            | null
+        'local maven'          | mavenLocalRepoBlock()         | expectedMavenLocalRepo()         | null
+        'maven central'        | mavenCentralRepoBlock()       | expectedMavenCentralRepo()       | null
+        'jcenter'              | jcenterRepoBlock()            | expectedJcenterRepo()            | "The RepositoryHandler.jcenter() method has been deprecated. This is scheduled to be removed in Gradle 8.0. JFrog announced JCenter's sunset in February 2021. Use mavenCentral() instead. Consult the upgrading guide for further information: https://docs.gradle.org/current/userguide/upgrading_version_6.html#jcenter_deprecation"
+        'google'               | googleRepoBlock()             | expectedGoogleRepo()             | null
+        'gradle plugin portal' | gradlePluginPortalRepoBlock() | expectedGradlePluginPortalRepo() | null
     }
 
     def "repositories used in buildscript blocks are exposed via build operation"() {
         setup:
         def module = mavenHttpRepo.module('org', 'foo')
         module.pom.expectGetBroken()
-        buildFile << """     
+        buildFile << """
             buildscript {
                 repositories { maven { url '${mavenHttpRepo.uri}' } }
                 dependencies { classpath 'org:foo:1.0' }
@@ -99,7 +102,7 @@ class ResolveConfigurationRepositoriesBuildOperationIntegrationTest extends Abst
                 AUTHENTICATED: false,
                 AUTHENTICATION_SCHEMES: [],
                 URL: getMavenHttpRepo().uri.toString(),
-                METADATA_SOURCES: ['mavenPom', 'artifact']
+                METADATA_SOURCES: ['mavenPom']
             ]
         }
     }
@@ -134,7 +137,7 @@ class ResolveConfigurationRepositoriesBuildOperationIntegrationTest extends Abst
                 ARTIFACT_URLS: [],
                 AUTHENTICATED: false,
                 AUTHENTICATION_SCHEMES: [],
-                METADATA_SOURCES: ['mavenPom', 'artifact'],
+                METADATA_SOURCES: ['mavenPom'],
                 URL: getMavenHttpRepo().uri.toString(),
             ]
         }
@@ -160,7 +163,7 @@ class ResolveConfigurationRepositoriesBuildOperationIntegrationTest extends Abst
             }
             apply plugin: 'org.example.plugin2'
             repositories { maven { url = '$mavenRepo.uri' } }
-            task resolve { doLast { configurations.compile.resolve() } }
+            task resolve { doLast { configurations.compileClasspath.resolve() } }
         """
 
         when:
@@ -178,10 +181,10 @@ class ResolveConfigurationRepositoriesBuildOperationIntegrationTest extends Abst
             include 'child'
         """
         buildFile << """
-            allprojects { 
+            allprojects {
                 apply plugin: 'java'
-                repositories { jcenter() }
-                task resolve { doLast { configurations.compile.resolve() } }
+                ${mavenCentralRepoBlock()}
+                task resolve { doLast { configurations.compileClasspath.resolve() } }
             }
         """
 
@@ -213,7 +216,7 @@ class ResolveConfigurationRepositoriesBuildOperationIntegrationTest extends Abst
                     }
                 }
             }
-            task resolve { doLast { configurations.compile.resolve() } }
+            task resolve { doLast { configurations.compileClasspath. resolve() } }
         """
 
         when:
@@ -244,7 +247,7 @@ class ResolveConfigurationRepositoriesBuildOperationIntegrationTest extends Abst
                     name = 'custom repo'
                 }
             }
-            task resolve { doLast { configurations.compile.resolve() } }
+            task resolve { doLast { configurations.compileClasspath. resolve() } }
         """
 
         when:
@@ -281,7 +284,7 @@ class ResolveConfigurationRepositoriesBuildOperationIntegrationTest extends Abst
                     }
                 }
             }
-            task resolve { doLast { configurations.compile.resolve() } }
+            task resolve { doLast { configurations.compileClasspath. resolve() } }
         """
 
         when:
@@ -323,7 +326,7 @@ class ResolveConfigurationRepositoriesBuildOperationIntegrationTest extends Abst
                     ${definition}
                 }
             }
-            task resolve { doLast { configurations.compile.resolve() } }
+            task resolve { doLast { configurations.compileClasspath.resolve() } }
         """
 
         when:
@@ -348,7 +351,7 @@ class ResolveConfigurationRepositoriesBuildOperationIntegrationTest extends Abst
                     properties.IVY_PATTERNS == ['[organisation]/[module]/[revision]/ivy-[revision].xml']
                     properties.LAYOUT_TYPE == 'Gradle'
                     properties.M2_COMPATIBLE == false
-                    properties.METADATA_SOURCES == ['ivyDescriptor', 'artifact']
+                    properties.METADATA_SOURCES == ['ivyDescriptor']
                     properties.AUTHENTICATED == false
                     properties.'AUTHENTICATION_SCHEMES' == []
                 } else {
@@ -358,13 +361,13 @@ class ResolveConfigurationRepositoriesBuildOperationIntegrationTest extends Abst
                     properties.IVY_PATTERNS == ['[organisation]/[module]/[revision]/ivy-[revision].xml']
                     properties.LAYOUT_TYPE == 'Gradle'
                     properties.M2_COMPATIBLE == false
-                    properties.METADATA_SOURCES == ['ivyDescriptor', 'artifact']
+                    properties.METADATA_SOURCES == ['ivyDescriptor']
                     properties.AUTHENTICATED == false
                     properties.'AUTHENTICATION_SCHEMES' == []
                 }
             }
         } else {
-            result.assertHasCause 'You must specify a base url or at least one artifact pattern for an Ivy repository.'
+            result.assertHasCause "You must specify a base url or at least one artifact pattern for the Ivy repository 'custom repo'."
             operations.none(ResolveConfigurationDependenciesBuildOperationType)
         }
 
@@ -385,7 +388,7 @@ class ResolveConfigurationRepositoriesBuildOperationIntegrationTest extends Abst
                     dirs 'lib1', 'lib2'
                 }
             }
-            task resolve { doLast { configurations.compile.resolve() } }
+            task resolve { doLast { configurations.compileClasspath. resolve() } }
         """
 
         when:
@@ -414,7 +417,7 @@ class ResolveConfigurationRepositoriesBuildOperationIntegrationTest extends Abst
             type: 'MAVEN',
             properties: [
                 ARTIFACT_URLS: [],
-                METADATA_SOURCES: ['mavenPom', 'artifact'],
+                METADATA_SOURCES: ['mavenPom'],
                 AUTHENTICATED: false,
                 AUTHENTICATION_SCHEMES: [],
                 URL: null,
@@ -433,7 +436,7 @@ class ResolveConfigurationRepositoriesBuildOperationIntegrationTest extends Abst
             type: 'MAVEN',
             properties: [
                 ARTIFACT_URLS: ['http://artifactUrl'],
-                METADATA_SOURCES: ['mavenPom', 'artifact'],
+                METADATA_SOURCES: ['mavenPom'],
                 AUTHENTICATED: false,
                 AUTHENTICATION_SCHEMES: []
             ]
@@ -456,7 +459,7 @@ class ResolveConfigurationRepositoriesBuildOperationIntegrationTest extends Abst
                 IVY_PATTERNS: ['[organisation]/[module]/[revision]/ivy-[revision].xml'],
                 LAYOUT_TYPE: 'Gradle',
                 M2_COMPATIBLE: false,
-                METADATA_SOURCES: ['ivyDescriptor', 'artifact'],
+                METADATA_SOURCES: ['ivyDescriptor'],
                 URL: null
             ]
         ]
@@ -481,7 +484,7 @@ class ResolveConfigurationRepositoriesBuildOperationIntegrationTest extends Abst
                 IVY_PATTERNS: ['[organisation]/[module]/[revision]/ivy-[revision].xml'],
                 LAYOUT_TYPE: 'Gradle',
                 M2_COMPATIBLE: false,
-                METADATA_SOURCES: ['ivyDescriptor', 'artifact']
+                METADATA_SOURCES: ['ivyDescriptor']
             ]
         ]
     }
@@ -514,7 +517,7 @@ class ResolveConfigurationRepositoriesBuildOperationIntegrationTest extends Abst
                 ARTIFACT_URLS: [],
                 AUTHENTICATED: false,
                 AUTHENTICATION_SCHEMES: [],
-                METADATA_SOURCES: ['mavenPom', 'artifact'],
+                METADATA_SOURCES: ['mavenPom'],
                 URL: null,
             ]
         ]
@@ -533,7 +536,7 @@ class ResolveConfigurationRepositoriesBuildOperationIntegrationTest extends Abst
                 ARTIFACT_URLS: [],
                 AUTHENTICATED: false,
                 AUTHENTICATION_SCHEMES: [],
-                METADATA_SOURCES: ['mavenPom', 'artifact'],
+                METADATA_SOURCES: ['mavenPom'],
                 URL: 'https://repo.maven.apache.org/maven2/',
             ]
         ]
@@ -550,7 +553,7 @@ class ResolveConfigurationRepositoriesBuildOperationIntegrationTest extends Abst
             type: 'MAVEN',
             properties: [
                 ARTIFACT_URLS: [],
-                METADATA_SOURCES: ['mavenPom', 'artifact'],
+                METADATA_SOURCES: ['mavenPom'],
                 AUTHENTICATED: false,
                 AUTHENTICATION_SCHEMES: [],
                 URL: 'https://jcenter.bintray.com/',
@@ -571,7 +574,7 @@ class ResolveConfigurationRepositoriesBuildOperationIntegrationTest extends Abst
                 ARTIFACT_URLS: [],
                 AUTHENTICATED: false,
                 AUTHENTICATION_SCHEMES: [],
-                METADATA_SOURCES: ['mavenPom', 'artifact'],
+                METADATA_SOURCES: ['mavenPom'],
                 URL: 'https://dl.google.com/dl/android/maven2/',
             ]
         ]

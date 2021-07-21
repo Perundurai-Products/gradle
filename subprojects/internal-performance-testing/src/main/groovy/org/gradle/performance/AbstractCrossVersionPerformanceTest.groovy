@@ -1,5 +1,5 @@
 /*
- * Copyright 2012 the original author or authors.
+ * Copyright 2019 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,34 +19,33 @@ package org.gradle.performance
 import org.gradle.integtests.fixtures.executer.IntegrationTestBuildContext
 import org.gradle.integtests.fixtures.executer.UnderDevelopmentGradleDistribution
 import org.gradle.integtests.fixtures.versions.ReleasedVersionDistributions
-import org.gradle.performance.categories.PerformanceRegressionTest
-import org.gradle.performance.fixture.BuildExperimentRunner
+import org.gradle.internal.scan.config.fixtures.ApplyGradleEnterprisePluginFixture
+import org.gradle.performance.annotations.AllFeaturesShouldBeAnnotated
 import org.gradle.performance.fixture.CrossVersionPerformanceTestRunner
-import org.gradle.performance.fixture.GradleSessionProvider
-import org.gradle.performance.fixture.PerformanceTestConditions
+import org.gradle.performance.fixture.GradleBuildExperimentRunner
 import org.gradle.performance.fixture.PerformanceTestDirectoryProvider
 import org.gradle.performance.fixture.PerformanceTestIdProvider
 import org.gradle.performance.results.CrossVersionResultsStore
-import org.gradle.performance.results.SlackReporter
+import org.gradle.profiler.BuildMutator
+import org.gradle.profiler.ScenarioContext
 import org.gradle.test.fixtures.file.CleanupTestDirectory
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.junit.Rule
-import org.junit.experimental.categories.Category
-import spock.lang.Retry
-import spock.lang.Specification
 
-import static spock.lang.Retry.Mode.SETUP_FEATURE_CLEANUP
-
-@Category(PerformanceRegressionTest)
+import static org.gradle.performance.results.ResultsStoreHelper.createResultsStoreWhenDatabaseAvailable
+/**
+ * A base class for cross version performance tests.
+ *
+ * This base class uses Gradle profiler as a backend for running the performance tests.
+ */
 @CleanupTestDirectory
-@Retry(condition = { PerformanceTestConditions.whenSlowerButNotAdhoc(failure) }, mode = SETUP_FEATURE_CLEANUP, count = 2)
-class AbstractCrossVersionPerformanceTest extends Specification {
+@AllFeaturesShouldBeAnnotated
+class AbstractCrossVersionPerformanceTest extends AbstractPerformanceTest {
 
-    private static def resultStore = new CrossVersionResultsStore()
-    private static def reporter = SlackReporter.wrap(resultStore)
+    private static final RESULTS_STORE = createResultsStoreWhenDatabaseAvailable { new CrossVersionResultsStore() }
 
     @Rule
-    TestNameTestDirectoryProvider temporaryFolder = new PerformanceTestDirectoryProvider()
+    TestNameTestDirectoryProvider temporaryFolder = new PerformanceTestDirectoryProvider(getClass())
 
     private final IntegrationTestBuildContext buildContext = new IntegrationTestBuildContext()
 
@@ -57,11 +56,10 @@ class AbstractCrossVersionPerformanceTest extends Specification {
 
     def setup() {
         runner = new CrossVersionPerformanceTestRunner(
-            new BuildExperimentRunner(new GradleSessionProvider(buildContext)),
-            resultStore,
-            reporter,
-            new ReleasedVersionDistributions(buildContext),
-            buildContext
+                new GradleBuildExperimentRunner(gradleProfilerReporter, outputDirSelector),
+                RESULTS_STORE.reportAlso(dataReporter),
+                new ReleasedVersionDistributions(buildContext),
+                buildContext
         )
         runner.workingDir = temporaryFolder.testDirectory
         runner.current = new UnderDevelopmentGradleDistribution(buildContext)
@@ -72,11 +70,30 @@ class AbstractCrossVersionPerformanceTest extends Specification {
         runner
     }
 
+    void applyEnterprisePlugin() {
+        runner.addBuildMutator { invocationSettings ->
+            new ApplyGradleEnterprisePluginMutator(invocationSettings.projectDir)
+        }
+    }
+
     static {
         // TODO - find a better way to cleanup
         System.addShutdownHook {
-            resultStore.close()
-            reporter.close()
+            RESULTS_STORE.close()
         }
+    }
+}
+
+class ApplyGradleEnterprisePluginMutator implements BuildMutator {
+
+    private final File projectDir
+
+    ApplyGradleEnterprisePluginMutator(File projectDir) {
+        this.projectDir = projectDir
+    }
+
+    @Override
+    void beforeScenario(ScenarioContext context) {
+        ApplyGradleEnterprisePluginFixture.applyEnterprisePlugin(new File(projectDir, "settings.gradle"))
     }
 }

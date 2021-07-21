@@ -18,28 +18,24 @@ package org.gradle.api.internal.tasks.properties.bean;
 
 import com.google.common.base.Supplier;
 import com.google.common.base.Suppliers;
+import org.gradle.api.Buildable;
 import org.gradle.api.GradleException;
-import org.gradle.api.Task;
-import org.gradle.api.internal.provider.ProducerAwareProperty;
-import org.gradle.api.internal.provider.PropertyInternal;
-import org.gradle.api.internal.tasks.PropertySpecFactory;
-import org.gradle.api.internal.tasks.TaskValidationContext;
-import org.gradle.api.internal.tasks.ValidationAction;
+import org.gradle.api.internal.provider.HasConfigurableValueInternal;
+import org.gradle.api.internal.tasks.TaskDependencyContainer;
 import org.gradle.api.internal.tasks.properties.BeanPropertyContext;
 import org.gradle.api.internal.tasks.properties.PropertyValue;
 import org.gradle.api.internal.tasks.properties.PropertyVisitor;
 import org.gradle.api.internal.tasks.properties.TypeMetadata;
 import org.gradle.api.internal.tasks.properties.annotations.PropertyAnnotationHandler;
+import org.gradle.api.provider.HasConfigurableValue;
 import org.gradle.api.provider.Provider;
-import org.gradle.api.tasks.Optional;
 import org.gradle.internal.Factory;
 import org.gradle.internal.UncheckedException;
+import org.gradle.internal.deprecation.DeprecationLogger;
 import org.gradle.internal.reflect.PropertyMetadata;
-import org.gradle.util.DeferredUtil;
-import org.gradle.util.DeprecationLogger;
+import org.gradle.internal.reflect.validation.TypeValidationContext;
 
 import javax.annotation.Nullable;
-import java.lang.annotation.Annotation;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.Queue;
@@ -49,14 +45,15 @@ public abstract class AbstractNestedRuntimeBeanNode extends RuntimeBeanNode<Obje
         super(parentNode, propertyName, bean, typeMetadata);
     }
 
-    public void visitProperties(PropertyVisitor visitor, PropertySpecFactory specFactory, final Queue<RuntimeBeanNode<?>> queue, final RuntimeBeanNodeFactory nodeFactory) {
+    protected void visitProperties(PropertyVisitor visitor, final Queue<RuntimeBeanNode<?>> queue, final RuntimeBeanNodeFactory nodeFactory, TypeValidationContext validationContext) {
         TypeMetadata typeMetadata = getTypeMetadata();
+        typeMetadata.visitValidationFailures(getPropertyName(), validationContext);
         for (PropertyMetadata propertyMetadata : typeMetadata.getPropertiesMetadata()) {
             PropertyAnnotationHandler annotationHandler = typeMetadata.getAnnotationHandlerFor(propertyMetadata);
-            if (annotationHandler != null && annotationHandler.shouldVisit(visitor)) {
-                String propertyName = getQualifiedPropertyName(propertyMetadata.getFieldName());
-                PropertyValue propertyValue = new DefaultPropertyValue(propertyName, propertyMetadata, getBean());
-                annotationHandler.visitPropertyValue(propertyValue, visitor, specFactory, new BeanPropertyContext() {
+            if (annotationHandler.shouldVisit(visitor)) {
+                String propertyName = getQualifiedPropertyName(propertyMetadata.getPropertyName());
+                PropertyValue value = new BeanPropertyValue(getBean(), propertyMetadata.getGetterMethod());
+                annotationHandler.visitPropertyValue(propertyName, value, propertyMetadata, visitor, new BeanPropertyContext() {
                     @Override
                     public void addNested(String propertyName, Object bean) {
                         queue.add(nodeFactory.create(AbstractNestedRuntimeBeanNode.this, propertyName, bean));
@@ -66,17 +63,16 @@ public abstract class AbstractNestedRuntimeBeanNode extends RuntimeBeanNode<Obje
         }
     }
 
-    private static class DefaultPropertyValue implements PropertyValue {
-        private final String propertyName;
-        private final PropertyMetadata propertyMetadata;
+    private static class BeanPropertyValue implements PropertyValue {
+        private final Method method;
         private final Object bean;
         private final Supplier<Object> valueSupplier = Suppliers.memoize(new Supplier<Object>() {
             @Override
             @Nullable
             public Object get() {
                 return DeprecationLogger.whileDisabled(new Factory<Object>() {
+                    @Override
                     public Object create() {
-                        Method method = propertyMetadata.getGetterMethod();
                         try {
                             return method.invoke(bean);
                         } catch (InvocationTargetException e) {
@@ -89,87 +85,58 @@ public abstract class AbstractNestedRuntimeBeanNode extends RuntimeBeanNode<Obje
             }
         });
 
-        public DefaultPropertyValue(String propertyName, PropertyMetadata propertyMetadata, Object bean) {
-            this.propertyName = propertyName;
-            this.propertyMetadata = propertyMetadata;
+        public BeanPropertyValue(Object bean, Method method) {
             this.bean = bean;
-            propertyMetadata.getGetterMethod().setAccessible(true);
+            this.method = method;
+            method.setAccessible(true);
         }
 
         @Override
-        public String getPropertyName() {
-            return propertyName;
-        }
-
-        @Override
-        public boolean isAnnotationPresent(Class<? extends Annotation> annotationType) {
-            return propertyMetadata.isAnnotationPresent(annotationType);
-        }
-
-        @Nullable
-        @Override
-        public <A extends Annotation> A getAnnotation(Class<A> annotationType) {
-            return propertyMetadata.getAnnotation(annotationType);
-        }
-
-        @Override
-        public boolean isOptional() {
-            return isAnnotationPresent(Optional.class);
-        }
-
-        @Override
-        public void attachProducer(Task producer) {
+        public TaskDependencyContainer getTaskDependencies() {
             if (isProvider()) {
-                Object value = valueSupplier.get();
-                if (value instanceof ProducerAwareProperty) {
-                    ((ProducerAwareProperty) value).attachProducer(producer);
-                }
+                return (TaskDependencyContainer) valueSupplier.get();
             }
+            if (isBuildable()) {
+                return context -> {
+                    Object dependency = valueSupplier.get();
+                    if (dependency != null) {
+                        context.add(dependency);
+                    }
+                };
+            }
+            return TaskDependencyContainer.EMPTY;
         }
 
         @Override
         public void maybeFinalizeValue() {
-            if (isProvider()) {
+            if (isConfigurable()) {
                 Object value = valueSupplier.get();
-                if (value instanceof PropertyInternal) {
-                    ((PropertyInternal) value).finalizeValueOnReadAndWarnAboutChanges();
-                }
+                ((HasConfigurableValueInternal) value).implicitFinalizeValue();
             }
         }
 
         private boolean isProvider() {
-            return Provider.class.isAssignableFrom(propertyMetadata.getDeclaredType());
+            return Provider.class.isAssignableFrom(method.getReturnType());
         }
 
-        @Nullable
-        @Override
-        public Object getValue() {
-            Object value = valueSupplier.get();
-            // Replace absent Provider with null.
-            // This is required for allowing optional provider properties - all code which unpacks providers calls Provider.get() and would fail if an optional provider is passed.
-            // Returning null from a Callable is ignored, and PropertyValue is a callable.
-            if (value instanceof Provider && !((Provider<?>) value).isPresent()) {
-                return null;
-            }
-            return value;
+        private boolean isConfigurable() {
+            return HasConfigurableValue.class.isAssignableFrom(method.getReturnType());
+        }
+
+        private boolean isBuildable() {
+            return Buildable.class.isAssignableFrom(method.getReturnType());
         }
 
         @Nullable
         @Override
         public Object call() {
-            return getValue();
+            return valueSupplier.get();
         }
 
+        @Nullable
         @Override
-        public void validate(String propertyName, boolean optional, ValidationAction valueValidator, TaskValidationContext context) {
-            Object unpacked = DeferredUtil.unpack(getValue());
-            if (unpacked == null) {
-                if (!optional) {
-                    context.recordValidationMessage(String.format("No value has been specified for property '%s'.", propertyName));
-                }
-            } else {
-                valueValidator.validate(propertyName, unpacked, context);
-            }
+        public Object getUnprocessedValue() {
+            return valueSupplier.get();
         }
     }
 }

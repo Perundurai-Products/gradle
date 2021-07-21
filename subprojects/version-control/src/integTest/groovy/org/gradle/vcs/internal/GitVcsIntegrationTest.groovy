@@ -17,7 +17,9 @@
 package org.gradle.vcs.internal
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.integtests.fixtures.build.BuildTestFile
+import org.gradle.test.fixtures.plugin.PluginBuilder
 import org.gradle.test.fixtures.server.http.BlockingHttpServer
 import org.gradle.vcs.fixtures.GitFileRepository
 import org.junit.Rule
@@ -39,9 +41,9 @@ class GitVcsIntegrationTest extends AbstractIntegrationSpec implements SourceDep
             apply plugin: 'java'
             group = 'org.gradle'
             version = '2.0'
-            
+
             dependencies {
-                compile "org.test:dep:latest.integration"
+                implementation "org.test:dep:latest.integration"
             }
         """
         file("src/main/java/Main.java") << """
@@ -53,7 +55,7 @@ class GitVcsIntegrationTest extends AbstractIntegrationSpec implements SourceDep
         depProject = singleProjectBuild("dep") {
             buildFile << """
                 allprojects {
-                    apply plugin: 'java'
+                    apply plugin: 'java-library'
                     group = 'org.test'
                 }
             """
@@ -61,6 +63,7 @@ class GitVcsIntegrationTest extends AbstractIntegrationSpec implements SourceDep
         }
     }
 
+    @ToBeFixedForConfigurationCache
     def 'can define and use source repository'() {
         given:
         def commit = repo.commit('initial commit')
@@ -80,6 +83,7 @@ class GitVcsIntegrationTest extends AbstractIntegrationSpec implements SourceDep
         gitCheckout.file('.git').assertExists()
     }
 
+    @ToBeFixedForConfigurationCache
     def 'can define and use source repositories using VCS mapping'() {
         given:
         repo.commit('initial commit')
@@ -101,6 +105,7 @@ class GitVcsIntegrationTest extends AbstractIntegrationSpec implements SourceDep
         result.assertTaskExecuted(":compileJava")
     }
 
+    @ToBeFixedForConfigurationCache
     def 'can define and use source repositories with submodules'() {
         given:
         // Populate submodule origin
@@ -176,11 +181,12 @@ The following types/formats are supported:
     }
 
     @Issue('gradle/gradle-native#206')
+    @ToBeFixedForConfigurationCache
     def 'can define and use source repositories with initscript resolution present'() {
         given:
         def commit = repo.commit('initial commit')
         temporaryFolder.file('initialize.gradle') << """
-        initscript {            
+        initscript {
             dependencies {
                 classpath files('classpath.file')
             }
@@ -208,6 +214,7 @@ The following types/formats are supported:
     }
 
     @Issue('gradle/gradle-native#207')
+    @ToBeFixedForConfigurationCache
     def 'can use repositories even when clean is run'() {
         given:
         def commit = repo.commit('initial commit')
@@ -236,6 +243,7 @@ The following types/formats are supported:
         gitCheckout.file('.git').assertExists()
     }
 
+    @ToBeFixedForConfigurationCache
     def 'can handle conflicting versions'() {
         given:
         settingsFile << """
@@ -254,10 +262,10 @@ The following types/formats are supported:
             apply plugin: 'java'
             group = 'org.gradle'
             version = '2.0'
-            
+
             dependencies {
-                compile "org.test:dep:1.3.0"
-                compile "org.test:dep:1.4.0"
+                implementation "org.test:dep:1.3.0"
+                implementation "org.test:dep:1.4.0"
             }
         """
         def commit = repo.commit('initial commit')
@@ -277,6 +285,7 @@ The following types/formats are supported:
         gitCheckout2.file('.git').assertExists()
     }
 
+    @ToBeFixedForConfigurationCache
     def 'uses root project cache directory'() {
         given:
         settingsFile << """
@@ -332,6 +341,7 @@ The following types/formats are supported:
         deeperCheckout.file('.git').assertExists()
     }
 
+    @ToBeFixedForConfigurationCache
     def 'can resolve the same version for latest.integration within the same build session'() {
         given:
         BlockingHttpServer server = new BlockingHttpServer()
@@ -359,7 +369,7 @@ The following types/formats are supported:
             project(':bar') {
                 apply plugin: 'java'
                 dependencies {
-                    compile 'org.test:dep:latest.integration'
+                    implementation 'org.test:dep:latest.integration'
                 }
             }
 
@@ -368,7 +378,7 @@ The following types/formats are supported:
             }
 
             dependencies {
-                compile project(':bar')
+                implementation project(':bar')
             }
         """
         def commit = repo.commit('initial commit')
@@ -401,6 +411,7 @@ The following types/formats are supported:
         server.stop()
     }
 
+    @ToBeFixedForConfigurationCache
     def "external modifications to source dependency directories are reset"() {
         given:
         repo.file('foo').text = "bar"
@@ -434,6 +445,7 @@ The following types/formats are supported:
         gitCheckout.file('foo').text == "bar"
     }
 
+    @ToBeFixedForConfigurationCache
     def "external modifications to source dependency submodule directories are reset"() {
         given:
         // Populate submodule origin
@@ -474,6 +486,41 @@ The following types/formats are supported:
         then:
         gitCheckout.file('deeperDep/foo').text == "bar"
         gitCheckout.file('deeperDep/evenDeeperDep/foo').text == "baz"
+    }
+
+    @ToBeFixedForConfigurationCache
+    def "do not consider source dependencies with plugin injection undefined builds"() {
+        given:
+        depProject.settingsFile.delete()
+        depProject.buildFile.delete()
+        repo.commit('initial commit')
+
+        def pluginBuilder = new PluginBuilder(file("plugin"))
+        pluginBuilder.addSettingsPlugin """
+            settings.gradle.allprojects {
+                apply plugin: 'java-library'
+                group = 'org.test'
+                version = '1.0'
+            }
+        """, "org.gradle.test.MyPlugin", "MyPlugin"
+        pluginBuilder.prepareToExecute()
+
+        settingsFile << """
+            includeBuild("plugin")
+            sourceControl {
+                vcsMappings {
+                    withModule("org.test:dep") {
+                        from(GitVersionControlSpec) {
+                            url = "${repo.url}"
+                            plugins { id("org.gradle.test.MyPlugin") }
+                        }
+                    }
+                }
+            }
+        """
+
+        expect:
+        succeeds('assemble')
     }
 
     // TODO: Use HTTP hosting for git repo

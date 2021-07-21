@@ -17,61 +17,68 @@
 package org.gradle.api.internal.tasks;
 
 import org.gradle.api.file.ConfigurableFileCollection;
+import org.gradle.api.file.Directory;
 import org.gradle.api.file.FileCollection;
 import org.gradle.api.internal.file.CompositeFileCollection;
+import org.gradle.api.internal.file.FileCollectionFactory;
+import org.gradle.api.internal.file.FileCollectionInternal;
 import org.gradle.api.internal.file.FileResolver;
-import org.gradle.api.internal.file.collections.DefaultConfigurableFileCollection;
-import org.gradle.api.internal.file.collections.FileCollectionResolveContext;
+import org.gradle.api.provider.Provider;
 import org.gradle.api.tasks.SourceSetOutput;
-import org.gradle.util.DeprecationLogger;
+import org.gradle.api.tasks.TaskDependency;
+import org.gradle.api.tasks.TaskProvider;
+import org.gradle.internal.logging.text.TreeFormatter;
 
 import javax.annotation.Nullable;
 import java.io.File;
 import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.Callable;
+import java.util.function.Consumer;
 
 public class DefaultSourceSetOutput extends CompositeFileCollection implements SourceSetOutput {
-    private final DefaultConfigurableFileCollection outputDirectories;
+    private final ConfigurableFileCollection outputDirectories;
     private Object resourcesDir;
 
-    private final DefaultConfigurableFileCollection classesDirs;
-    private final DefaultConfigurableFileCollection dirs;
-    private final DefaultConfigurableFileCollection generatedSourcesDirs;
+    private final ConfigurableFileCollection classesDirs;
+    private final ConfigurableFileCollection dirs;
+    private final ConfigurableFileCollection generatedSourcesDirs;
     private final FileResolver fileResolver;
+    private final DefaultTaskDependency compileTasks;
 
-    public DefaultSourceSetOutput(String sourceSetDisplayName, final FileResolver fileResolver, TaskResolver taskResolver) {
+    public DefaultSourceSetOutput(String sourceSetDisplayName, FileResolver fileResolver, FileCollectionFactory fileCollectionFactory) {
         this.fileResolver = fileResolver;
-        String displayName = sourceSetDisplayName + " classes";
 
-        this.classesDirs = new DefaultConfigurableFileCollection("classesDirs", fileResolver, taskResolver);
+        this.classesDirs = fileCollectionFactory.configurableFiles(sourceSetDisplayName + " classesDirs");
         // TODO: This should be more specific to just the tasks that create the class files?
         classesDirs.builtBy(this);
 
-        this.outputDirectories = new DefaultConfigurableFileCollection(displayName, fileResolver, taskResolver);
-        outputDirectories.from(new Callable() {
-            public Object call() {
-                return classesDirs;
-            }
-        }, new Callable() {
-            public Object call() {
-                return getResourcesDir();
-            }
-        });
+        this.outputDirectories = fileCollectionFactory.configurableFiles(sourceSetDisplayName + " classes");
+        outputDirectories.from(classesDirs, (Callable) this::getResourcesDir);
 
-        this.dirs = new DefaultConfigurableFileCollection("dirs", fileResolver, taskResolver);
+        this.dirs = fileCollectionFactory.configurableFiles(sourceSetDisplayName + " dirs");
 
-        this.generatedSourcesDirs = new DefaultConfigurableFileCollection("generatedSourcesDirs", fileResolver, taskResolver);
+        this.generatedSourcesDirs = fileCollectionFactory.configurableFiles(sourceSetDisplayName + " generatedSourcesDirs");
+        this.compileTasks = new DefaultTaskDependency();
     }
 
     @Override
-    public void visitContents(FileCollectionResolveContext context) {
-        context.add(outputDirectories);
+    protected void visitChildren(Consumer<FileCollectionInternal> visitor) {
+        visitor.accept((FileCollectionInternal) outputDirectories);
     }
 
     @Override
     public String getDisplayName() {
-        return outputDirectories.getDisplayName();
+        return outputDirectories.toString();
+    }
+
+    @Override
+    protected void appendContents(TreeFormatter formatter) {
+        formatter.node("source set: " + outputDirectories.toString());
+        formatter.node("output directories");
+        formatter.startChildren();
+        ((FileCollectionInternal) outputDirectories).describeContents(formatter);
+        formatter.endChildren();
     }
 
     @Override
@@ -79,19 +86,14 @@ public class DefaultSourceSetOutput extends CompositeFileCollection implements S
         return classesDirs;
     }
 
+
     /**
      * Adds a new classes directory that compiled classes are assembled into.
      *
-     * @param classesDir the classes dir. Should not be null.
+     * @param directory the classes dir provider. Should not be null.
      */
-    public void addClassesDir(Callable<File> classesDir) {
-        classesDirs.from(classesDir);
-    }
-
-    @Override
-    public boolean isLegacyLayout() {
-        DeprecationLogger.nagUserOfDiscontinuedProperty("legacyLayout", "The method always returns false.");
-        return false;
+    public void addClassesDir(Provider<Directory> directory) {
+        classesDirs.from(directory);
     }
 
     @Override
@@ -110,7 +112,7 @@ public class DefaultSourceSetOutput extends CompositeFileCollection implements S
 
     @Override
     public void setResourcesDir(Object resourcesDir) {
-       this.resourcesDir = resourcesDir;
+        this.resourcesDir = resourcesDir;
     }
 
     public void builtBy(Object... taskPaths) {
@@ -119,7 +121,7 @@ public class DefaultSourceSetOutput extends CompositeFileCollection implements S
 
     @Override
     public void dir(Object dir) {
-        this.dir(Collections.<String, Object>emptyMap(), dir);
+        this.dir(Collections.emptyMap(), dir);
     }
 
     @Override
@@ -143,4 +145,13 @@ public class DefaultSourceSetOutput extends CompositeFileCollection implements S
     public ConfigurableFileCollection getGeneratedSourcesDirs() {
         return generatedSourcesDirs;
     }
+
+    public void registerClassesContributor(TaskProvider<?> task) {
+        compileTasks.add(task);
+    }
+
+    public TaskDependency getClassesContributors() {
+        return compileTasks;
+    }
+
 }

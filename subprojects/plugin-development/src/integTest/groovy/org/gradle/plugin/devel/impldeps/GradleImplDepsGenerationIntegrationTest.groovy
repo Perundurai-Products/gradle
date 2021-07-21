@@ -16,11 +16,14 @@
 
 package org.gradle.plugin.devel.impldeps
 
+import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
+import spock.lang.IgnoreIf
+
+@IgnoreIf({ GradleContextualExecuter.embedded }) // Gradle API and TestKit JARs are not generated when running embedded
 class GradleImplDepsGenerationIntegrationTest extends BaseGradleImplDepsIntegrationTest {
 
     def "Gradle API is not generated if not declared by build"() {
         given:
-        requireOwnGradleUserHomeDir()
         buildFile << applyJavaPlugin()
 
         when:
@@ -32,7 +35,6 @@ class GradleImplDepsGenerationIntegrationTest extends BaseGradleImplDepsIntegrat
 
     def "buildSrc project implicitly forces generation of Gradle API JAR"() {
         given:
-        requireOwnGradleUserHomeDir()
         buildFile << applyJavaPlugin()
         temporaryFolder.createFile('buildSrc/src/main/groovy/MyPlugin.groovy') << customGroovyPlugin()
 
@@ -57,10 +59,12 @@ class GradleImplDepsGenerationIntegrationTest extends BaseGradleImplDepsIntegrat
             task resolveDependencyArtifacts {
                 doLast {
                     def resolvedArtifacts = configurations.deps.incoming.files.files
-                    assert resolvedArtifacts.size() == 3
                     assert resolvedArtifacts.find { (it.name =~ 'gradle-api-(.*)\\\\.jar').matches() }
                     assert resolvedArtifacts.find { (it.name =~ 'gradle-installation-beacon-(.*)\\\\.jar').matches() }
-                    assert resolvedArtifacts.find { (it.name =~ 'groovy-all-(.*)\\\\.jar').matches() }
+                    assert resolvedArtifacts.find { (it.name =~ 'groovy-(.*)\\\\.jar').matches() }
+                    assert resolvedArtifacts.findAll { (it.name =~ 'kotlin-stdlib-(.*)\\\\.jar').matches() }.size() == 4
+                    assert resolvedArtifacts.find { (it.name =~ 'kotlin-reflect-(.*)\\\\.jar').matches() }
+                    assert resolvedArtifacts.size() == 21
                 }
             }
         """

@@ -17,27 +17,36 @@
 package org.gradle.api.internal.changedetection.state
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import spock.lang.Issue
+import spock.lang.Unroll
 
+import java.nio.file.Files
+
+@Unroll
 class UpToDateIntegTest extends AbstractIntegrationSpec {
-
 
     def "empty output directories created automatically are part of up-to-date checking"() {
         given:
-        buildFile << '''
+        buildFile '''
 apply plugin: 'base'
 
 task checkCreated {
     dependsOn "createEmpty"
+    def createdDir = file('build/createdDirectory')
     doLast {
-        assert file('build/createdDirectory').exists()
+        assert createdDir.exists()
         println "Directory 'build/createdDirectory' exists"
     }
 }
 
 task("createEmpty", type: CreateEmptyDirectory)
 
-public class CreateEmptyDirectory extends DefaultTask {
+public abstract class CreateEmptyDirectory extends DefaultTask {
+
+    @Inject
+    abstract ProjectLayout getLayout()
+
     @TaskAction
     public void createDir() {
         println "did nothing: output dir is created automatically"
@@ -45,7 +54,7 @@ public class CreateEmptyDirectory extends DefaultTask {
 
     @OutputDirectory
     public File getDirectory() {
-        return new File(getProject().getBuildDir(), "createdDirectory")
+        return layout.buildDirectory.file('createdDirectory').get().asFile
     }
 }
 '''
@@ -60,6 +69,39 @@ public class CreateEmptyDirectory extends DefaultTask {
 
         succeeds("checkCreated")
         result.assertTaskSkipped(":createEmpty")
+    }
+
+    @Issue("https://github.com/gradle/gradle/issues/13554")
+    def "removing an empty output directory is detected even when it existed before the first task execution"() {
+        buildFile """
+            task createEmptyDir {
+                outputs.dir("empty")
+                doLast {
+                    // do nothing, since Gradle does create the empty directory for us.
+                }
+            }
+        """
+        def emptyDir = file('empty').createDir()
+        def emptyDirTask = ':createEmptyDir'
+
+        when:
+        run emptyDirTask
+        then:
+        executedAndNotSkipped emptyDirTask
+        emptyDir.directory
+
+        when:
+        run emptyDirTask
+        then:
+        skipped emptyDirTask
+        emptyDir.directory
+
+        when:
+        emptyDir.deleteDir()
+        run emptyDirTask
+        then:
+        executedAndNotSkipped emptyDirTask
+        emptyDir.directory
     }
 
     @Issue("https://issues.gradle.org/browse/GRADLE-834")
@@ -84,21 +126,21 @@ public class CreateEmptyDirectory extends DefaultTask {
         buildFile << '''
             task customTask(type: CustomTask) {
                 outputFile = file("$buildDir/outputFile")
-                content = project.findProperty("content")
+                content = providers.gradleProperty('content').forUseAtConfigurationTime().getOrElse(null)
             }
 
             class CustomTask extends DefaultTask {
                 @OutputFile
                 File outputFile
-                
+
                 @Input
                 String content
-            
+
                 @TaskAction
                 public void doStuff() {
                     outputFile.text = content
                 }
-            }            
+            }
         '''
 
         def customTask = ':customTask'
@@ -122,5 +164,103 @@ public class CreateEmptyDirectory extends DefaultTask {
         then:
         skipped customTask
         result.output =~ /Skipping task '${customTask}' as it is up-to-date\./
+    }
+
+    def "registering an optional #type output property with a null value keeps task up-to-date"() {
+        buildFile << """
+            task customTask(type: CustomTask) {
+                outputFile = file("\$buildDir/outputFile")
+                if (project.hasProperty("addNullOutput")) {
+                    outputs.$type(null).optional()
+                }
+            }
+
+            class CustomTask extends DefaultTask {
+                @OutputFile
+                File outputFile
+
+                @TaskAction
+                public void doStuff() {
+                    outputFile.text = "output"
+                }
+            }
+        """
+
+        run "customTask"
+        when:
+        run "customTask", "-PaddNullOutput"
+        then:
+        skipped ":customTask"
+
+        where:
+        type << ["dir", "file"]
+    }
+
+    @ToBeFixedForConfigurationCache(because = "The cache fix plugin hackery doesn't work with configuration caching")
+    @Issue("https://github.com/gradle/gradle/issues/15397")
+    def "can add a file input in a task execution listener"() {
+        buildFile << """
+            abstract class TaskMissingPathSensitivity extends DefaultTask {
+                @InputFiles
+                FileCollection inputFiles
+
+                @OutputFile
+                abstract RegularFileProperty getOutputFile()
+
+                @TaskAction
+                void doWork() {
+                    outputFile.get().asFile.text = "output"
+                }
+            }
+
+            tasks.register("customTask", TaskMissingPathSensitivity) {
+                inputFiles = files("input1", "input2")
+                outputFile = layout.buildDirectory.file("output.txt")
+            }
+
+            // This is what the Android cache fix plugin is doing:
+            tasks.withType(TaskMissingPathSensitivity).configureEach { TaskMissingPathSensitivity task ->
+                ConfigurableFileCollection newInputs = files()
+                FileCollection originalPropertyValue
+                task.inputs.files(newInputs)
+                    .withPathSensitivity(PathSensitivity.RELATIVE)
+                    .withPropertyName("inputFiles.workaround")
+                    .optional()
+                // Create a synthetic input with the original property value and RELATIVE path sensitivity
+                project.gradle.taskGraph.beforeTask {
+                    if (it == task) {
+                        originalPropertyValue = task.inputFiles
+                        task.inputFiles = project.files()
+                        newInputs.from(originalPropertyValue)
+                    }
+                }
+                // Set the task property back to its original value
+                task.doFirst {
+                    task.inputFiles = originalPropertyValue
+                }
+            }
+        """
+        def inputDir1 = file("input1").createDir()
+        def inputDir2 = file("input2").createDir()
+        def inputFileName = "inputFile.txt"
+        def inputFile = inputDir1.file(inputFileName)
+        inputFile.text = "input"
+
+        when:
+        run "customTask"
+        then:
+        executedAndNotSkipped(":customTask")
+
+        when:
+        Files.move(inputFile.toPath(), inputDir2.file(inputFileName).toPath())
+        run "customTask"
+        then:
+        skipped(":customTask")
+
+        when:
+        inputDir2.file(inputFileName).text = "changed"
+        run "customTask"
+        then:
+        executedAndNotSkipped(":customTask")
     }
 }

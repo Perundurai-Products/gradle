@@ -16,6 +16,7 @@
 
 package org.gradle.api.publish.ivy
 
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.test.fixtures.encoding.Identifier
 import spock.lang.Unroll
 
@@ -24,6 +25,7 @@ import javax.xml.namespace.QName
 class IvyPublishValidationIntegTest extends AbstractIvyPublishIntegTest {
 
     @Unroll
+    @ToBeFixedForConfigurationCache
     def "can publish with metadata containing #identifier characters"() {
         given:
         file("content-file") << "some content"
@@ -87,6 +89,7 @@ class IvyPublishValidationIntegTest extends AbstractIvyPublishIntegTest {
     }
 
     @Unroll
+    @ToBeFixedForConfigurationCache
     def "can publish artifacts with attributes containing #identifier characters"() {
         given:
         file("content-file") << "some content"
@@ -143,6 +146,7 @@ class IvyPublishValidationIntegTest extends AbstractIvyPublishIntegTest {
         identifier << Identifier.all
     }
 
+    @ToBeFixedForConfigurationCache
     def "fails with reasonable error message for invalid identifier value"() {
         buildFile << """
             apply plugin: 'ivy-publish'
@@ -152,7 +156,7 @@ class IvyPublishValidationIntegTest extends AbstractIvyPublishIntegTest {
 
             publishing {
                 repositories {
-                    ivy { url "${mavenRepo.uri}" }
+                    ivy { url "${ivyRepo.uri}" }
                 }
                 publications {
                     ivy(IvyPublication)
@@ -169,6 +173,7 @@ class IvyPublishValidationIntegTest extends AbstractIvyPublishIntegTest {
     }
 
     @Unroll
+    @ToBeFixedForConfigurationCache
     def "fails with reasonable error message for invalid metadata value" () {
         when:
         buildFile << """
@@ -179,7 +184,7 @@ class IvyPublishValidationIntegTest extends AbstractIvyPublishIntegTest {
 
             publishing {
                 repositories {
-                    ivy { url "${mavenRepo.uri}" }
+                    ivy { url "${ivyRepo.uri}" }
                 }
                 publications {
                     ivy(IvyPublication) {
@@ -205,4 +210,39 @@ class IvyPublishValidationIntegTest extends AbstractIvyPublishIntegTest {
         "status 'a\tb'" | "Invalid publication 'ivy': status cannot contain ISO control character '\\u0009'"
         "status 'a/b'"  | "Invalid publication 'ivy': status cannot contain '/'"
     }
+
+    @Unroll
+    def "fails with reasonable error message for invalid #invalidComponent name"() {
+        settingsFile << "rootProject.name = 'invalid'"
+        buildFile << """
+            apply plugin: 'ivy-publish'
+
+            group = 'org'
+            version = '2'
+
+            publishing {
+                repositories {
+                    ivy {
+                        name '${repoName}'
+                        url "${ivyRepo.uri}"
+                    }
+                }
+                publications {
+                    "${publicationName}"(IvyPublication)
+                }
+            }
+        """
+        when:
+        fails 'publish'
+
+        then:
+        failure.assertHasDescription "A problem occurred configuring root project 'invalid'"
+        failure.assertHasCause "${invalidComponent} name 'bad:name' is not valid for publication. Must match regex [A-Za-z0-9_\\-.]+"
+
+        where:
+        invalidComponent | repoName    | publicationName
+        "Repository"     | "bad:name"  | "mavenPub"
+        "Publication"    | "mavenRepo" | "bad:name"
+    }
+
 }

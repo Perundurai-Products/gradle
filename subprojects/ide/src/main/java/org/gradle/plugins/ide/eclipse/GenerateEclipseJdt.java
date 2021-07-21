@@ -21,6 +21,7 @@ import org.gradle.plugins.ide.api.PropertiesFileContentMerger;
 import org.gradle.plugins.ide.api.PropertiesGeneratorTask;
 import org.gradle.plugins.ide.eclipse.model.EclipseJdt;
 import org.gradle.plugins.ide.eclipse.model.Jdt;
+import org.gradle.work.DisableCachingByDefault;
 
 import javax.inject.Inject;
 
@@ -29,6 +30,7 @@ import javax.inject.Inject;
  * <p>
  * At this moment nearly all configuration is done via {@link EclipseJdt}.
  */
+@DisableCachingByDefault(because = "Not made cacheable, yet")
 public class GenerateEclipseJdt extends PropertiesGeneratorTask<Jdt> {
 
     private EclipseJdt jdt;
@@ -42,10 +44,12 @@ public class GenerateEclipseJdt extends PropertiesGeneratorTask<Jdt> {
         this.jdt = jdt;
     }
 
+    @Override
     protected Jdt create() {
         return new Jdt(getTransformer());
     }
 
+    @Override
     @SuppressWarnings("unchecked")
     protected void configure(Jdt jdtContent) {
         EclipseJdt jdtModel = getJdt();

@@ -18,60 +18,44 @@ package org.gradle.internal.jvm.inspection;
 
 import org.gradle.api.GradleException;
 import org.gradle.api.JavaVersion;
-import org.gradle.api.UncheckedIOException;
-import org.gradle.internal.io.NullOutputStream;
-import org.gradle.internal.io.StreamByteBuffer;
 import org.gradle.internal.jvm.JavaInfo;
-import org.gradle.process.internal.ExecHandleBuilder;
-import org.gradle.process.internal.ExecHandleFactory;
+import org.gradle.process.internal.ExecException;
 
-import java.io.BufferedReader;
 import java.io.File;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.nio.file.NoSuchFileException;
 
 public class DefaultJvmVersionDetector implements JvmVersionDetector {
-    private final ExecHandleFactory execHandleFactory;
 
-    public DefaultJvmVersionDetector(ExecHandleFactory execHandleFactory) {
-        this.execHandleFactory = execHandleFactory;
+    private final JvmMetadataDetector detector;
+
+    public DefaultJvmVersionDetector(JvmMetadataDetector detector) {
+        this.detector = detector;
     }
 
     @Override
     public JavaVersion getJavaVersion(JavaInfo jvm) {
-        return getJavaVersion(jvm.getJavaExecutable().getPath());
+        return getVersionFromJavaHome(jvm.getJavaHome());
     }
 
     @Override
     public JavaVersion getJavaVersion(String javaCommand) {
-        StreamByteBuffer buffer = new StreamByteBuffer();
-
-        ExecHandleBuilder builder = execHandleFactory.newExec();
-        builder.setWorkingDir(new File(".").getAbsolutePath());
-        builder.setCommandLine(javaCommand, "-version");
-        builder.setStandardOutput(NullOutputStream.INSTANCE);
-        builder.setErrorOutput(buffer.getOutputStream());
-        builder.build().start().waitForFinish().assertNormalExitValue();
-
-        return parseJavaVersionCommandOutput(javaCommand, new BufferedReader(new InputStreamReader(buffer.getInputStream())));
+        File executable = new File(javaCommand);
+        File parentFolder = executable.getParentFile();
+        if(parentFolder == null || !parentFolder.exists()) {
+            Exception cause = new NoSuchFileException(javaCommand);
+            throw new ExecException("A problem occurred starting process 'command '" + javaCommand + "''", cause);
+        }
+        return getVersionFromJavaHome(parentFolder.getParentFile());
     }
 
-    private JavaVersion parseJavaVersionCommandOutput(String javaExecutable, BufferedReader reader) {
-        try {
-            String versionStr = reader.readLine();
-            while (versionStr != null) {
-                Matcher matcher = Pattern.compile("(?:java|openjdk) version \"(.+?)\"( \\d{4}-\\d{2}-\\d{2}( LTS)?)?").matcher(versionStr);
-                if (matcher.matches()) {
-                    return JavaVersion.toVersion(matcher.group(1));
-                }
-                versionStr = reader.readLine();
-            }
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+    private JavaVersion getVersionFromJavaHome(File javaHome) {
+        return validate(detector.getMetadata(javaHome)).getLanguageVersion();
+    }
 
-        throw new GradleException(String.format("Could not determine Java version using executable %s.", javaExecutable));
+    private JvmInstallationMetadata validate(JvmInstallationMetadata metadata) {
+        if(metadata.isValidInstallation()) {
+            return metadata;
+        }
+        throw new GradleException("Unable to determine version for JDK located at " + metadata.getJavaHome() + ". Reason: " + metadata.getErrorMessage(), metadata.getErrorCause());
     }
 }

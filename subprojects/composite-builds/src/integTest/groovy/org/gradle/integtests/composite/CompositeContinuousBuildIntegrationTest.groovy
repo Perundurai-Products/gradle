@@ -16,9 +16,9 @@
 
 package org.gradle.integtests.composite
 
-import org.gradle.launcher.continuous.Java7RequiringContinuousIntegrationTest
+import org.gradle.integtests.fixtures.AbstractContinuousIntegrationTest
 
-class CompositeContinuousBuildIntegrationTest extends Java7RequiringContinuousIntegrationTest {
+class CompositeContinuousBuildIntegrationTest extends AbstractContinuousIntegrationTest {
     def setup() {
         buildTestFixture.withBuildInSubDir()
     }
@@ -89,15 +89,17 @@ class CompositeContinuousBuildIntegrationTest extends Java7RequiringContinuousIn
             apply plugin: 'java'
             apply plugin: 'application'
             group = 'com.example'
-            mainClassName = 'com.example.Main'
+            application {
+                mainClass = 'com.example.Main'
+            }
             dependencies {
-                compile 'org.test:library:0.1'
+                implementation 'org.test:library:0.1'
             }
         """
         def mainSource = file("src/main/java/com/example/Main.java")
         mainSource << """
             package com.example;
-            
+
             public class Main {
                 public static void main(String... args) {
                     org.test.Library.print("World");
@@ -207,9 +209,11 @@ class CompositeContinuousBuildIntegrationTest extends Java7RequiringContinuousIn
                 apply plugin: 'java'
                 apply plugin: 'application'
                 group = 'com.example'
-                mainClassName = 'com.example.' + name + '.Main'
+                application {
+                   mainClass = 'com.example.' + name + '.Main'
+                }
                 dependencies {
-                    compile 'org.test:library:0.1'
+                    implementation 'org.test:library:0.1'
                 }
             }
             project(":sub2") {
@@ -219,7 +223,7 @@ class CompositeContinuousBuildIntegrationTest extends Java7RequiringContinuousIn
         def mainSourceSub1 = file("sub1/src/main/java/com/example/sub1/Main.java")
         mainSourceSub1 << """
             package com.example.sub1;
-            
+
             public class Main {
                 public static void main(String... args) {
                     org.test.Library.print("First");
@@ -229,7 +233,7 @@ class CompositeContinuousBuildIntegrationTest extends Java7RequiringContinuousIn
         def mainSourceSub2 = file("sub2/src/main/java/com/example/sub2/Main.java")
         mainSourceSub2 << """
             package com.example.sub2;
-            
+
             public class Main {
                 public static void main(String... args) {
                     org.test.Library.print("Second");

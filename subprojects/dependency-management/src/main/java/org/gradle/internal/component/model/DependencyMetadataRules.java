@@ -32,7 +32,7 @@ import org.gradle.internal.component.external.model.ModuleDependencyMetadata;
 import org.gradle.internal.component.external.model.VariantMetadataRules;
 import org.gradle.internal.reflect.Instantiator;
 import org.gradle.internal.typeconversion.NotationParser;
-import org.gradle.util.CollectionUtils;
+import org.gradle.util.internal.CollectionUtils;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -44,18 +44,8 @@ import java.util.List;
  * in the {@link #execute(VariantResolveMetadata, List)} method when the dependencies of a variant are needed during dependency resolution.
  */
 public class DependencyMetadataRules {
-    private static final Spec<ModuleDependencyMetadata> DEPENDENCY_FILTER = new Spec<ModuleDependencyMetadata>() {
-        @Override
-        public boolean isSatisfiedBy(ModuleDependencyMetadata dep) {
-            return !dep.isConstraint();
-        }
-    };
-    private static final Spec<ModuleDependencyMetadata> DEPENDENCY_CONSTRAINT_FILTER = new Spec<ModuleDependencyMetadata>() {
-        @Override
-        public boolean isSatisfiedBy(ModuleDependencyMetadata dep) {
-            return dep.isConstraint();
-        }
-    };
+    private static final Spec<ModuleDependencyMetadata> DEPENDENCY_FILTER = dep -> !dep.isConstraint();
+    private static final Spec<ModuleDependencyMetadata> DEPENDENCY_CONSTRAINT_FILTER = DependencyMetadata::isConstraint;
 
     private final Instantiator instantiator;
     private final NotationParser<Object, DirectDependencyMetadata> dependencyNotationParser;
@@ -90,7 +80,7 @@ public class DependencyMetadataRules {
     }
 
     private <T extends ModuleDependencyMetadata> List<T> executeDependencyRules(VariantResolveMetadata variant, List<T> dependencies) {
-        List<T> calculatedDependencies = new ArrayList<T>(CollectionUtils.filter(dependencies, DEPENDENCY_FILTER));
+        List<T> calculatedDependencies = new ArrayList<>(CollectionUtils.filter(dependencies, DEPENDENCY_FILTER));
         for (VariantMetadataRules.VariantAction<? super DirectDependenciesMetadata> dependenciesMetadataAction : dependencyActions) {
             dependenciesMetadataAction.maybeExecute(variant, instantiator.newInstance(
                 DirectDependenciesMetadataAdapter.class, attributesFactory, calculatedDependencies, instantiator, dependencyNotationParser));
@@ -99,7 +89,7 @@ public class DependencyMetadataRules {
     }
 
     private <T extends ModuleDependencyMetadata> List<T> executeDependencyConstraintRules(VariantResolveMetadata variant, List<T> dependencies) {
-        List<T> calculatedDependencies = new ArrayList<T>(CollectionUtils.filter(dependencies, DEPENDENCY_CONSTRAINT_FILTER));
+        List<T> calculatedDependencies = new ArrayList<>(CollectionUtils.filter(dependencies, DEPENDENCY_CONSTRAINT_FILTER));
         for (VariantMetadataRules.VariantAction<? super DependencyConstraintsMetadata> dependencyConstraintsMetadataAction : dependencyConstraintActions) {
             dependencyConstraintsMetadataAction.maybeExecute(variant, instantiator.newInstance(
                 DependencyConstraintsMetadataAdapter.class, attributesFactory, calculatedDependencies, instantiator, dependencyConstraintNotationParser));

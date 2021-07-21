@@ -17,7 +17,7 @@
 package org.gradle.integtests.resolve.locking
 
 import org.gradle.integtests.fixtures.AbstractHttpDependencyResolutionTest
-import org.gradle.util.ToBeImplemented
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import spock.lang.Unroll
 
 class LockingInteractionsIntegrationTest extends AbstractHttpDependencyResolutionTest {
@@ -28,6 +28,7 @@ class LockingInteractionsIntegrationTest extends AbstractHttpDependencyResolutio
         settingsFile << "rootProject.name = 'locking-interactions'"
     }
 
+    @ToBeFixedForConfigurationCache
     def 'locking constraints do not bring back excluded modules'() {
         def foo = mavenRepo.module('org', 'foo', '1.0').publish()
         mavenRepo.module('org', 'bar', '1.0').dependsOn(foo).publish()
@@ -54,7 +55,7 @@ dependencies {
 }
 """
 
-        lockfileFixture.createLockfile('lockedConf', ['org:bar:1.0'])
+        lockfileFixture.createLockfile('lockedConf', ['org:bar:1.0'], false)
 
         when:
         succeeds 'dependencies'
@@ -65,6 +66,7 @@ dependencies {
 
     }
 
+    @ToBeFixedForConfigurationCache
     def 'does not lock dependencies missing a version'() {
         def flatRepo = testDirectory.file('repo')
         flatRepo.createFile('my-dep-1.0.jar')
@@ -96,6 +98,7 @@ dependencies {
     }
 
     @Unroll
+    @ToBeFixedForConfigurationCache
     def "can lock when using latest.#level"() {
         mavenRepo.module('org', 'bar', '1.0').publish()
         mavenRepo.module('org', 'bar', '1.0-SNAPSHOT').withNonUniqueSnapshots().publish()
@@ -125,7 +128,7 @@ dependencies {
         if (level == 'integration') {
             version += '-SNAPSHOT'
         }
-        lockfileFixture.createLockfile('lockedConf', ["org:bar:$version".toString()])
+        lockfileFixture.createLockfile('lockedConf', ["org:bar:$version".toString()], false)
 
         when:
         succeeds 'dependencies'
@@ -140,6 +143,7 @@ dependencies {
     }
 
     @Unroll
+    @ToBeFixedForConfigurationCache
     def "can write lock when using #version"() {
         mavenRepo.module('org', 'bar', '1.0').publish()
         mavenRepo.module('org', 'bar', '1.0-SNAPSHOT').publish()
@@ -189,6 +193,7 @@ dependencies {
 
     }
 
+    @ToBeFixedForConfigurationCache
     def 'kind of locks snapshots but warns about it'() {
         mavenRepo.module('org', 'bar', '1.0-SNAPSHOT').publish()
         mavenRepo.module('org', 'bar', '1.0-SNAPSHOT').publish()
@@ -228,6 +233,7 @@ dependencies {
     }
 
     @Unroll
+    @ToBeFixedForConfigurationCache
     def "can update a single lock entry when using #version"() {
         ['bar', 'baz', 'foo'].each { artifactId ->
             mavenRepo.module('org', artifactId, '1.0').publish()
@@ -314,13 +320,191 @@ task copyFiles(type: Copy) {
 
     }
 
-    @ToBeImplemented
+    def "fails when a force overwrites a locked version"() {
+        given:
+        mavenRepo.module('org', 'test', '1.0').publish()
+        mavenRepo.module('org', 'test', '1.1').publish()
+
+        lockfileFixture.createLockfile('lockedConf', ['org:test:1.1'], false)
+
+        buildFile << """
+dependencyLocking {
+    lockAllConfigurations()
+}
+
+repositories {
+    maven {
+        name 'repo'
+        url '${mavenRepo.uri}'
+    }
+}
+configurations {
+    lockedConf {
+        resolutionStrategy {
+            force 'org:test:1.0'
+        }
+    }
+}
+
+dependencies {
+    lockedConf 'org:test:[1.0,2.0)'
+}
+
+task resolve {
+    doLast {
+        println configurations.lockedConf.files
+    }
+}
+"""
+
+        when:
+        fails 'resolve'
+
+        then:
+        failureHasCause("Did not resolve 'org:test:1.1' which has been forced / substituted to a different version: '1.0'")
+    }
+
+    def "fails when a substitute overwrites a locked version"() {
+        given:
+        mavenRepo.module('org', 'test', '1.0').publish()
+        mavenRepo.module('org', 'test', '1.1').publish()
+
+        lockfileFixture.createLockfile('lockedConf', ['org:test:1.1'], false)
+
+        buildFile << """
+dependencyLocking {
+    lockAllConfigurations()
+}
+
+repositories {
+    maven {
+        name 'repo'
+        url '${mavenRepo.uri}'
+    }
+}
+configurations {
+    lockedConf {
+        resolutionStrategy.dependencySubstitution {
+            substitute module('org:test') using module('org:test:1.0')
+        }
+    }
+}
+
+dependencies {
+    lockedConf 'org:test:[1.0,2.0)'
+}
+
+task resolve {
+    doLast {
+        println configurations.lockedConf.files
+    }
+}
+"""
+
+        when:
+        fails 'resolve'
+
+        then:
+        failureHasCause("Did not resolve 'org:test:1.1' which has been forced / substituted to a different version: '1.0'")
+    }
+
+    def "fails when a useTarget overwrites a locked version"() {
+        given:
+        mavenRepo.module('org', 'test', '1.0').publish()
+        mavenRepo.module('org', 'test', '1.1').publish()
+
+        lockfileFixture.createLockfile('lockedConf', ['org:test:1.1'], false)
+
+        buildFile << """
+dependencyLocking {
+    lockAllConfigurations()
+}
+
+repositories {
+    maven {
+        name 'repo'
+        url '${mavenRepo.uri}'
+    }
+}
+configurations {
+    lockedConf {
+        resolutionStrategy.eachDependency { details ->
+            if (details.requested.group == 'org' && details.requested.name == 'test') {
+                details.useVersion '1.0'
+            }
+        }
+    }
+}
+
+dependencies {
+    lockedConf 'org:test:[1.0,2.0)'
+}
+
+task resolve {
+    doLast {
+        println configurations.lockedConf.files
+    }
+}
+"""
+
+        when:
+        fails 'resolve'
+
+        then:
+        failureHasCause("Did not resolve 'org:test:1.1' which has been forced / substituted to a different version: '1.0'")
+    }
+
+    def "ignores the lock entry that matches a composite"() {
+        given:
+        lockfileFixture.createLockfile('lockedConf', ['org:composite:1.1'], false)
+
+        file("composite/settings.gradle") << """
+rootProject.name = 'composite'
+"""
+        file("composite/build.gradle") << """
+apply plugin: 'java'
+group = 'org'
+version = '1.1'
+"""
+
+        buildFile << """
+dependencyLocking {
+    lockAllConfigurations()
+}
+
+repositories {
+    maven {
+        name 'repo'
+        url '${mavenRepo.uri}'
+    }
+}
+
+configurations {
+    lockedConf
+}
+
+dependencies {
+    lockedConf 'org:composite:1.1'
+}
+
+task resolve {
+    doLast {
+        println configurations.lockedConf.files
+    }
+}
+"""
+        expect:
+        succeeds 'resolve', '--include-build', 'composite'
+    }
+
+    @ToBeFixedForConfigurationCache
     def "avoids HTTP requests for dynamic version when lock exists"() {
-        def module1 = mavenHttpRepo.module('org', 'foo', '1.0').publish()
+        def foo10 = mavenHttpRepo.module('org', 'foo', '1.0').publish()
         mavenHttpRepo.module('org', 'foo', '1.1').publish()
         mavenHttpRepo.module('org', 'foo', '2.0').publish()
+        def bar10 = mavenHttpRepo.module('org', 'bar', '1.0').dependsOn('org', 'foo', '[1.0,2.0)').publish()
 
-        lockfileFixture.createLockfile('lockedConf', ['org:foo:1.0'])
+        lockfileFixture.createLockfile('lockedConf', ['org:bar:1.0', 'org:foo:1.0'], false)
 
         buildFile << """
 dependencyLocking {
@@ -338,13 +522,12 @@ configurations {
 }
 
 dependencies {
-    lockedConf 'org:foo:[1.0,2.0)'
+    lockedConf 'org:bar:[1.0,2.0)'
 }
 """
         when:
-        // TODO Should not need to load the maven-metadata to get the version list
-        module1.rootMetaData.expectGet()
-        module1.pom.expectGet()
+        foo10.pom.expectGet()
+        bar10.pom.expectGet()
 
         then:
         succeeds 'dependencies'

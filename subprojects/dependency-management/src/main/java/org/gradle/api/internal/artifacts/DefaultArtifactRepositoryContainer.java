@@ -29,31 +29,26 @@ import org.gradle.api.internal.InternalAction;
 import org.gradle.api.internal.artifacts.repositories.ArtifactRepositoryInternal;
 import org.gradle.internal.Actions;
 import org.gradle.internal.reflect.Instantiator;
-import org.gradle.util.ConfigureUtil;
-import org.gradle.util.GUtil;
+import org.gradle.util.internal.ConfigureUtil;
+import org.gradle.util.internal.GUtil;
 
 public class DefaultArtifactRepositoryContainer extends DefaultNamedDomainObjectList<ArtifactRepository>
         implements ArtifactRepositoryContainer {
 
-    private final Action<ArtifactRepository> addLastAction = new Action<ArtifactRepository>() {
-        public void execute(ArtifactRepository repository) {
-            DefaultArtifactRepositoryContainer.super.add(repository);
-        }
-    };
+    private final Action<ArtifactRepository> addLastAction = DefaultArtifactRepositoryContainer.super::add;
 
     public DefaultArtifactRepositoryContainer(Instantiator instantiator, CollectionCallbackActionDecorator callbackActionDecorator) {
         super(ArtifactRepository.class, instantiator, new RepositoryNamer(), callbackActionDecorator);
-        whenObjectAdded(new InternalAction<ArtifactRepository>() {
-            public void execute(ArtifactRepository artifactRepository) {
-                if (artifactRepository instanceof ArtifactRepositoryInternal) {
-                    ArtifactRepositoryInternal repository = (ArtifactRepositoryInternal) artifactRepository;
-                    repository.onAddToContainer(DefaultArtifactRepositoryContainer.this);
-                }
+        whenObjectAdded((InternalAction<ArtifactRepository>) artifactRepository -> {
+            if (artifactRepository instanceof ArtifactRepositoryInternal) {
+                ArtifactRepositoryInternal repository = (ArtifactRepositoryInternal) artifactRepository;
+                repository.onAddToContainer(DefaultArtifactRepositoryContainer.this);
             }
         });
     }
 
     private static class RepositoryNamer implements Namer<ArtifactRepository> {
+        @Override
         public String determineName(ArtifactRepository r) {
             return r.getName();
         }
@@ -64,14 +59,18 @@ public class DefaultArtifactRepositoryContainer extends DefaultNamedDomainObject
         return "repository";
     }
 
+    @Override
+    @SuppressWarnings("rawtypes")
     public DefaultArtifactRepositoryContainer configure(Closure closure) {
         return ConfigureUtil.configureSelf(closure, this);
     }
 
+    @Override
     public void addFirst(ArtifactRepository repository) {
         add(0, repository);
     }
 
+    @Override
     public void addLast(ArtifactRepository repository) {
         add(repository);
     }

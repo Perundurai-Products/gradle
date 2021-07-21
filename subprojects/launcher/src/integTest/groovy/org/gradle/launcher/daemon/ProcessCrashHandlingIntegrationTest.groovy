@@ -16,6 +16,7 @@
 
 package org.gradle.launcher.daemon
 
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.integtests.fixtures.daemon.DaemonClientFixture
 import org.gradle.integtests.fixtures.daemon.DaemonIntegrationSpec
 import org.gradle.launcher.daemon.client.DaemonDisappearedException
@@ -91,6 +92,7 @@ class ProcessCrashHandlingIntegrationTest extends DaemonIntegrationSpec {
      * of the daemon is different than the session id of the client.
      */
     @Requires(TestPrecondition.NOT_WINDOWS)
+    @ToBeFixedForConfigurationCache(because = "fixture uses the software model")
     def "session id of daemon is different from daemon client"() {
         given:
         withGetSidProject()
@@ -175,6 +177,32 @@ class ProcessCrashHandlingIntegrationTest extends DaemonIntegrationSpec {
         failure.assertHasDescription(DaemonDisappearedException.MESSAGE)
     }
 
+    def "client logs location of crash log on daemon crash"() {
+        buildFile << """
+            task block {
+                doLast {
+                    ${server.callFromBuild("block")}
+                    def theUnsafe = sun.misc.Unsafe.class.getDeclaredField("theUnsafe")
+                    theUnsafe.setAccessible(true)
+                    theUnsafe.get(null).getByte(0)
+                }
+            }
+        """
+
+        when:
+        executer.withStackTraceChecksDisabled() // daemon log may contain stack traces
+        executer.noDaemonCrashChecks()
+        def block = server.expectAndBlock("block")
+        def build = executer.withTasks("block").start()
+        block.waitForAllPendingCalls()
+        block.releaseAll()
+        def failure = build.waitForFailure()
+
+        then:
+        failure.assertHasDescription(DaemonDisappearedException.MESSAGE)
+        failure.assertHasErrorOutput("JVM crash log found: file://")
+    }
+
     def "client logs useful information when daemon exits"() {
         given:
         file("build.gradle") << "System.exit(0)"
@@ -251,8 +279,11 @@ class ProcessCrashHandlingIntegrationTest extends DaemonIntegrationSpec {
 
                 // We expect AttachConsole to fail with a particular error if the
                 // provided pid is not attached to a console
+                // when pid is not attached to console, GetLastError(pid) returns:
+                // ERROR_GEN_FAILURE on Win7
+                // ERROR_INVALID_HANDLE on Win10
                 if (!AttachConsole(pid)) {
-                    if (GetLastError() == ERROR_GEN_FAILURE) {
+                    if (GetLastError() == ERROR_GEN_FAILURE || GetLastError() == ERROR_INVALID_HANDLE) {
                         printf("none\\n");
                         exit(0);
                     } else {

@@ -21,34 +21,42 @@ import com.google.common.collect.Sets;
 import org.gradle.api.Action;
 import org.gradle.api.Task;
 import org.gradle.api.internal.TaskInternal;
+import org.gradle.internal.deprecation.DeprecationLogger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.NavigableSet;
 import java.util.Set;
 
 public abstract class TaskNode extends Node {
+    private static final Logger LOGGER = LoggerFactory.getLogger(TaskNode.class);
 
     private final NavigableSet<Node> mustSuccessors = Sets.newTreeSet();
+    private final Set<Node> mustPredecessors = Sets.newHashSet();
     private final NavigableSet<Node> shouldSuccessors = Sets.newTreeSet();
     private final NavigableSet<Node> finalizers = Sets.newTreeSet();
     private final NavigableSet<Node> finalizingSuccessors = Sets.newTreeSet();
 
     @Override
-    public boolean allDependenciesComplete() {
-        if (!super.allDependenciesComplete()) {
+    public boolean doCheckDependenciesComplete() {
+        if (!super.doCheckDependenciesComplete()) {
             return false;
         }
+        LOGGER.debug("Checking if all must successors are complete for {}", this);
         for (Node dependency : mustSuccessors) {
             if (!dependency.isComplete()) {
                 return false;
             }
         }
 
+        LOGGER.debug("Checking if all finalizing successors are complete for {}", this);
         for (Node dependency : finalizingSuccessors) {
             if (!dependency.isComplete()) {
                 return false;
             }
         }
 
+        LOGGER.debug("All task dependencies are complete for {}", this);
         return true;
     }
 
@@ -56,6 +64,7 @@ public abstract class TaskNode extends Node {
         return mustSuccessors;
     }
 
+    @Override
     public Set<Node> getFinalizers() {
         return finalizers;
     }
@@ -68,20 +77,24 @@ public abstract class TaskNode extends Node {
         return shouldSuccessors;
     }
 
-    protected void addMustSuccessor(Node toNode) {
+    public void addMustSuccessor(TaskNode toNode) {
+        deprecateLifecycleHookReferencingNonLocalTask("mustRunAfter", toNode);
         mustSuccessors.add(toNode);
+        toNode.mustPredecessors.add(this);
     }
 
-    protected void addFinalizingSuccessor(TaskNode finalized) {
+    public void addFinalizingSuccessor(TaskNode finalized) {
         finalizingSuccessors.add(finalized);
+        finalized.finalizers.add(this);
     }
 
-    protected void addFinalizer(TaskNode finalizerNode) {
-        finalizers.add(finalizerNode);
+    public void addFinalizer(TaskNode finalizerNode) {
+        deprecateLifecycleHookReferencingNonLocalTask("finalizedBy", finalizerNode);
         finalizerNode.addFinalizingSuccessor(this);
     }
 
-    protected void addShouldSuccessor(Node toNode) {
+    public void addShouldSuccessor(Node toNode) {
+        deprecateLifecycleHookReferencingNonLocalTask("shouldRunAfter", toNode);
         shouldSuccessors.add(toNode);
     }
 
@@ -91,8 +104,23 @@ public abstract class TaskNode extends Node {
 
     @Override
     public Iterable<Node> getAllSuccessors() {
-        return Iterables.concat(getMustSuccessors(), getFinalizingSuccessors(), super.getAllSuccessors());
+        return Iterables.concat(
+            shouldSuccessors,
+            finalizingSuccessors,
+            mustSuccessors,
+            super.getAllSuccessors()
+        );
     }
+
+    @Override
+    public Iterable<Node> getHardSuccessors() {
+        return Iterables.concat(
+            finalizingSuccessors,
+            mustSuccessors,
+            super.getHardSuccessors()
+        );
+    }
+
     @Override
     public Iterable<Node> getAllSuccessorsInReverseOrder() {
         return Iterables.concat(
@@ -101,6 +129,11 @@ public abstract class TaskNode extends Node {
             finalizingSuccessors.descendingSet(),
             shouldSuccessors.descendingSet()
         );
+    }
+
+    @Override
+    public Iterable<Node> getAllPredecessors() {
+        return Iterables.concat(mustPredecessors, finalizers, super.getAllPredecessors());
     }
 
     @Override
@@ -127,5 +160,19 @@ public abstract class TaskNode extends Node {
     public abstract Action<? super Task> getPostAction();
 
     public abstract TaskInternal getTask();
+
+    @Override
+    public boolean isPublicNode() {
+        return true;
+    }
+
+    private void deprecateLifecycleHookReferencingNonLocalTask(String hookName, Node taskNode) {
+        if (taskNode instanceof TaskInAnotherBuild) {
+            DeprecationLogger.deprecateAction("Using " + hookName + " to reference tasks from another build")
+                .willBecomeAnErrorInGradle8()
+                .withUpgradeGuideSection(6, "referencing_tasks_from_included_builds")
+                .nagUser();
+        }
+    }
 
 }

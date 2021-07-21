@@ -20,16 +20,16 @@ import org.gradle.cache.internal.DefaultCacheRepository
 import org.gradle.cache.internal.UsedGradleVersions
 import org.gradle.internal.resource.local.ModificationTimeFileAccessTimeJournal
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
-import org.gradle.testfixtures.internal.InMemoryCacheFactory
+import org.gradle.testfixtures.internal.TestInMemoryCacheFactory
 import org.junit.Rule
 import spock.lang.AutoCleanup
 import spock.lang.Specification
 import spock.lang.Subject
 
 class DefaultArtifactCacheLockingManagerTest extends Specification {
-    @Rule TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider()
+    @Rule TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider(getClass())
 
-    def cacheRepository = new DefaultCacheRepository(null, new InMemoryCacheFactory())
+    def cacheRepository = new DefaultCacheRepository(null, new TestInMemoryCacheFactory())
     def cacheDir = temporaryFolder.createDir(CacheLayout.ROOT.key)
     def resourcesDir = cacheDir.createDir(CacheLayout.RESOURCES.key)
     def filesDir = cacheDir.createDir(CacheLayout.FILE_STORE.key)
@@ -44,7 +44,7 @@ class DefaultArtifactCacheLockingManagerTest extends Specification {
     def usedGradleVersions = Stub(UsedGradleVersions)
 
     @Subject @AutoCleanup
-    def cacheLockingManager = new DefaultArtifactCacheLockingManager(cacheRepository, artifactCacheMetadata, fileAccessTimeJournal, usedGradleVersions)
+    def cacheLockingManager = new WritableArtifactCacheLockingManager(cacheRepository, artifactCacheMetadata, fileAccessTimeJournal, usedGradleVersions)
 
     def "cleans up resources"() {
         given:

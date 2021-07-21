@@ -29,6 +29,12 @@
             <tr>
                 <td>allowUntrustedServer</td>
             </tr>
+            <tr>
+                <td>allowInsecureProtocol</td>
+            </tr>
+            <tr>
+                <td>useExpectContinue</td>
+            </tr>
         </table>
     </section>
     <section>

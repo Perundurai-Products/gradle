@@ -20,7 +20,6 @@ import org.gradle.api.artifacts.Configuration
 import org.gradle.api.internal.file.collections.LazilyInitializedFileCollection
 import org.gradle.api.plugins.GroovyBasePlugin
 import org.gradle.test.fixtures.AbstractProjectBuilderSpec
-import spock.lang.Unroll
 
 class GroovyRuntimeTest extends AbstractProjectBuilderSpec {
 
@@ -43,7 +42,44 @@ class GroovyRuntimeTest extends AbstractProjectBuilderSpec {
         classifier << ["", "-indy"]
     }
 
-    @Unroll
+    def "inferred Groovy3 class path uses 'groovy' jars from classpath if all required pieces are found"() {
+        def groovyVersion = "3.0.8"
+
+        when:
+        def classpath = project.groovyRuntime.inferGroovyClasspath([
+            project.file("other.jar"),
+            project.file("groovy-${groovyVersion}.jar"),
+            project.file("groovy-ant-${groovyVersion}.jar"),
+            project.file("groovy-astbuilder-${groovyVersion}.jar"),
+            project.file("groovy-console-${groovyVersion}.jar"),
+            project.file("groovy-datetime-${groovyVersion}.jar"),
+            project.file("groovy-dateutil-${groovyVersion}.jar"),
+            project.file("groovy-templates-${groovyVersion}.jar"),
+            project.file("groovy-json-${groovyVersion}.jar"),
+            project.file("groovy-xml-${groovyVersion}.jar"),
+            project.file("groovy-groovydoc-${groovyVersion}.jar"),
+            project.file("groovy-nio-${groovyVersion}.jar"),
+            project.file("groovy-sql-${groovyVersion}.jar"),
+            project.file("groovy-test-${groovyVersion}.jar")
+        ])
+
+        then:
+        classpath.files.size() == 13
+        classpath.files.contains(project.file("groovy-${groovyVersion}.jar"))
+        classpath.files.contains(project.file("groovy-ant-${groovyVersion}.jar"))
+        classpath.files.contains(project.file("groovy-astbuilder-${groovyVersion}.jar"))
+        classpath.files.contains(project.file("groovy-console-${groovyVersion}.jar"))
+        classpath.files.contains(project.file("groovy-datetime-${groovyVersion}.jar"))
+        classpath.files.contains(project.file("groovy-dateutil-${groovyVersion}.jar"))
+        classpath.files.contains(project.file("groovy-templates-${groovyVersion}.jar"))
+        classpath.files.contains(project.file("groovy-json-${groovyVersion}.jar"))
+        classpath.files.contains(project.file("groovy-xml-${groovyVersion}.jar"))
+        classpath.files.contains(project.file("groovy-groovydoc-${groovyVersion}.jar"))
+        classpath.files.contains(project.file("groovy-nio-${groovyVersion}.jar"))
+        classpath.files.contains(project.file("groovy-sql-${groovyVersion}.jar"))
+        classpath.files.contains(project.file("groovy-test-${groovyVersion}.jar"))
+    }
+
     def "inferred Groovy #groovyVersion#classifier class path uses repository dependency if 'groovy' Jar is found on class path (to get transitive dependencies right)"() {
         project.repositories {
             mavenCentral()
@@ -70,6 +106,7 @@ class GroovyRuntimeTest extends AbstractProjectBuilderSpec {
         "2.1.2"       | "-indy"    | ["groovy", "groovy-ant"]
         "2.5.2"       | ""         | ["groovy", "groovy-ant", "groovy-templates"]
         "2.5.2"       | "-indy"    | ["groovy", "groovy-ant", "groovy-templates"]
+        "3.0.8"       | ""         | ["groovy", "groovy-ant", "groovy-templates", "groovy-json", "groovy-xml", "groovy-groovydoc", "groovy-astbuilder", "groovy-console", "groovy-datetime", "groovy-dateutil", "groovy-nio", "groovy-sql", "groovy-test"]
     }
 
     def "useful error message is produced when no groovy runtime could be found on a classpath"() {

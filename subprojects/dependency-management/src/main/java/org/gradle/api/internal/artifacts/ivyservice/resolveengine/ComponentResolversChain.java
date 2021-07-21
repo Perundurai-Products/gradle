@@ -25,8 +25,10 @@ import org.gradle.internal.component.model.ComponentArtifactMetadata;
 import org.gradle.internal.component.model.ComponentOverrideMetadata;
 import org.gradle.internal.component.model.ComponentResolveMetadata;
 import org.gradle.internal.component.model.DependencyMetadata;
-import org.gradle.internal.component.model.ModuleSource;
+import org.gradle.internal.component.model.ModuleSources;
+import org.gradle.internal.model.CalculatedValueContainerFactory;
 import org.gradle.internal.resolve.resolver.ArtifactResolver;
+import org.gradle.internal.resolve.resolver.ArtifactSelector;
 import org.gradle.internal.resolve.resolver.ComponentMetaDataResolver;
 import org.gradle.internal.resolve.resolver.DefaultArtifactSelector;
 import org.gradle.internal.resolve.resolver.DependencyToComponentIdResolver;
@@ -36,21 +38,25 @@ import org.gradle.internal.resolve.result.BuildableArtifactSetResolveResult;
 import org.gradle.internal.resolve.result.BuildableComponentIdResolveResult;
 import org.gradle.internal.resolve.result.BuildableComponentResolveResult;
 
+import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * A factory for the various resolver services backed by a chain of repositories.
+ */
 public class ComponentResolversChain {
     private final DependencyToComponentIdResolverChain dependencyToComponentIdResolver;
     private final ComponentMetaDataResolverChain componentMetaDataResolver;
     private final ArtifactResolver artifactResolverChain;
     private final DefaultArtifactSelector artifactSelector;
 
-    public ComponentResolversChain(List<ComponentResolvers> providers, ArtifactTypeRegistry artifactTypeRegistry) {
-        List<DependencyToComponentIdResolver> depToComponentIdResolvers = new ArrayList<DependencyToComponentIdResolver>(providers.size());
-        List<ComponentMetaDataResolver> componentMetaDataResolvers = new ArrayList<ComponentMetaDataResolver>(1 + providers.size());
+    public ComponentResolversChain(List<ComponentResolvers> providers, ArtifactTypeRegistry artifactTypeRegistry, CalculatedValueContainerFactory calculatedValueContainerFactory) {
+        List<DependencyToComponentIdResolver> depToComponentIdResolvers = new ArrayList<>(providers.size());
+        List<ComponentMetaDataResolver> componentMetaDataResolvers = new ArrayList<>(1 + providers.size());
         componentMetaDataResolvers.add(VirtualComponentMetadataResolver.INSTANCE);
-        List<ArtifactResolver> artifactResolvers = new ArrayList<ArtifactResolver>(providers.size());
-        List<OriginArtifactSelector> artifactSelectors = new ArrayList<OriginArtifactSelector>(providers.size());
+        List<ArtifactResolver> artifactResolvers = new ArrayList<>(providers.size());
+        List<OriginArtifactSelector> artifactSelectors = new ArrayList<>(providers.size());
         for (ComponentResolvers provider : providers) {
             depToComponentIdResolvers.add(provider.getComponentIdResolver());
             componentMetaDataResolvers.add(provider.getComponentResolver());
@@ -60,10 +66,10 @@ public class ComponentResolversChain {
         dependencyToComponentIdResolver = new DependencyToComponentIdResolverChain(depToComponentIdResolvers);
         componentMetaDataResolver = new ComponentMetaDataResolverChain(componentMetaDataResolvers);
         artifactResolverChain = new ErrorHandlingArtifactResolver(new ArtifactResolverChain(artifactResolvers));
-        artifactSelector = new DefaultArtifactSelector(artifactSelectors, artifactResolverChain, artifactTypeRegistry);
+        artifactSelector = new DefaultArtifactSelector(artifactSelectors, artifactResolverChain, artifactTypeRegistry, calculatedValueContainerFactory);
     }
 
-    public DefaultArtifactSelector getArtifactSelector() {
+    public ArtifactSelector getArtifactSelector() {
         return artifactSelector;
     }
 
@@ -115,12 +121,12 @@ public class ComponentResolversChain {
         }
 
         @Override
-        public void resolveArtifact(ComponentArtifactMetadata artifact, ModuleSource moduleSource, BuildableArtifactResolveResult result) {
+        public void resolveArtifact(ComponentArtifactMetadata artifact, ModuleSources moduleSources, BuildableArtifactResolveResult result) {
             for (ArtifactResolver resolver : resolvers) {
                 if (result.hasResult()) {
                     return;
                 }
-                resolver.resolveArtifact(artifact, moduleSource, result);
+                resolver.resolveArtifact(artifact, moduleSources, result);
             }
         }
 
@@ -145,7 +151,7 @@ public class ComponentResolversChain {
         }
 
         @Override
-        public void resolve(DependencyMetadata dependency, VersionSelector acceptor, VersionSelector rejector, BuildableComponentIdResolveResult result) {
+        public void resolve(DependencyMetadata dependency, VersionSelector acceptor, @Nullable VersionSelector rejector, BuildableComponentIdResolveResult result) {
             for (DependencyToComponentIdResolver resolver : resolvers) {
                 if (result.hasResult()) {
                     return;

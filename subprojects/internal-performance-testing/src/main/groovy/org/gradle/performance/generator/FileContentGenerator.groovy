@@ -16,17 +16,22 @@
 
 package org.gradle.performance.generator
 
-import static org.gradle.test.fixtures.dsl.GradleDsl.GROOVY
+import groovy.transform.CompileStatic
+import org.gradle.test.fixtures.dsl.GradleDsl
+import org.gradle.test.fixtures.language.Language
+
 import static org.gradle.test.fixtures.dsl.GradleDsl.KOTLIN
 
+@CompileStatic
 abstract class FileContentGenerator {
-
     static FileContentGenerator forConfig(TestProjectGeneratorConfiguration config) {
         switch (config.dsl) {
             case KOTLIN:
                 return new KotlinDslFileContentGenerator(config)
-            case GROOVY:
+            case GradleDsl.GROOVY:
                 return new GroovyDslFileContentGenerator(config)
+            default:
+                throw new IllegalStateException("Should not be here!")
         }
     }
 
@@ -36,7 +41,7 @@ abstract class FileContentGenerator {
         this.config = config
     }
 
-    def generateBuildGradle(Integer subProjectNumber, DependencyTree dependencyTree) {
+    String generateBuildGradle(Language language, Integer subProjectNumber, DependencyTree dependencyTree) {
         def isRoot = subProjectNumber == null
         if (isRoot && config.subProjects > 0) {
             if (config.compositeBuild) {
@@ -50,14 +55,23 @@ abstract class FileContentGenerator {
         return """
         import org.gradle.util.GradleVersion
 
-        ${missingJavaLibrarySupportFlag()}
+        ${noJavaLibraryPluginFlag()}
 
         ${config.plugins.collect { decideOnJavaPlugin(it, dependencyTree.hasParentProject(subProjectNumber)) }.join("\n        ")}
-        
+
         repositories {
             ${config.repositories.join("\n            ")}
         }
-        ${dependenciesBlock('api', 'implementation', 'testImplementation', subProjectNumber, dependencyTree)}             
+        ${dependenciesBlock('api', 'implementation', 'testImplementation', subProjectNumber, dependencyTree)}
+
+        allprojects {
+            dependencies{
+        ${
+            language == Language.GROOVY ? directDependencyDeclaration('implementation', 'org.codehaus.groovy:groovy:2.5.8') : ""
+        }
+            }
+        }
+
 
         ${tasksConfiguration()}
 
@@ -66,7 +80,7 @@ abstract class FileContentGenerator {
         """
     }
 
-    def generateSettingsGradle(boolean isRoot) {
+    String generateSettingsGradle(boolean isRoot) {
         if (config.compositeBuild) {
             if (!isRoot) {
                 return ""
@@ -88,51 +102,50 @@ abstract class FileContentGenerator {
             if (!isRoot) {
                 return null
             }
-            if (config.subProjects == 0) {
-                return ""
+
+            String includedProjects = ""
+            if (config.subProjects != 0) {
+                includedProjects = """
+                    ${(0..config.subProjects - 1).collect { "include(\"project$it\")" }.join("\n")}
+                """
             }
-            """ 
-            ${(0..config.subProjects - 1).collect { "include(\"project$it\")" }.join("\n")}
-            """
+
+            return includedProjects + generateEnableFeaturePreviewCode()
         }
     }
 
-    def generateGradleProperties(boolean isRoot) {
+    abstract protected String generateEnableFeaturePreviewCode()
+
+    String generateGradleProperties(boolean isRoot) {
         if (!isRoot && !config.compositeBuild) {
             return null
         }
         """
-        org.gradle.jvmargs=-Xmxs${config.daemonMemory} -Xmx${config.daemonMemory}
+        org.gradle.jvmargs=-Xms${config.daemonMemory} -Xmx${config.daemonMemory} -Dfile.encoding=UTF-8
         org.gradle.parallel=${config.parallel}
         org.gradle.workers.max=${config.maxWorkers}
         compilerMemory=${config.compilerMemory}
         testRunnerMemory=${config.testRunnerMemory}
         testForkEvery=${config.testForkEvery}
+        ${->
+            config.systemProperties.entrySet().collect { "systemProp.${it.key}=${it.value}" }.join("\n")
+        }
         """
     }
 
-    def generatePomXML(Integer subProjectNumber, DependencyTree dependencyTree) {
-        def body
+    String generatePomXML(Integer subProjectNumber, DependencyTree dependencyTree) {
+        def body = ""
+        def isParent = subProjectNumber == null || config.subProjects == 0
         def hasSources = subProjectNumber != null || config.subProjects == 0
-        if (!hasSources) {
-            body = """
-            <modules>
-                ${(0..config.subProjects - 1).collect { "<module>project$it</module>" }.join("\n                ")}
-            </modules>
-            """
-        } else {
-            def subProjectNumbers = dependencyTree.getChildProjectIds(subProjectNumber)
-            def subProjectDependencies = ''
-            if (subProjectNumbers?.size() > 0) {
-                subProjectDependencies = subProjectNumbers.collect { convertToPomDependency("org.gradle.test.performance:project$it:1.0") }.join()
+        if (isParent) {
+            if (config.subProjects != 0) {
+                body += """
+                    <modules>
+                        ${(0..config.subProjects - 1).collect { "<module>project$it</module>" }.join("\n                ")}
+                    </modules>
+                """
             }
-            body = """
-            <dependencies>
-                ${config.externalApiDependencies.collect { convertToPomDependency(it) }.join()}
-                ${config.externalImplementationDependencies.collect { convertToPomDependency(it) }.join()}
-                ${convertToPomDependency('junit:junit:4.12', 'test')}
-                ${subProjectDependencies}
-            </dependencies>
+            body += """
             <build>
                 <plugins>
                     <plugin>
@@ -174,6 +187,29 @@ abstract class FileContentGenerator {
                 </plugins>
             </build>
             """
+        } else {
+            body += """
+                <parent>
+                    <groupId>org.gradle.test.performance</groupId>
+                    <artifactId>project</artifactId>
+                    <version>1.0</version>
+                </parent>
+            """
+        }
+        if (hasSources) {
+            def subProjectNumbers = dependencyTree.getChildProjectIds(subProjectNumber)
+            def subProjectDependencies = ''
+            if (subProjectNumbers?.size() > 0) {
+                subProjectDependencies = subProjectNumbers.collect { convertToPomDependency("org.gradle.test.performance:project$it:1.0") }.join("")
+            }
+            body += """
+            <dependencies>
+                ${config.externalApiDependencies.collect { convertToPomDependency(it) }.join("")}
+                ${config.externalImplementationDependencies.collect { convertToPomDependency(it) }.join("")}
+                ${convertToPomDependency('junit:junit:4.13', 'test')}
+                ${subProjectDependencies}
+            </dependencies>
+            """
         }
         """
         <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -188,7 +224,7 @@ abstract class FileContentGenerator {
         """
     }
 
-    def generatePerformanceScenarios(boolean isRoot) {
+    String generatePerformanceScenarios(boolean isRoot) {
         if (isRoot) {
             def fileToChange = config.fileToChangeByScenario['assemble']
             """
@@ -198,43 +234,49 @@ abstract class FileContentGenerator {
                   maven {
                     targets = ["clean", "package", "-Dmaven.test.skip=true", "-T", "4"]
                   }
+                  bazel {
+                    targets = ["build", "//..."]
+                  }
                 }
-                
+
                 abiChange {
                   tasks = ["assemble"]
                   apply-abi-change-to = "${fileToChange}"
                   maven {
                     targets = ["clean", "package", "-Dmaven.test.skip=true", "-T", "4"]
                   }
+                  bazel {
+                    targets = ["build", "//..."]
+                  }
                 }
-                
+
                 cleanAssemble {
                   tasks = ["clean", "assemble"]
                    maven {
                     targets = ["clean", "package", "-Dmaven.test.skip=true", "-T", "4"]
                   }
                 }
-                
+
                 cleanAssembleCached {
                   tasks = ["clean", "assemble"]
                   gradle-args = ["--build-cache"]
                 }
-                
+
                 cleanBuild {
                   tasks = ["clean", "build"]
                   maven {
-                    targets = ["clean", "test", "package", "-T", "4"]
+                    targets = ["clean", "package", "-T", "4"]
                   }
                 }
-                
+
                 cleanBuildCached {
                   tasks = ["clean", "build"]
                   maven {
-                    targets = ["clean", "test", "package", "-T", "4"]
+                    targets = ["clean", "package", "-T", "4"]
                   }
                   gradle-args = ["--build-cache"]
                 }
-                
+
                 incrementalCompile {
                   tasks = ["compileJava"]
                    maven {
@@ -242,7 +284,7 @@ abstract class FileContentGenerator {
                   }
                   apply-non-abi-change-to = "${fileToChange}"
                 }
-                
+
                 incrementalTest {
                   tasks = ["build"]
                   apply-non-abi-change-to = "${fileToChange}"
@@ -250,14 +292,14 @@ abstract class FileContentGenerator {
                     targets = ["test", "-T", "4"]
                   }
                 }
-                
+
                 cleanTest {
                   tasks = ["clean", "test"]
                   maven {
                     targets = ["clean", "test", "-T", "4"]
                   }
                 }
-                
+
                 cleanTestCached {
                   tasks = ["clean", "test"]
                   gradle-args = ["--build-cache"]
@@ -267,7 +309,7 @@ abstract class FileContentGenerator {
         }
     }
 
-    def generateProductionClassFile(Integer subProjectNumber, int classNumber, DependencyTree dependencyTree) {
+    String generateProductionClassFile(Integer subProjectNumber, int classNumber, DependencyTree dependencyTree) {
         def properties = ''
         def ownPackageName = packageName(classNumber, subProjectNumber)
         def imports = ''
@@ -291,7 +333,7 @@ abstract class FileContentGenerator {
             public $propertyType getProperty$it() {
                 return property$it;
             }
-        
+
             public void setProperty$it($propertyType value) {
                 property$it = value;
             }
@@ -301,13 +343,13 @@ abstract class FileContentGenerator {
         """
         package ${ownPackageName};
         ${imports}
-        public class Production$classNumber {        
-            $properties    
-        }   
+        public class Production$classNumber {
+            $properties
+        }
         """
     }
 
-    def generateTestClassFile(Integer subProjectNumber, int classNumber, DependencyTree dependencyTree) {
+    String generateTestClassFile(Integer subProjectNumber, int classNumber, DependencyTree dependencyTree) {
         def testMethods = ""
         def ownPackageName = packageName(classNumber, subProjectNumber)
         def imports = ''
@@ -343,9 +385,9 @@ abstract class FileContentGenerator {
         ${imports}
         import org.${config.useTestNG ? 'testng.annotations' : 'junit'}.Test;
         import static org.${config.useTestNG ? 'testng' : 'junit'}.Assert.*;
-        
-        public class Test$classNumber {  
-            Production$classNumber objectUnderTest = new Production$classNumber();     
+
+        public class Test$classNumber {
+            Production$classNumber objectUnderTest = new Production$classNumber();
             $testMethods
         }
         """
@@ -357,15 +399,15 @@ abstract class FileContentGenerator {
         "org${separator}gradle${separator}test${separator}performance${separator}${config.projectName.toLowerCase()}${projectPackage}$subPackage"
     }
 
-    protected final getPropertyCount() {
-        Math.ceil(config.minLinesOfCodePerSourceFile / 10)
+    protected final int getPropertyCount() {
+        Math.ceil((double) config.minLinesOfCodePerSourceFile / 10)
     }
 
     protected final String decideOnJavaPlugin(String plugin, Boolean projectHasParents) {
         if (plugin.contains('java')) {
             if (projectHasParents) {
                 return """
-                    if(missingJavaLibrarySupport) {
+                    if (noJavaLibraryPlugin) {
                         ${imperativelyApplyPlugin("java")}
                     } else {
                         ${imperativelyApplyPlugin("java-library")}
@@ -388,15 +430,17 @@ abstract class FileContentGenerator {
                 it == abiProjectNumber ? projectDependencyDeclaration(hasParent ? api : implementation, abiProjectNumber) : projectDependencyDeclaration(implementation, it)
             }.join("\n            ")
         }
+        def block = """
+                    ${config.externalApiDependencies.collect { directDependencyDeclaration(hasParent ? api : implementation, it) }.join("\n            ")}
+                    ${config.externalImplementationDependencies.collect { directDependencyDeclaration(implementation, it) }.join("\n            ")}
+                    ${directDependencyDeclaration(testImplementation, config.useTestNG ? 'org.testng:testng:6.4' : 'junit:junit:4.13')}
+
+                    $subProjectDependencies
+        """
         return """
-            ${configurationsIfMissingJavaLibrarySupport(hasParent)}
-
+            ${addJavaLibraryConfigurationsIfNecessary(hasParent)}
             dependencies {
-                ${config.externalApiDependencies.collect { directDependencyDeclaration(hasParent ? api : implementation, it) }.join("\n            ")}
-                ${config.externalImplementationDependencies.collect { directDependencyDeclaration(implementation, it) }.join("\n            ")}
-                ${directDependencyDeclaration(testImplementation, config.useTestNG ? 'org.testng:testng:6.4' : 'junit:junit:4.12')}
-
-                $subProjectDependencies
+                $block
             }
         """
     }
@@ -415,7 +459,7 @@ abstract class FileContentGenerator {
                 </dependency>"""
     }
 
-    protected abstract String missingJavaLibrarySupportFlag()
+    protected abstract String noJavaLibraryPluginFlag()
 
     protected abstract String tasksConfiguration()
 
@@ -423,7 +467,7 @@ abstract class FileContentGenerator {
 
     protected abstract String createTaskThatDependsOnAllIncludedBuildsTaskWithSameName(String taskName)
 
-    protected abstract String configurationsIfMissingJavaLibrarySupport(boolean hasParent)
+    protected abstract String addJavaLibraryConfigurationsIfNecessary(boolean hasParent)
 
     protected abstract String directDependencyDeclaration(String configuration, String notation)
 

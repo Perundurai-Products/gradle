@@ -16,22 +16,34 @@
 
 package org.gradle.internal.nativeintegration.services
 
+import net.rubygrapefruit.platform.Native
+import org.gradle.api.internal.file.temp.TemporaryFileProvider
+import org.gradle.internal.file.Chmod
 import org.gradle.internal.reflect.JavaMethod
-import org.gradle.internal.reflect.JavaReflectionUtil
-import org.gradle.util.Requires
-import org.gradle.util.TestPrecondition
+import org.gradle.internal.service.ServiceRegistry
+import org.slf4j.LoggerFactory
 import spock.lang.Specification
 
+import javax.inject.Inject
 import java.lang.reflect.Constructor
 
 class NativeServicesInitializationTest extends Specification {
-    @Requires(TestPrecondition.FIX_TO_WORK_ON_JAVA9)
+
     def "cannot get an instance of NativeServices without initializing first" () {
         // Construct an isolated classloader so we can load a pristine NativeServices class
         // that's guaranteed not to have been initialized before
-        ClassLoader classLoader = new URLClassLoader(((URLClassLoader) getClass().getClassLoader()).getURLs(), (ClassLoader)null)
-        Class nativeServicesClass = classLoader.loadClass("org.gradle.internal.nativeintegration.services.NativeServices")
-        JavaMethod nativeServicesGetInstance = JavaReflectionUtil.staticMethod(nativeServicesClass, nativeServicesClass, "getInstance")
+        URL[] jars = [
+            jar(NativeServices),
+            jar(ServiceRegistry),
+            jar(Native),
+            jar(LoggerFactory),
+            jar(Chmod),
+            jar(TemporaryFileProvider),
+            jar(Inject)
+        ]
+        ClassLoader classLoader = new URLClassLoader(jars, null as ClassLoader)
+        Class nativeServicesClass = classLoader.loadClass(NativeServices.getName())
+        JavaMethod nativeServicesGetInstance = JavaMethod.ofStatic(nativeServicesClass, nativeServicesClass, "getInstance")
 
         when:
         nativeServicesGetInstance.invokeStatic()
@@ -46,5 +58,9 @@ class NativeServicesInitializationTest extends Specification {
 
         expect:
         constructors.size() == 0
+    }
+
+    private static URL jar(Class clazz) {
+        clazz.getProtectionDomain().getCodeSource().getLocation()
     }
 }

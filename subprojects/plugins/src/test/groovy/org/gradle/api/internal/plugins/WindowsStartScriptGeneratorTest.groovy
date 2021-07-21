@@ -17,8 +17,8 @@
 package org.gradle.api.internal.plugins
 
 import org.gradle.jvm.application.scripts.JavaAppStartScriptGenerationDetails
-import org.gradle.util.TextUtil
-import org.gradle.util.WrapUtil
+import org.gradle.util.internal.TextUtil
+import org.gradle.util.internal.WrapUtil
 import spock.lang.Specification
 
 class WindowsStartScriptGeneratorTest extends Specification {
@@ -46,7 +46,7 @@ class WindowsStartScriptGeneratorTest extends Specification {
         generator.generateScript(details, destination)
 
         then:
-        destination.toString().split(TextUtil.windowsLineSeparator).length == 84
+        destination.toString().split(TextUtil.windowsLineSeparator).length == 89
     }
 
     def "defaultJvmOpts is expanded properly in windows script"() {
@@ -112,6 +112,6 @@ class WindowsStartScriptGeneratorTest extends Specification {
     private JavaAppStartScriptGenerationDetails createScriptGenerationDetails(List<String> defaultJvmOpts, String scriptRelPath) {
         final String applicationName = 'TestApp'
         final List<String> classpath = WrapUtil.toList('path/to/Jar.jar')
-        return new DefaultJavaAppStartScriptGenerationDetails(applicationName, null, null, null, defaultJvmOpts, classpath, scriptRelPath, null)
+        return new DefaultJavaAppStartScriptGenerationDetails(applicationName, null, null, "", defaultJvmOpts, classpath, [], scriptRelPath, null)
     }
 }

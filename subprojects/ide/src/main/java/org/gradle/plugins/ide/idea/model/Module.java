@@ -20,7 +20,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import groovy.util.Node;
-import org.gradle.api.Incubating;
+import org.gradle.internal.Cast;
 import org.gradle.internal.xml.XmlTransformer;
 import org.gradle.plugins.ide.internal.generator.XmlPersistableConfigurationObject;
 
@@ -103,7 +103,6 @@ public class Module extends XmlPersistableConfigurationObject {
      * Must not be null.
      * @since 4.7
      */
-    @Incubating
     public Set<Path> getResourceFolders() {
         return resourceFolders;
     }
@@ -112,7 +111,6 @@ public class Module extends XmlPersistableConfigurationObject {
      * Sets the directories containing resources.
      * @since 4.7
      */
-    @Incubating
     public void setResourceFolders(Set<Path> resourceFolders) {
         this.resourceFolders = resourceFolders;
     }
@@ -122,7 +120,6 @@ public class Module extends XmlPersistableConfigurationObject {
      * Must not be null.
      * @since 4.7
      */
-    @Incubating
     public Set<Path> getTestResourceFolders() {
         return testResourceFolders;
     }
@@ -131,7 +128,6 @@ public class Module extends XmlPersistableConfigurationObject {
      * Sets the directories containing test resources.
      * @since 4.7
      */
-    @Incubating
     public void setTestResourceFolders(Set<Path> testResourceFolders) {
         this.testResourceFolders = testResourceFolders;
     }
@@ -387,7 +383,7 @@ public class Module extends XmlPersistableConfigurationObject {
 
     private void setContentURL() {
         if (contentPath != null) {
-            findOrCreateContentNode().attributes().put("url", contentPath.getUrl());
+            setNodeAttribute(findOrCreateContentNode(), "url", contentPath.getUrl());
         }
     }
 
@@ -404,9 +400,6 @@ public class Module extends XmlPersistableConfigurationObject {
     private void addSourceAndExcludeFolderToXml() {
         Node content = findOrCreateContentNode();
         for (Path path : sourceFolders) {
-            if (resourceFolders.contains(path)) {
-                continue;
-            }
             Map<String, Object> attributes = Maps.newLinkedHashMap();
             attributes.put("url", path.getUrl());
             attributes.put("isTestSource", "false");
@@ -416,9 +409,6 @@ public class Module extends XmlPersistableConfigurationObject {
             content.appendNode("sourceFolder", attributes);
         }
         for (Path path : testSourceFolders) {
-            if (testResourceFolders.contains(path)) {
-                continue;
-            }
             Map<String, Object> attributes = Maps.newLinkedHashMap();
             attributes.put("url", path.getUrl());
             attributes.put("isTestSource", "true");
@@ -459,21 +449,21 @@ public class Module extends XmlPersistableConfigurationObject {
     }
 
     private void writeInheritOutputDirsToXml() {
-        getNewModuleRootManager().attributes().put("inherit-compiler-output", inheritOutputDirs);
+        setNodeAttribute(getNewModuleRootManager(), "inherit-compiler-output", inheritOutputDirs);
     }
 
     private void writeSourceLanguageLevel() {
         if (languageLevel != null) {
-            getNewModuleRootManager().attributes().put("LANGUAGE_LEVEL", languageLevel);
+            setNodeAttribute(getNewModuleRootManager(), "LANGUAGE_LEVEL", languageLevel);
         }
     }
 
     private void addOutputDirsToXml() {
         if (outputDir != null) {
-            findOrCreateOutputDir().attributes().put("url", outputDir.getUrl());
+            setNodeAttribute(findOrCreateOutputDir(), "url", outputDir.getUrl());
         }
         if (testOutputDir != null) {
-            findOrCreateTestOutputDir().attributes().put("url", testOutputDir.getUrl());
+            setNodeAttribute(findOrCreateTestOutputDir(), "url", testOutputDir.getUrl());
         }
     }
 
@@ -487,7 +477,7 @@ public class Module extends XmlPersistableConfigurationObject {
     }
 
     protected boolean isDependencyOrderEntry(Object orderEntry) {
-        return Arrays.asList("module-library", "module").contains(((Node) orderEntry).attribute("type"));
+        return Arrays.asList("module-library", "module").contains((String) ((Node) orderEntry).attribute("type"));
     }
 
     private void addDependenciesToXml() {
@@ -548,6 +538,11 @@ public class Module extends XmlPersistableConfigurationObject {
 
     private List<Node> findOrderEntries() {
         return getChildren(getNewModuleRootManager(), "orderEntry");
+    }
+
+    private static void setNodeAttribute(Node node, String key, Object value) {
+        final Map<String, Object> attributes = Cast.uncheckedCast(node.attributes());
+        attributes.put(key, value);
     }
 
     @Override

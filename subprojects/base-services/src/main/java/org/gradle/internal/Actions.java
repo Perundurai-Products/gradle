@@ -16,9 +16,7 @@
 
 package org.gradle.internal;
 
-import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import org.gradle.api.Action;
 import org.gradle.api.Transformer;
@@ -32,12 +30,6 @@ import java.util.List;
 public abstract class Actions {
 
     static final Action<?> DO_NOTHING = new NullAction<Object>();
-    private static final Predicate<Action<?>> DOES_SOMETHING = new Predicate<Action<?>>() {
-        @Override
-        public boolean apply(@Nullable Action<?> input) {
-            return input != DO_NOTHING;
-        }
-    };
 
     /**
      * Creates an action implementation that simply does nothing.
@@ -52,6 +44,7 @@ public abstract class Actions {
     }
 
     private static class NullAction<T> implements Action<T>, Serializable {
+        @Override
         public void execute(T t) {
         }
     }
@@ -64,7 +57,13 @@ public abstract class Actions {
      * @return The composite action.
      */
     public static <T> Action<T> composite(Iterable<? extends Action<? super T>> actions) {
-        return composite(ImmutableList.copyOf(Iterables.filter(actions, DOES_SOMETHING)));
+        ImmutableList.Builder<Action<? super T>> builder = ImmutableList.builder();
+        for (Action<? super T> action : actions) {
+            if (doesSomething(action)) {
+                builder.add(action);
+            }
+        }
+        return composite(builder.build());
     }
 
     /**
@@ -91,10 +90,11 @@ public abstract class Actions {
      * @param <T> The type of the object that action is for
      * @return The composite action.
      */
+    @SafeVarargs
     public static <T> Action<T> composite(Action<? super T>... actions) {
         List<Action<? super T>> filtered = Lists.newArrayListWithCapacity(actions.length);
         for (Action<? super T> action : actions) {
-            if (DOES_SOMETHING.apply(action)) {
+            if (doesSomething(action)) {
                 filtered.add(action);
             }
         }
@@ -108,6 +108,7 @@ public abstract class Actions {
             this.actions = actions;
         }
 
+        @Override
         public void execute(T item) {
             for (Action<? super T> action : actions) {
                 action.execute(item);
@@ -123,7 +124,7 @@ public abstract class Actions {
                 return false;
             }
 
-            CompositeAction that = (CompositeAction) o;
+            CompositeAction<?> that = (CompositeAction<?>) o;
 
             if (!actions.equals(that.actions)) {
                 return false;
@@ -160,6 +161,7 @@ public abstract class Actions {
             this.action = action;
         }
 
+        @Override
         public void execute(I thing) {
             T transformed = transformer.transform(thing);
             action.execute(transformed);
@@ -203,6 +205,7 @@ public abstract class Actions {
             this.runnable = runnable;
         }
 
+        @Override
         public void execute(T t) {
             runnable.run();
         }
@@ -234,6 +237,7 @@ public abstract class Actions {
             this.action = action;
         }
 
+        @Override
         public void execute(T t) {
             if (filter.isSatisfiedBy(t)) {
                 action.execute(t);
@@ -257,5 +261,9 @@ public abstract class Actions {
 
     public static <T> Action<T> set(Action<T>... actions) {
         return ImmutableActionSet.of(actions);
+    }
+
+    private static boolean doesSomething(Action<?> action) {
+        return action != DO_NOTHING;
     }
 }

@@ -18,6 +18,7 @@ package org.gradle.internal.component.external.model;
 import org.gradle.api.artifacts.VersionConstraint;
 import org.gradle.api.artifacts.component.ComponentSelector;
 import org.gradle.api.artifacts.component.ModuleComponentSelector;
+import org.gradle.api.capabilities.Capability;
 import org.gradle.api.internal.attributes.AttributesSchemaInternal;
 import org.gradle.api.internal.attributes.ImmutableAttributes;
 import org.gradle.internal.component.model.ComponentResolveMetadata;
@@ -26,6 +27,7 @@ import org.gradle.internal.component.model.DependencyMetadata;
 import org.gradle.internal.component.model.ExcludeMetadata;
 import org.gradle.internal.component.model.IvyArtifactName;
 
+import java.util.Collection;
 import java.util.List;
 
 public class ModuleDependencyMetadataWrapper implements ModuleDependencyMetadata {
@@ -45,7 +47,7 @@ public class ModuleDependencyMetadataWrapper implements ModuleDependencyMetadata
     @Override
     public ModuleDependencyMetadata withRequestedVersion(VersionConstraint requestedVersion) {
         ModuleComponentSelector selector = getSelector();
-        ModuleComponentSelector newSelector = DefaultModuleComponentSelector.newSelector(selector.getModuleIdentifier(), requestedVersion, selector.getAttributes());
+        ModuleComponentSelector newSelector = DefaultModuleComponentSelector.newSelector(selector.getModuleIdentifier(), requestedVersion, selector.getAttributes(), selector.getRequestedCapabilities());
         return new ModuleDependencyMetadataWrapper(delegate.withTarget(newSelector));
     }
 
@@ -55,8 +57,21 @@ public class ModuleDependencyMetadataWrapper implements ModuleDependencyMetadata
     }
 
     @Override
+    public ModuleDependencyMetadata withEndorseStrictVersions(boolean endorse) {
+        if (delegate instanceof ModuleDependencyMetadata) {
+            return new ModuleDependencyMetadataWrapper(((ModuleDependencyMetadata) delegate).withEndorseStrictVersions(endorse));
+        }
+        return this;
+    }
+
+    @Override
     public DependencyMetadata withTarget(ComponentSelector target) {
         return delegate.withTarget(target);
+    }
+
+    @Override
+    public DependencyMetadata withTargetAndArtifacts(ComponentSelector target, List<IvyArtifactName> artifacts) {
+        return delegate.withTargetAndArtifacts(target, artifacts);
     }
 
     @Override
@@ -70,8 +85,8 @@ public class ModuleDependencyMetadataWrapper implements ModuleDependencyMetadata
     }
 
     @Override
-    public List<ConfigurationMetadata> selectConfigurations(ImmutableAttributes consumerAttributes, ComponentResolveMetadata targetComponent, AttributesSchemaInternal consumerSchema) {
-        return delegate.selectConfigurations(consumerAttributes, targetComponent, consumerSchema);
+    public List<ConfigurationMetadata> selectConfigurations(ImmutableAttributes consumerAttributes, ComponentResolveMetadata targetComponent, AttributesSchemaInternal consumerSchema, Collection<? extends Capability> explicitRequestedCapabilities) {
+        return delegate.selectConfigurations(consumerAttributes, targetComponent, consumerSchema, explicitRequestedCapabilities);
     }
 
     @Override
@@ -87,6 +102,11 @@ public class ModuleDependencyMetadataWrapper implements ModuleDependencyMetadata
     @Override
     public boolean isConstraint() {
         return delegate.isConstraint();
+    }
+
+    @Override
+    public boolean isEndorsingStrictVersions() {
+        return delegate.isEndorsingStrictVersions();
     }
 
     @Override

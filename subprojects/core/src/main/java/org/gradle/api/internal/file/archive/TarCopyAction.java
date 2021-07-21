@@ -54,6 +54,7 @@ public class TarCopyAction implements CopyAction {
         this.preserveFileTimestamps = preserveFileTimestamps;
     }
 
+    @Override
     public WorkResult execute(final CopyActionProcessingStream stream) {
 
         final OutputStream outStr;
@@ -73,6 +74,7 @@ public class TarCopyAction implements CopyAction {
                     throw new GradleException(String.format("Could not create TAR '%s'.", tarFile), e);
                 }
                 tarOutStr.setLongFileMode(TarOutputStream.LONGFILE_GNU);
+                tarOutStr.setBigNumberMode(TarOutputStream.BIGNUMBER_STAR);
                 stream.process(new StreamAction(tarOutStr));
                 tarOutStr.close();
             }
@@ -88,6 +90,7 @@ public class TarCopyAction implements CopyAction {
             this.tarOutStr = tarOutStr;
         }
 
+        @Override
         public void processFile(FileCopyDetailsInternal details) {
             if (details.isDirectory()) {
                 visitDir(details);

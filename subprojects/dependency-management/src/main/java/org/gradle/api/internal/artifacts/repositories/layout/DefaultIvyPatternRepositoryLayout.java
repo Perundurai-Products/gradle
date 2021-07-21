@@ -29,13 +29,14 @@ import java.util.Set;
  * Optionally supports a Maven style layout for the 'organisation' part, replacing any dots with forward slashes.
  */
 public class DefaultIvyPatternRepositoryLayout extends AbstractRepositoryLayout implements IvyPatternRepositoryLayout {
-    private final Set<String> artifactPatterns = new LinkedHashSet<String>();
-    private final Set<String> ivyPatterns = new LinkedHashSet<String>();
+    private final Set<String> artifactPatterns = new LinkedHashSet<>();
+    private final Set<String> ivyPatterns = new LinkedHashSet<>();
     private boolean m2compatible;
 
     /**
      * {@inheritDoc}
      */
+    @Override
     public void artifact(String pattern) {
         artifactPatterns.add(pattern);
     }
@@ -43,6 +44,7 @@ public class DefaultIvyPatternRepositoryLayout extends AbstractRepositoryLayout 
     /**
      * {@inheritDoc}
      */
+    @Override
     public void ivy(String pattern) {
         ivyPatterns.add(pattern);
     }
@@ -50,6 +52,7 @@ public class DefaultIvyPatternRepositoryLayout extends AbstractRepositoryLayout 
     /**
      * {@inheritDoc}
      */
+    @Override
     public boolean getM2Compatible() {
         return m2compatible;
     }
@@ -57,6 +60,7 @@ public class DefaultIvyPatternRepositoryLayout extends AbstractRepositoryLayout 
     /**
      * {@inheritDoc}
      */
+    @Override
     public void setM2compatible(boolean m2compatible) {
         this.m2compatible = m2compatible;
     }

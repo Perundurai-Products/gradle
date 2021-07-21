@@ -17,10 +17,10 @@ package org.gradle.api.tasks;
 
 import groovy.lang.Closure;
 import org.gradle.api.Action;
-import org.gradle.api.Incubating;
 import org.gradle.api.InvalidUserDataException;
 import org.gradle.api.NamedDomainObjectContainer;
 import org.gradle.api.PolymorphicDomainObjectContainer;
+import org.gradle.api.Project;
 import org.gradle.api.Task;
 import org.gradle.api.UnknownTaskException;
 import org.gradle.api.provider.Provider;
@@ -94,7 +94,7 @@ public interface TaskContainer extends TaskCollection<Task>, PolymorphicDomainOb
      * </table>
      *
      * <p>After the task is added, it is made available as a property of the project, so that you can reference the task
-     * by name in your build file.  See <a href="../Project.html#properties">here</a> for more details.</p>
+     * by name in your build file.</p>
      *
      * <p>If a task with the given name already exists in this container and the <code>{@value org.gradle.api.Task#TASK_OVERWRITE}</code>
      * option is not set to true, an exception is thrown.</p>
@@ -103,6 +103,7 @@ public interface TaskContainer extends TaskCollection<Task>, PolymorphicDomainOb
      * @return The newly created task object
      * @throws InvalidUserDataException If a task with the given name already exists in this project.
      * @throws NullPointerException If any of the values in <code>{@value org.gradle.api.Task#TASK_CONSTRUCTOR_ARGS}</code> is null.
+     * @see Project#getProperties()  More information about how tasks are exposed by name in build scripts
      */
     Task create(Map<String, ?> options) throws InvalidUserDataException;
 
@@ -112,12 +113,13 @@ public interface TaskContainer extends TaskCollection<Task>, PolymorphicDomainOb
      * closure is used to configure the task before it is returned by this method.</p>
      *
      * <p>After the task is added, it is made available as a property of the project, so that you can reference the task
-     * by name in your build file. See <a href="../Project.html#properties">here</a> for more details.</p>
+     * by name in your build file.</p>
      *
      * @param options The task creation options.
      * @param configureClosure The closure to use to configure the task.
      * @return The newly created task object
      * @throws InvalidUserDataException If a task with the given name already exists in this project.
+     * @see Project#getProperties()  More information about how tasks are exposed by name in build scripts
      */
     Task create(Map<String, ?> options, Closure configureClosure) throws InvalidUserDataException;
 
@@ -126,38 +128,44 @@ public interface TaskContainer extends TaskCollection<Task>, PolymorphicDomainOb
      * the task before it is returned by this method.</p>
      *
      * <p>After the task is added, it is made available as a property of the project, so that you can reference the task
-     * by name in your build file. See <a href="../Project.html#properties">here</a> for more details.</p>
+     * by name in your build file.</p>
      *
      * @param name The name of the task to be created
      * @param configureClosure The closure to use to configure the task.
      * @return The newly created task object
      * @throws InvalidUserDataException If a task with the given name already exists in this project.
+     * @see Project#getProperties()  More information about how tasks are exposed by name in build scripts
      */
+    @Override
     Task create(String name, Closure configureClosure) throws InvalidUserDataException;
 
     /**
      * <p>Creates a {@link Task} with the given name and adds it to this container.</p>
      *
      * <p>After the task is added, it is made available as a property of the project, so that you can reference the task
-     * by name in your build file. See <a href="../Project.html#properties">here</a> for more details.</p>
+     * by name in your build file.</p>
      *
      * @param name The name of the task to be created
      * @return The newly created task object
      * @throws InvalidUserDataException If a task with the given name already exists in this project.
+     * @see Project#getProperties()  More information about how tasks are exposed by name in build scripts
      */
+    @Override
     Task create(String name) throws InvalidUserDataException;
 
     /**
      * <p>Creates a {@link Task} with the given name and type, and adds it to this container.</p>
      *
      * <p>After the task is added, it is made available as a property of the project, so that you can reference the task
-     * by name in your build file. See <a href="../Project.html#properties">here</a> for more details.</p>
+     * by name in your build file.</p>
      *
      * @param name The name of the task to be created.
      * @param type The type of task to create.
      * @return The newly created task object
      * @throws InvalidUserDataException If a task with the given name already exists in this project.
+     * @see Project#getProperties()  More information about how tasks are exposed by name in build scripts
      */
+    @Override
     <T extends Task> T create(String name, Class<T> type) throws InvalidUserDataException;
 
     /**
@@ -166,7 +174,7 @@ public interface TaskContainer extends TaskCollection<Task>, PolymorphicDomainOb
      * {@code NullPointerException} will be thrown</p>
      *
      * <p>After the task is added, it is made available as a property of the project, so that you can reference the task
-     * by name in your build file. See <a href="../Project.html#properties">here</a> for more details.</p>
+     * by name in your build file.</p>
      *
      * @param name The name of the task to be created.
      * @param type The type of task to create.
@@ -174,23 +182,25 @@ public interface TaskContainer extends TaskCollection<Task>, PolymorphicDomainOb
      * @return The newly created task object
      * @throws InvalidUserDataException If a task with the given name already exists in this project.
      * @throws NullPointerException If any of the values in {@code constructorArgs} is null.
+     * @see Project#getProperties()  More information about how tasks are exposed by name in build scripts
      * @since 4.7
      */
-    @Incubating
     <T extends Task> T create(String name, Class<T> type, Object... constructorArgs) throws InvalidUserDataException;
 
     /**
      * <p>Creates a {@link Task} with the given name and type, configures it with the given action, and adds it to this container.</p>
      *
      * <p>After the task is added, it is made available as a property of the project, so that you can reference the task
-     * by name in your build file. See <a href="../Project.html#properties">here</a> for more details.</p>
+     * by name in your build file.</p>
      *
      * @param name The name of the task to be created.
      * @param type The type of task to create.
      * @param configuration The action to configure the task with.
      * @return The newly created task object.
      * @throws InvalidUserDataException If a task with the given name already exists in this project.
+     * @see Project#getProperties()  More information about how tasks are exposed by name in build scripts
      */
+    @Override
     <T extends Task> T create(String name, Class<T> type, Action<? super T> configuration) throws InvalidUserDataException;
 
     /**
@@ -204,6 +214,7 @@ public interface TaskContainer extends TaskCollection<Task>, PolymorphicDomainOb
      * @throws InvalidUserDataException If a task with the given name already exists in this project.
      * @since 4.9
      */
+    @Override
     TaskProvider<Task> register(String name, Action<? super Task> configurationAction) throws InvalidUserDataException;
 
     /**
@@ -219,6 +230,7 @@ public interface TaskContainer extends TaskCollection<Task>, PolymorphicDomainOb
      * @throws InvalidUserDataException If a task with the given name already exists in this project.
      * @since 4.9
      */
+    @Override
     <T extends Task> TaskProvider<T> register(String name, Class<T> type, Action<? super T> configurationAction) throws InvalidUserDataException;
 
     /**
@@ -233,6 +245,7 @@ public interface TaskContainer extends TaskCollection<Task>, PolymorphicDomainOb
      * @throws InvalidUserDataException If a task with the given name already exists in this project.
      * @since 4.9
      */
+    @Override
     <T extends Task> TaskProvider<T> register(String name, Class<T> type) throws InvalidUserDataException;
 
     /**
@@ -253,13 +266,14 @@ public interface TaskContainer extends TaskCollection<Task>, PolymorphicDomainOb
     /**
      * Defines a new task, which will be created when it is required. A task is 'required' when the task is located using query methods such as {@link TaskCollection#getByName(java.lang.String)}, when the task is added to the task graph for execution or when {@link Provider#get()} is called on the return value of this method.
      *
-     * <p>It is generally more efficient to use this method instead of {@link #create(java.lang.String)}, as that methods will eagerly create he task, regardless of whether that task is required for the current build or not. This method, on the other hand, will defer creation until required.</p>
+     * <p>It is generally more efficient to use this method instead of {@link #create(java.lang.String)}, as that method will eagerly create the task, regardless of whether that task is required for the current build or not. This method, on the other hand, will defer creation until required.</p>
      *
      * @param name The name of the task.
      * @return A {@link Provider} that whose value will be the task, when queried.
      * @throws InvalidUserDataException If a task with the given name already exists in this project.
      * @since 4.9
      */
+    @Override
     TaskProvider<Task> register(String name) throws InvalidUserDataException;
 
     /**
@@ -267,10 +281,11 @@ public interface TaskContainer extends TaskCollection<Task>, PolymorphicDomainOb
      * same name.</p>
      *
      * <p>After the task is added, it is made available as a property of the project, so that you can reference the task
-     * by name in your build file. See <a href="../Project.html#properties">here</a> for more details.</p>
+     * by name in your build file.</p>
      *
      * @param name The name of the task to be created
      * @return The newly created task object
+     * @see Project#getProperties()  More information about how tasks are exposed by name in build scripts
      */
     Task replace(String name);
 
@@ -279,11 +294,12 @@ public interface TaskContainer extends TaskCollection<Task>, PolymorphicDomainOb
      * task of the same name.</p>
      *
      * <p>After the task is added, it is made available as a property of the project, so that you can reference the task
-     * by name in your build file. See <a href="../Project.html#properties">here</a> for more details.</p>
+     * by name in your build file.</p>
      *
      * @param name The name of the task to be created.
      * @param type The type of task to create.
      * @return The newly created task object
+     * @see Project#getProperties()  More information about how tasks are exposed by name in build scripts
      */
     <T extends Task> T replace(String name, Class<T> type);
 }

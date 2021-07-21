@@ -14,13 +14,14 @@
  * limitations under the License.
  */
 package org.gradle.scala
+
 import org.gradle.integtests.fixtures.ZincScalaCompileFixture
 import org.gradle.integtests.fixtures.MultiVersionIntegrationSpec
 import org.gradle.integtests.fixtures.TargetCoverage
 import org.gradle.integtests.fixtures.ScalaCoverage
 import org.junit.Rule
 
-import static org.hamcrest.Matchers.startsWith
+import static org.hamcrest.CoreMatchers.startsWith
 
 @TargetCoverage({ScalaCoverage.DEFAULT})
 class ScalaBasePluginIntegrationTest extends MultiVersionIntegrationSpec {
@@ -37,7 +38,7 @@ class ScalaBasePluginIntegrationTest extends MultiVersionIntegrationSpec {
         ${mavenCentralRepository()}
 
         dependencies {
-           customCompile "org.scala-lang:scala-library:$version"
+           customImplementation "org.scala-lang:scala-library:$version"
         }
 
         task scaladoc(type: ScalaDoc) {
@@ -67,7 +68,7 @@ sourceSets {
 ${mavenCentralRepository()}
 
 dependencies {
-    customCompile "org.scala-lang:scala-library:$version"
+    customImplementation "org.scala-lang:scala-library:$version"
 }
 
 task scaladoc(type: ScalaDoc) {
@@ -76,8 +77,8 @@ task scaladoc(type: ScalaDoc) {
 
 task verify {
     doLast {
-        assert configurations.customCompile.state.toString() == "UNRESOLVED"
-        assert configurations.customRuntime.state.toString() == "UNRESOLVED"
+        assert configurations.customCompileClasspath.state.toString() == "UNRESOLVED"
+        assert configurations.customRuntimeClasspath.state.toString() == "UNRESOLVED"
     }
 }
         """
@@ -98,7 +99,7 @@ task verify {
             ${mavenCentralRepository()}
 
             dependencies {
-                compile "com.google.guava:guava:11.0.2"
+                implementation "com.google.guava:guava:11.0.2"
             }
         """
 

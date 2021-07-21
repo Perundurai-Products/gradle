@@ -17,13 +17,12 @@
 package org.gradle.process.internal
 
 import org.gradle.api.Action
-import org.gradle.api.internal.file.TmpDirTemporaryFileProvider
+import org.gradle.api.internal.file.temp.GradleUserHomeTemporaryFileProvider
 import org.gradle.api.logging.LogLevel
 import org.gradle.api.logging.Logging
 import org.gradle.internal.Actions
-import org.gradle.internal.event.ListenerBroadcast
 import org.gradle.internal.id.LongIdGenerator
-import org.gradle.internal.jvm.inspection.CachingJvmVersionDetector
+import org.gradle.internal.jvm.inspection.CachingJvmMetadataDetector
 import org.gradle.internal.jvm.inspection.DefaultJvmVersionDetector
 import org.gradle.internal.remote.ObjectConnectionBuilder
 import org.gradle.process.internal.health.memory.MemoryManager
@@ -31,7 +30,9 @@ import org.gradle.process.internal.worker.DefaultWorkerProcessFactory
 import org.gradle.process.internal.worker.WorkerProcess
 import org.gradle.process.internal.worker.WorkerProcessBuilder
 import org.gradle.process.internal.worker.WorkerProcessContext
-import org.gradle.util.TextUtil
+import org.gradle.util.Requires
+import org.gradle.util.TestPrecondition
+import org.gradle.util.internal.TextUtil
 import spock.lang.Timeout
 import spock.lang.Unroll
 
@@ -41,12 +42,7 @@ import static org.junit.Assert.assertTrue
 @Timeout(120)
 class WorkerProcessIntegrationTest extends AbstractWorkerProcessIntegrationSpec {
     private final TestListenerInterface listenerMock = Mock(TestListenerInterface.class)
-    private final ListenerBroadcast<TestListenerInterface> broadcast = new ListenerBroadcast<TestListenerInterface>(TestListenerInterface.class)
-    private final RemoteExceptionListener exceptionListener = new RemoteExceptionListener(broadcast.source)
-
-    def setup() {
-        broadcast.add(listenerMock)
-    }
+    private final RemoteExceptionListener exceptionListener = new RemoteExceptionListener(listenerMock)
 
     ChildProcess worker(Action<? super WorkerProcessContext> action) {
         return new ChildProcess(action)
@@ -54,12 +50,12 @@ class WorkerProcessIntegrationTest extends AbstractWorkerProcessIntegrationSpec 
 
     void execute(ChildProcess... processes) throws Throwable {
         for (ChildProcess process : processes) {
-            process.start();
+            process.start()
         }
         for (ChildProcess process : processes) {
-            process.waitForStop();
+            process.waitForStop()
         }
-        exceptionListener.rethrow();
+        exceptionListener.rethrow()
     }
 
     def workerProcessStdoutAndStderrIsForwardedToThisProcess() {
@@ -89,14 +85,24 @@ class WorkerProcessIntegrationTest extends AbstractWorkerProcessIntegrationSpec 
         "ERROR"  | "org.gradle.process.internal.LogSerializableLogAction" | new LogSerializableLogAction(LogLevel.ERROR, "error log statement")  | "error log statement"
     }
 
-    @Unroll
     def "worker process respects log level setting"() {
         given:
         LoggingProcess loggingProcess = new LoggingProcess(new LogSerializableLogAction(LogLevel.INFO, "info log statement"))
         String expectedLogStatement = "[[INFO] [org.gradle.process.internal.LogSerializableLogAction] info log statement]"
 
         when:
-        workerFactory = new DefaultWorkerProcessFactory(loggingManager(LogLevel.LIFECYCLE), server, classPathRegistry, new LongIdGenerator(), tmpDir.file("gradleUserHome"), new TmpDirTemporaryFileProvider(), execHandleFactory, new CachingJvmVersionDetector(new DefaultJvmVersionDetector(execHandleFactory)), outputEventListener, Stub(MemoryManager))
+        workerFactory = new DefaultWorkerProcessFactory(
+            loggingManager(LogLevel.LIFECYCLE),
+            server,
+            classPathRegistry,
+            new LongIdGenerator(),
+            gradleUserHome(),
+            new GradleUserHomeTemporaryFileProvider({ gradleUserHome() }),
+            execHandleFactory,
+            new DefaultJvmVersionDetector(new CachingJvmMetadataDetector(defaultJvmMetadataDetector)),
+            outputEventListener,
+            Stub(MemoryManager)
+        )
         and:
         execute(worker(loggingProcess))
 
@@ -104,7 +110,18 @@ class WorkerProcessIntegrationTest extends AbstractWorkerProcessIntegrationSpec 
         !outputEventListener.toString().contains(TextUtil.toPlatformLineSeparators(expectedLogStatement))
 
         when:
-        workerFactory = new DefaultWorkerProcessFactory(loggingManager(LogLevel.INFO), server, classPathRegistry, new LongIdGenerator(), tmpDir.file("gradleUserHome"), new TmpDirTemporaryFileProvider(), execHandleFactory, new CachingJvmVersionDetector(new DefaultJvmVersionDetector(execHandleFactory)), outputEventListener, Stub(MemoryManager))
+        workerFactory = new DefaultWorkerProcessFactory(
+            loggingManager(LogLevel.INFO),
+            server,
+            classPathRegistry,
+            new LongIdGenerator(),
+            gradleUserHome(),
+            new GradleUserHomeTemporaryFileProvider({ gradleUserHome() }),
+            execHandleFactory,
+            new DefaultJvmVersionDetector(new CachingJvmMetadataDetector(defaultJvmMetadataDetector)),
+            outputEventListener,
+            Stub(MemoryManager)
+        )
         and:
         execute(worker(loggingProcess))
 
@@ -126,15 +143,13 @@ class WorkerProcessIntegrationTest extends AbstractWorkerProcessIntegrationSpec 
 
     def thisProcessCanSendEventsToWorkerProcess() {
         when:
-        execute(worker(new PingRemoteProcess()).onServer(new Action<ObjectConnectionBuilder>() {
-            public void execute(ObjectConnectionBuilder objectConnection) {
-                TestListenerInterface listener = objectConnection.addOutgoing(TestListenerInterface.class)
-                listener.send("1", 0)
-                listener.send("1", 1)
-                listener.send("1", 2)
-                listener.send("stop", 3)
-            }
-        }))
+        execute(worker(new PingRemoteProcess()).onServer { objectConnection ->
+            TestListenerInterface listener = objectConnection.addOutgoing(TestListenerInterface.class)
+            listener.send("1", 0)
+            listener.send("1", 1)
+            listener.send("1", 2)
+            listener.send("stop", 3)
+        })
 
         then:
         noExceptionThrown()
@@ -152,7 +167,7 @@ class WorkerProcessIntegrationTest extends AbstractWorkerProcessIntegrationSpec 
         0 * listenerMock._
     }
 
-    def handlesWorkerProcessWhichCrashes() {
+    def handlesWorkerProcessThatCrashes() {
         when:
         execute(worker(new CrashingRemoteProcess()).expectStopFailure())
 
@@ -160,14 +175,34 @@ class WorkerProcessIntegrationTest extends AbstractWorkerProcessIntegrationSpec 
         (0..1) * listenerMock.send("message 1", 1)
         (0..1) * listenerMock.send("message 2", 2)
         0 * listenerMock._
+
+        and:
+        stdout.stdOut == ""
+        stdout.stdErr == ""
     }
 
-    def handlesWorkerActionWhichThrowsException() {
+    def handlesWorkerActionThatThrowsException() {
         when:
         execute(worker(new BrokenRemoteProcess()).expectStopFailure())
 
         then:
-        noExceptionThrown()
+        stdout.stdOut == ""
+        stdout.stdErr.contains("java.lang.RuntimeException: broken")
+    }
+
+    def handlesWorkerActionThatThrowsExceptionAndWhenMessagesAreSentToWorker() {
+        when:
+        execute(worker(new BrokenRemoteProcess()).expectStopFailure().onServer { objectConnection ->
+            TestListenerInterface listener = objectConnection.addOutgoing(TestListenerInterface.class)
+            listener.send("1", 0)
+            listener.send("1", 1)
+            listener.send("1", 2)
+            listener.send("stop", 3)
+        })
+
+        then:
+        stdout.stdOut == ""
+        stdout.stdErr.contains("java.lang.RuntimeException: broken")
     }
 
     def handlesWorkerActionThatLeavesThreadsRunning() {
@@ -180,13 +215,14 @@ class WorkerProcessIntegrationTest extends AbstractWorkerProcessIntegrationSpec 
         0 * listenerMock._
     }
 
-    def handlesWorkerProcessWhichNeverConnects() {
+    def handlesWorkerProcessThatNeverConnects() {
         when:
         workerFactory.setConnectTimeoutSeconds(3)
         execute(worker(Actions.doNothing()).jvmArgs("-Dorg.gradle.worker.test.stuck").expectStartFailure())
 
         then:
-        noExceptionThrown()
+        stdout.stdOut == ""
+        stdout.stdErr == ""
     }
 
     def handlesWorkerActionThatCannotBeDeserialized() {
@@ -194,7 +230,8 @@ class WorkerProcessIntegrationTest extends AbstractWorkerProcessIntegrationSpec 
         execute(worker(new NotDeserializable()).expectStartFailure())
 
         then:
-        noExceptionThrown()
+        stdout.stdOut == ""
+        stdout.stdErr.contains("java.io.IOException: Broken")
     }
 
     def handlesWorkerProcessWhenJvmFailsToStart() {
@@ -202,7 +239,8 @@ class WorkerProcessIntegrationTest extends AbstractWorkerProcessIntegrationSpec 
         execute(worker(Actions.doNothing()).jvmArgs("--broken").expectStartFailure())
 
         then:
-        noExceptionThrown()
+        stdout.stdOut == ""
+        stdout.stdErr.contains("--broken")
     }
 
     def "handles output after worker messaging services are stopped"() {
@@ -212,7 +250,7 @@ class WorkerProcessIntegrationTest extends AbstractWorkerProcessIntegrationSpec 
         then:
         noExceptionThrown()
         stdout.stdOut.contains("Goodbye, world!")
-        ! stdout.stdErr.contains("java.lang.IllegalStateException")
+        stdout.stdErr == ""
     }
 
     def "handles output during worker shutdown"() {
@@ -220,30 +258,39 @@ class WorkerProcessIntegrationTest extends AbstractWorkerProcessIntegrationSpec 
         execute(worker(new MessageProducingProcess()))
 
         then:
-        noExceptionThrown()
-        ! stdout.stdErr.contains("java.lang.IllegalStateException")
+        stdout.stdErr == ""
+    }
+
+    @Requires(TestPrecondition.NOT_WINDOWS)
+    def "handles output when worker fails before logging is started"() {
+        when:
+        execute(worker(new RemoteProcess()).jvmArgs("-Dorg.gradle.native.dir=/dev/null").expectStartFailure())
+
+        then:
+        stdout.stdOut == ""
+        stdout.stdErr.contains("net.rubygrapefruit.platform.NativeException: Failed to load native library")
     }
 
     private class ChildProcess {
-        private boolean stopFails;
-        private boolean startFails;
-        private WorkerProcess proc;
-        private Action<? super WorkerProcessContext> action;
-        private List<String> jvmArgs = Collections.emptyList();
-        private Action<ObjectConnectionBuilder> serverAction;
+        private boolean stopFails
+        private boolean startFails
+        private WorkerProcess proc
+        private Action<? super WorkerProcessContext> action
+        private List<String> jvmArgs = Collections.emptyList()
+        private Action<ObjectConnectionBuilder> serverAction
 
         public ChildProcess(Action<? super WorkerProcessContext> action) {
-            this.action = action;
+            this.action = action
         }
 
         ChildProcess expectStopFailure() {
-            stopFails = true;
-            return this;
+            stopFails = true
+            return this
         }
 
         ChildProcess expectStartFailure() {
-            startFails = true;
-            return this;
+            startFails = true
+            return this
         }
 
         public void start() {
@@ -253,9 +300,9 @@ class WorkerProcessIntegrationTest extends AbstractWorkerProcessIntegrationSpec 
             builder.javaCommand.systemProperty("test.system.property", "value")
             builder.javaCommand.environment("TEST_ENV_VAR", "value")
 
-            builder.javaCommand.jvmArgs(jvmArgs);
+            builder.javaCommand.jvmArgs(jvmArgs)
 
-            proc = builder.build();
+            proc = builder.build()
             try {
                 proc.start()
                 assertFalse(startFails)
@@ -263,7 +310,7 @@ class WorkerProcessIntegrationTest extends AbstractWorkerProcessIntegrationSpec 
                 if (!startFails) {
                     throw new AssertionError(e)
                 }
-                return;
+                return
             }
             proc.connection.addIncoming(TestListenerInterface.class, exceptionListener)
             if (serverAction != null) {
@@ -303,7 +350,7 @@ class StdOutSerializableLogAction extends SerializableLogAction {
     }
 
     void execute() {
-        System.out.println(message);
+        System.out.println(message)
     }
 }
 
@@ -313,7 +360,7 @@ class StdErrSerializableLogAction extends SerializableLogAction {
     }
 
     void execute() {
-        System.err.println(message);
+        System.err.println(message)
     }
 }
 
@@ -338,5 +385,5 @@ abstract class SerializableLogAction implements Serializable {
         this.message = message
     }
 
-    abstract void execute();
+    abstract void execute()
 }

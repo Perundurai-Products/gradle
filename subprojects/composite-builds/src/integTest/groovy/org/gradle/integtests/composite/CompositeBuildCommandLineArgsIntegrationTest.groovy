@@ -19,6 +19,7 @@ package org.gradle.integtests.composite
 import org.gradle.integtests.fixtures.build.BuildTestFile
 import org.gradle.integtests.fixtures.resolve.ResolveTestFixture
 import org.gradle.test.fixtures.maven.MavenModule
+
 /**
  * Tests for resolving dependency artifacts with substitution within a composite build.
  */
@@ -67,7 +68,7 @@ class CompositeBuildCommandLineArgsIntegrationTest extends AbstractCompositeBuil
 
         [buildA, buildB].each {
             it.buildFile << """
-    if (System.properties['passedProperty'] != "foo") {
+    if (providers.systemProperty('passedProperty').forUseAtConfigurationTime().orNull != "foo") {
         throw new RuntimeException("property not passed to build")
     }
 """
@@ -110,6 +111,7 @@ rootProject.buildFileName='build-copy.gradle'
         buildA.file("build-copy.gradle").copyFrom(buildA.buildFile)
 
         when:
+        executer.expectDocumentedDeprecationWarning("Specifying custom build file location has been deprecated. This is scheduled to be removed in Gradle 8.0. Consult the upgrading guide for further information: https://docs.gradle.org/current/userguide/upgrading_version_7.html#configuring_custom_build_layout")
         execute(buildA, ":checkDeps", ["--build-file", "build-copy.gradle"])
 
         then:
@@ -126,6 +128,7 @@ includeBuild '../buildB'
 """
 
         when:
+        executer.expectDocumentedDeprecationWarning("Specifying custom settings file location has been deprecated. This is scheduled to be removed in Gradle 8.0. Consult the upgrading guide for further information: https://docs.gradle.org/current/userguide/upgrading_version_7.html#configuring_custom_build_layout")
         execute(buildA, ":checkDeps", ["--settings-file", "settings-copy.gradle"])
 
         then:

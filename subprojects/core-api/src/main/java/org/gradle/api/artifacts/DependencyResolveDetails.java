@@ -16,7 +16,7 @@
 
 package org.gradle.api.artifacts;
 
-import org.gradle.api.Incubating;
+import org.gradle.api.Action;
 
 /**
  * Provides details about a dependency when it is resolved.
@@ -80,6 +80,13 @@ public interface DependencyResolveDetails {
      *
      * @since 4.5
      */
-    @Incubating
     DependencyResolveDetails because(String description);
+
+    /**
+     * Configures the artifact selection for the target component of this dependency resolution rule.
+     * @param details the artifact selection details
+     *
+     * @since 6.6
+     */
+    DependencyResolveDetails artifactSelection(Action<? super ArtifactSelectionDetails> details);
 }

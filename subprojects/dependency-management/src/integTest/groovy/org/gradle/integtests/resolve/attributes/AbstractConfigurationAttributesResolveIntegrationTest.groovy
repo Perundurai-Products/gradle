@@ -18,11 +18,10 @@
 package org.gradle.integtests.resolve.attributes
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.integtests.fixtures.FluidDependenciesResolveRunner
+import org.gradle.integtests.fixtures.extensions.FluidDependenciesResolveTest
 import org.gradle.integtests.fixtures.resolve.ResolveTestFixture
-import org.junit.runner.RunWith
 
-@RunWith(FluidDependenciesResolveRunner)
+@FluidDependenciesResolveTest
 abstract class AbstractConfigurationAttributesResolveIntegrationTest extends AbstractIntegrationSpec {
 
     abstract String getTypeDefs()
@@ -33,6 +32,12 @@ abstract class AbstractConfigurationAttributesResolveIntegrationTest extends Abs
 
     String getFreeRelease() {
         "${free}; ${release}"
+    }
+
+    def setup() {
+        settingsFile << """
+            rootProject.name = 'test'
+        """
     }
 
     abstract String getDebug()
@@ -100,7 +105,7 @@ abstract class AbstractConfigurationAttributesResolveIntegrationTest extends Abs
         def resolveDebug = new ResolveTestFixture(buildFile, '_compileFreeDebug')
 
         given:
-        file('settings.gradle') << """rootProject.name='test' 
+        file('settings.gradle') << """rootProject.name='test'
 include 'a', 'b'
 """
         buildFile << """
@@ -272,12 +277,12 @@ include 'a', 'b'
                     }
                 }
                 task fooJar(type: Jar) {
-                   baseName = 'b-foo'
+                   archiveBaseName = 'b-foo'
                 }
                 task barJar(type: Jar) {
-                   baseName = 'b-bar'
+                   archiveBaseName = 'b-bar'
                 }
-                tasks.withType(Jar) { destinationDir = buildDir }
+                tasks.withType(Jar) { destinationDirectory = buildDir }
                 artifacts {
                     freeDebug fooJar
                     freeRelease fooJar
@@ -390,10 +395,9 @@ include 'a', 'b'
         fails ':a:checkDebug'
 
         then:
-        failure.assertHasCause '''Variant 'bar' in project :b does not match the consumer attributes
-Variant 'bar':
-  - Required buildType 'debug' and found incompatible value 'release'.
-  - Required flavor 'free' and found compatible value 'free'.'''
+        failure.assertHasCause """Variant 'bar' in project :b does not match the consumer attributes
+Variant 'bar' capability test:b:unspecified declares attribute 'flavor' with value 'free':
+  - Incompatible because this component declares attribute 'buildType' with value 'release' and the consumer needed attribute 'buildType' with value 'debug'"""
 
         when:
         run ':a:checkRelease'
@@ -453,7 +457,7 @@ Variant 'bar':
                         attribute(buildType)
                         attribute(flavor)
                     }
-                    
+
                     _compileFreeDebug project(':b')
                 }
                 task checkDebug(dependsOn: configurations._compileFreeDebug) {
@@ -469,8 +473,8 @@ Variant 'bar':
                     create 'default'
                 }
                 task barJar(type: Jar) {
-                   baseName = 'b-bar'
-                   destinationDir = buildDir
+                   archiveBaseName = 'b-bar'
+                   destinationDirectory = buildDir
                 }
                 artifacts {
                     'default' barJar
@@ -526,13 +530,13 @@ Variant 'bar':
         failure.assertHasDescription("Could not determine the dependencies of task ':a:checkDebug'.")
         failure.assertHasCause("Could not resolve all task dependencies for configuration ':a:_compileFreeDebug'.")
         failure.assertHasCause("Could not resolve project :b.")
-        failure.assertHasCause("""Unable to find a matching variant of project :b:
-  - Variant 'bar':
-      - Required buildType 'debug' and found incompatible value 'release'.
-      - Required flavor 'free' but no value provided.
-  - Variant 'foo':
-      - Required buildType 'debug' and found incompatible value 'release'.
-      - Required flavor 'free' and found compatible value 'free'.""")
+        failure.assertHasCause("""No matching variant of project :b was found. The consumer was configured to find attribute 'flavor' with value 'free', attribute 'buildType' with value 'debug' but:
+  - Variant 'bar' capability test:b:unspecified:
+      - Incompatible because this component declares attribute 'buildType' with value 'release' and the consumer needed attribute 'buildType' with value 'debug'
+      - Other compatible attribute:
+          - Doesn't say anything about flavor (required 'free')
+  - Variant 'foo' capability test:b:unspecified declares attribute 'flavor' with value 'free':
+      - Incompatible because this component declares attribute 'buildType' with value 'release' and the consumer needed attribute 'buildType' with value 'debug'""")
     }
 
     def "does not select default configuration when consumer has no attributes and configurations with attributes"() {
@@ -575,10 +579,13 @@ Variant 'bar':
   - bar
   - foo
 All of them match the consumer attributes:
-  - Variant 'bar': Found buildType 'release' but wasn't required.
-  - Variant 'foo':
-      - Found buildType 'release' but wasn't required.
-      - Found flavor 'free' but wasn't required.""")
+  - Variant 'bar' capability test:b:unspecified:
+      - Unmatched attribute:
+          - Provides buildType 'release' but the consumer didn't ask for it
+  - Variant 'foo' capability test:b:unspecified:
+      - Unmatched attributes:
+          - Provides buildType 'release' but the consumer didn't ask for it
+          - Provides flavor 'free' but the consumer didn't ask for it""")
     }
 
     def "does not select default configuration when no configurations with attributes and default configuration is not consumable"() {
@@ -617,16 +624,19 @@ All of them match the consumer attributes:
         fails ':a:checkDebug'
 
         then:
-        failure.assertHasCause """Unable to find a matching configuration of project :b:
+        failure.assertHasCause """No matching configuration of project :b was found. The consumer was configured to find attribute 'flavor' with value 'free', attribute 'buildType' with value 'debug' but:
   - Configuration 'archives':
-      - Required buildType 'debug' but no value provided.
-      - Required flavor 'free' but no value provided.
+      - Other compatible attributes:
+          - Doesn't say anything about buildType (required 'debug')
+          - Doesn't say anything about flavor (required 'free')
   - Configuration 'bar':
-      - Required buildType 'debug' but no value provided.
-      - Required flavor 'free' but no value provided.
+      - Other compatible attributes:
+          - Doesn't say anything about buildType (required 'debug')
+          - Doesn't say anything about flavor (required 'free')
   - Configuration 'foo':
-      - Required buildType 'debug' but no value provided.
-      - Required flavor 'free' but no value provided."""
+      - Other compatible attributes:
+          - Doesn't say anything about buildType (required 'debug')
+          - Doesn't say anything about flavor (required 'free')"""
     }
 
     def "does not select explicit configuration when it's not consumable"() {
@@ -705,13 +715,11 @@ All of them match the consumer attributes:
         fails ':a:checkDebug'
 
         then:
-        failure.assertHasCause '''Unable to find a matching variant of project :b:
-  - Variant 'bar':
-      - Required buildType 'debug' and found incompatible value 'release'.
-      - Required flavor 'free' and found incompatible value 'paid'.
-  - Variant 'foo':
-      - Required buildType 'debug' and found incompatible value 'release'.
-      - Required flavor 'free' and found compatible value 'free'.'''
+        failure.assertHasCause """No matching variant of project :b was found. The consumer was configured to find attribute 'flavor' with value 'free', attribute 'buildType' with value 'debug' but:
+  - Variant 'bar' capability test:b:unspecified:
+      - Incompatible because this component declares attribute 'buildType' with value 'release', attribute 'flavor' with value 'paid' and the consumer needed attribute 'buildType' with value 'debug', attribute 'flavor' with value 'free'
+  - Variant 'foo' capability test:b:unspecified declares attribute 'flavor' with value 'free':
+      - Incompatible because this component declares attribute 'buildType' with value 'release' and the consumer needed attribute 'buildType' with value 'debug'"""
 
     }
 
@@ -721,7 +729,7 @@ All of them match the consumer attributes:
         buildFile << """
             $typeDefs
 
-            project(':a') {                
+            project(':a') {
                 configurations {
                     _compileFreeDebug.attributes { $freeDebug }
                 }
@@ -748,15 +756,15 @@ All of them match the consumer attributes:
                     }
                 }
                 task defaultJar(type: Jar) {
-                   baseName = 'b-default'
+                   archiveBaseName = 'b-default'
                 }
                 task fooJar(type: Jar) {
-                   baseName = 'b-foo'
+                   archiveBaseName = 'b-foo'
                 }
                 task barJar(type: Jar) {
-                   baseName = 'b-bar'
+                   archiveBaseName = 'b-bar'
                 }
-                tasks.withType(Jar) { destinationDir = buildDir }
+                tasks.withType(Jar) { destinationDirectory = buildDir }
                 artifacts {
                     'default' defaultJar
                     foo fooJar
@@ -807,15 +815,15 @@ All of them match the consumer attributes:
                     }
                 }
                 task defaultJar(type: Jar) {
-                   baseName = 'b-default'
+                   archiveBaseName = 'b-default'
                 }
                 task fooJar(type: Jar) {
-                   baseName = 'b-foo'
+                   archiveBaseName = 'b-foo'
                 }
                 task barJar(type: Jar) {
-                   baseName = 'b-bar'
+                   archiveBaseName = 'b-bar'
                 }
-                tasks.withType(Jar) { destinationDir = buildDir }
+                tasks.withType(Jar) { destinationDirectory = buildDir }
                 artifacts {
                     'default' defaultJar
                     foo fooJar
@@ -829,16 +837,16 @@ All of them match the consumer attributes:
         fails ':a:checkDebug'
 
         then:
-        failure.assertHasCause("""Cannot choose between the following variants of project :b:
+        failure.assertHasCause("""The consumer was configured to find attribute 'flavor' with value 'free', attribute 'buildType' with value 'debug'. However we cannot choose between the following variants of project :b:
   - bar
   - foo
 All of them match the consumer attributes:
-  - Variant 'bar':
-      - Required buildType 'debug' but no value provided.
-      - Required flavor 'free' and found compatible value 'free'.
-  - Variant 'foo':
-      - Required buildType 'debug' and found compatible value 'debug'.
-      - Required flavor 'free' but no value provided.""")
+  - Variant 'bar' capability test:b:unspecified declares attribute 'flavor' with value 'free':
+      - Unmatched attribute:
+          - Doesn't say anything about buildType (required 'debug')
+  - Variant 'foo' capability test:b:unspecified declares attribute 'buildType' with value 'debug':
+      - Unmatched attribute:
+          - Doesn't say anything about flavor (required 'free')""")
     }
 
     def "selects configuration when it has more attributes than the resolved configuration"() {
@@ -921,14 +929,12 @@ All of them match the consumer attributes:
         fails ':a:check'
 
         then:
-        failure.assertHasCause """Cannot choose between the following variants of project :b:
+        failure.assertHasCause """The consumer was configured to find attribute 'buildType' with value 'debug'. However we cannot choose between the following variants of project :b:
   - bar
   - foo
 All of them match the consumer attributes:
-  - Variant 'bar':
-      - Required buildType 'debug' and found compatible value 'debug'.
-  - Variant 'foo':
-      - Required buildType 'debug' and found compatible value 'debug'."""
+  - Variant 'bar' capability test:b:unspecified declares attribute 'buildType' with value 'debug'
+  - Variant 'foo' capability test:b:unspecified declares attribute 'buildType' with value 'debug'"""
     }
 
     def "fails when multiple configurations match but have more attributes than requested"() {
@@ -972,18 +978,16 @@ All of them match the consumer attributes:
         fails ':a:checkDebug'
 
         then:
-        failure.assertHasCause """Cannot choose between the following variants of project :b:
+        failure.assertHasCause """The consumer was configured to find attribute 'flavor' with value 'free', attribute 'buildType' with value 'debug'. However we cannot choose between the following variants of project :b:
   - bar
   - foo
 All of them match the consumer attributes:
-  - Variant 'bar':
-      - Required buildType 'debug' and found compatible value 'debug'.
-      - Found extra 'extra 2' but wasn't required.
-      - Required flavor 'free' and found compatible value 'free'.
-  - Variant 'foo':
-      - Required buildType 'debug' and found compatible value 'debug'.
-      - Found extra 'extra' but wasn't required.
-      - Required flavor 'free' and found compatible value 'free'."""
+  - Variant 'bar' capability test:b:unspecified declares attribute 'buildType' with value 'debug', attribute 'flavor' with value 'free':
+      - Unmatched attribute:
+          - Provides extra 'extra 2' but the consumer didn't ask for it
+  - Variant 'foo' capability test:b:unspecified declares attribute 'buildType' with value 'debug', attribute 'flavor' with value 'free':
+      - Unmatched attribute:
+          - Provides extra 'extra' but the consumer didn't ask for it"""
     }
 
     /**
@@ -1012,7 +1016,7 @@ All of them match the consumer attributes:
             $typeDefs
 
             project(':a') {
-                dependencies { 
+                dependencies {
                     attributesSchema {
                         attribute(flavor)
                         attribute(buildType)
@@ -1033,12 +1037,12 @@ All of them match the consumer attributes:
                     compile.attributes { $free }
                 }
                 task fooJar(type: Jar) {
-                   baseName = 'b-foo'
+                   archiveBaseName = 'b-foo'
                 }
                 task barJar(type: Jar) {
-                   baseName = 'b-bar'
+                   archiveBaseName = 'b-bar'
                 }
-                tasks.withType(Jar) { destinationDir = buildDir }
+                tasks.withType(Jar) { destinationDirectory = buildDir }
                 artifacts {
                     debug fooJar
                     compile barJar
@@ -1051,16 +1055,16 @@ All of them match the consumer attributes:
         fails ':a:check'
 
         then:
-        failure.assertHasCause """Cannot choose between the following variants of project :b:
+        failure.assertHasCause """The consumer was configured to find attribute 'flavor' with value 'free', attribute 'buildType' with value 'debug'. However we cannot choose between the following variants of project :b:
   - compile
   - debug
 All of them match the consumer attributes:
-  - Variant 'compile':
-      - Required buildType 'debug' but no value provided.
-      - Required flavor 'free' and found compatible value 'free'.
-  - Variant 'debug':
-      - Required buildType 'debug' and found compatible value 'debug'.
-      - Required flavor 'free' but no value provided."""
+  - Variant 'compile' capability test:b:unspecified declares attribute 'flavor' with value 'free':
+      - Unmatched attribute:
+          - Doesn't say anything about buildType (required 'debug')
+  - Variant 'debug' capability test:b:unspecified declares attribute 'buildType' with value 'debug':
+      - Unmatched attribute:
+          - Doesn't say anything about flavor (required 'free')"""
     }
 
     def "transitive dependencies of selected configuration are included"() {
@@ -1192,12 +1196,12 @@ All of them match the consumer attributes:
                     bar.attributes { $freeRelease }
                 }
                 task fooJar(type: Jar) {
-                   baseName = 'c-foo'
+                   archiveBaseName = 'c-foo'
                 }
                 task barJar(type: Jar) {
-                   baseName = 'c-bar'
+                   archiveBaseName = 'c-bar'
                 }
-                tasks.withType(Jar) { destinationDir = buildDir }
+                tasks.withType(Jar) { destinationDirectory = buildDir }
                 artifacts {
                     foo fooJar
                     bar barJar
@@ -1255,7 +1259,7 @@ All of them match the consumer attributes:
                 }
                 configurations.all {
                     resolutionStrategy.dependencySubstitution {
-                        substitute module('com.acme.external:external') with project(":c")
+                        substitute module('com.acme.external:external') using project(":c")
                     }
                 }
             }
@@ -1276,12 +1280,12 @@ All of them match the consumer attributes:
                     bar.attributes { $freeRelease }
                 }
                 task fooJar(type: Jar) {
-                   baseName = 'c-foo'
+                   archiveBaseName = 'c-foo'
                 }
                 task barJar(type: Jar) {
-                   baseName = 'c-bar'
+                   archiveBaseName = 'c-bar'
                 }
-                tasks.withType(Jar) { destinationDir = buildDir }
+                tasks.withType(Jar) { destinationDirectory = buildDir }
                 artifacts {
                     foo fooJar
                     bar barJar
@@ -1309,7 +1313,7 @@ All of them match the consumer attributes:
         buildFile << """
             $typeDefs
             allprojects {
-                dependencies { 
+                dependencies {
                     attributesSchema {
                         attribute(extra)
                     }
@@ -1331,7 +1335,7 @@ All of them match the consumer attributes:
                 }
                 task checkRelease(dependsOn: configurations._compileFreeRelease) {
                     doLast {
-                       assert configurations._compileFreeRelease.collect { it.name } == ['b-bar.jar', , 'c-bar.jar']
+                       assert configurations._compileFreeRelease.collect { it.name } == ['b-bar.jar', 'c-bar.jar']
                     }
                 }
             }
@@ -1354,18 +1358,18 @@ All of them match the consumer attributes:
                     bar2.attributes { $freeRelease; attribute(extra, 'extra 2') }
                 }
                 task fooJar(type: Jar) {
-                   baseName = 'c-foo'
+                   archiveBaseName = 'c-foo'
                 }
                 task barJar(type: Jar) {
-                   baseName = 'c-bar'
+                   archiveBaseName = 'c-bar'
                 }
                 task foo2Jar(type: Jar) {
-                   baseName = 'c-foo2'
+                   archiveBaseName = 'c-foo2'
                 }
                 task bar2Jar(type: Jar) {
-                   baseName = 'c-bar2'
+                   archiveBaseName = 'c-bar2'
                 }
-                tasks.withType(Jar) { destinationDir = buildDir }
+                tasks.withType(Jar) { destinationDirectory = buildDir }
                 artifacts {
                     foo fooJar, foo2Jar
                     bar barJar, bar2Jar
@@ -1378,35 +1382,41 @@ All of them match the consumer attributes:
         fails ':a:checkDebug'
 
         then:
-        failure.assertHasCause """Cannot choose between the following variants of project :c:
+        failure.assertHasCause """The consumer was configured to find attribute 'flavor' with value 'free', attribute 'buildType' with value 'debug'. However we cannot choose between the following variants of project :c:
   - foo
   - foo2
 All of them match the consumer attributes:
-  - Variant 'foo':
-      - Required buildType 'debug' and found compatible value 'debug'.
-      - Found extra 'extra' but wasn't required.
-      - Required flavor 'free' and found compatible value 'free'.
-  - Variant 'foo2':
-      - Required buildType 'debug' and found compatible value 'debug'.
-      - Found extra 'extra 2' but wasn't required.
-      - Required flavor 'free' and found compatible value 'free'."""
+  - Variant 'foo' capability test:c:unspecified declares attribute 'buildType' with value 'debug', attribute 'flavor' with value 'free':
+      - Unmatched attribute:
+          - Provides extra 'extra' but the consumer didn't ask for it
+  - Variant 'foo2' capability test:c:unspecified declares attribute 'buildType' with value 'debug', attribute 'flavor' with value 'free':
+      - Unmatched attribute:
+          - Provides extra 'extra 2' but the consumer didn't ask for it
+The following variants were also considered but didn't match the requested attributes:
+  - Variant 'bar' capability test:c:unspecified declares attribute 'flavor' with value 'free':
+      - Incompatible because this component declares attribute 'buildType' with value 'release' and the consumer needed attribute 'buildType' with value 'debug'
+  - Variant 'bar2' capability test:c:unspecified declares attribute 'flavor' with value 'free':
+      - Incompatible because this component declares attribute 'buildType' with value 'release' and the consumer needed attribute 'buildType' with value 'debug'"""
 
         when:
         fails ':a:checkRelease'
 
         then:
-        failure.assertHasCause """Cannot choose between the following variants of project :c:
+        failure.assertHasCause """The consumer was configured to find attribute 'flavor' with value 'free', attribute 'buildType' with value 'release'. However we cannot choose between the following variants of project :c:
   - bar
   - bar2
 All of them match the consumer attributes:
-  - Variant 'bar':
-      - Required buildType 'release' and found compatible value 'release'.
-      - Found extra 'extra' but wasn't required.
-      - Required flavor 'free' and found compatible value 'free'.
-  - Variant 'bar2':
-      - Required buildType 'release' and found compatible value 'release'.
-      - Found extra 'extra 2' but wasn't required.
-      - Required flavor 'free' and found compatible value 'free'."""
+  - Variant 'bar' capability test:c:unspecified declares attribute 'buildType' with value 'release', attribute 'flavor' with value 'free':
+      - Unmatched attribute:
+          - Provides extra 'extra' but the consumer didn't ask for it
+  - Variant 'bar2' capability test:c:unspecified declares attribute 'buildType' with value 'release', attribute 'flavor' with value 'free':
+      - Unmatched attribute:
+          - Provides extra 'extra 2' but the consumer didn't ask for it
+The following variants were also considered but didn't match the requested attributes:
+  - Variant 'foo' capability test:c:unspecified declares attribute 'flavor' with value 'free':
+      - Incompatible because this component declares attribute 'buildType' with value 'debug' and the consumer needed attribute 'buildType' with value 'release'
+  - Variant 'foo2' capability test:c:unspecified declares attribute 'flavor' with value 'free':
+      - Incompatible because this component declares attribute 'buildType' with value 'debug' and the consumer needed attribute 'buildType' with value 'release'"""
 
     }
 
@@ -1426,7 +1436,7 @@ All of them match the consumer attributes:
             }
 
             project(':a') {
-                ${jcenterRepository()}
+                ${mavenCentralRepository()}
 
                 configurations {
                     _compileFreeDebug.attributes { $freeDebug }
@@ -1460,7 +1470,7 @@ All of them match the consumer attributes:
                 }
             }
             project(':c') {
-                ${jcenterRepository()}
+                ${mavenCentralRepository()}
                 configurations {
                     foo.attributes { $freeDebug }
                     bar.attributes { $freeRelease }
@@ -1469,12 +1479,12 @@ All of them match the consumer attributes:
                     bar 'org.apache.commons:commons-lang3:3.4'
                 }
                 task fooJar(type: Jar) {
-                   baseName = 'c-foo'
+                   archiveBaseName = 'c-foo'
                 }
                 task barJar(type: Jar) {
-                   baseName = 'c-bar'
+                   archiveBaseName = 'c-bar'
                 }
-                tasks.withType(Jar) { destinationDir = buildDir }
+                tasks.withType(Jar) { destinationDirectory = buildDir }
                 artifacts {
                     foo fooJar
                     bar barJar
@@ -1504,23 +1514,39 @@ All of them match the consumer attributes:
 
             project(':a') {
                 configurations {
-                    compileFreeDebug.attributes { $freeDebug }
-                    compileFreeRelease.attributes { $freeRelease }
-                    compileFreeDebug.canBeConsumed = false
-                    compileFreeRelease.canBeConsumed = false
+                    compileFreeDebug {
+                        canBeConsumed = false
+                        canBeResolved = false
+                    }
+                    compileFreeRelease {
+                        canBeConsumed = false
+                        canBeResolved = false
+                    }
+                    compileFreeDebugPath {
+                        extendsFrom(compileFreeDebug)
+                        attributes { $freeDebug }
+                        canBeConsumed = false
+                        canBeResolved = true
+                    }
+                    compileFreeReleasePath {
+                        extendsFrom(compileFreeRelease)
+                        attributes { $freeRelease }
+                        canBeConsumed = false
+                        canBeResolved = true
+                    }
                 }
                 dependencies {
                     compileFreeDebug project(':b')
                     compileFreeRelease project(':b')
                 }
-                task checkDebug(dependsOn: configurations.compileFreeDebug) {
+                task checkDebug(dependsOn: configurations.compileFreeDebugPath) {
                     doLast {
-                       assert configurations.compileFreeDebug.collect { it.name } == ['b-foo.jar']
+                       assert configurations.compileFreeDebugPath.collect { it.name } == ['b-foo.jar']
                     }
                 }
-                task checkRelease(dependsOn: configurations.compileFreeRelease) {
+                task checkRelease(dependsOn: configurations.compileFreeReleasePath) {
                     doLast {
-                       assert configurations.compileFreeRelease.collect { it.name } == ['b-bar.jar']
+                       assert configurations.compileFreeReleasePath.collect { it.name } == ['b-bar.jar']
                     }
                 }
             }
@@ -1540,15 +1566,15 @@ All of them match the consumer attributes:
                     }
                 }
                 task fooJar(type: Jar) {
-                   baseName = 'b-foo'
+                   archiveBaseName = 'b-foo'
                 }
                 task barJar(type: Jar) {
-                   baseName = 'b-bar'
+                   archiveBaseName = 'b-bar'
                 }
-                tasks.withType(Jar) { destinationDir = buildDir }
+                tasks.withType(Jar) { destinationDirectory = buildDir }
                 artifacts {
-                    _compileFreeDebug fooJar
-                    _compileFreeRelease barJar
+                    _compileFreeDebug(fooJar)
+                    _compileFreeRelease(barJar)
                 }
             }
 
@@ -1705,12 +1731,12 @@ All of them match the consumer attributes:
                     }
                 }
                 task fooJar(type: Jar) {
-                   baseName = 'c-foo'
+                   archiveBaseName = 'c-foo'
                 }
                 task barJar(type: Jar) {
-                   baseName = 'c-bar'
+                   archiveBaseName = 'c-bar'
                 }
-                tasks.withType(Jar) { destinationDir = buildDir }
+                tasks.withType(Jar) { destinationDirectory = buildDir }
                 artifacts {
                     foo fooJar
                     bar barJar
@@ -1760,15 +1786,15 @@ All of them match the consumer attributes:
                     }
                 }
                 task defaultJar(type: Jar) {
-                   baseName = 'b-default'
+                   archiveBaseName = 'b-default'
                 }
                 task fooJar(type: Jar) {
-                   baseName = 'b-foo'
+                   archiveBaseName = 'b-foo'
                 }
                 task barJar(type: Jar) {
-                   baseName = 'b-bar'
+                   archiveBaseName = 'b-bar'
                 }
-                tasks.withType(Jar) { destinationDir = buildDir }
+                tasks.withType(Jar) { destinationDirectory = buildDir }
                 artifacts {
                     'default' defaultJar
                     foo fooJar
@@ -1788,12 +1814,12 @@ All of them match the consumer attributes:
     private String fooAndBarJars() {
         '''
                 task fooJar(type: Jar) {
-                   baseName = 'b-foo'
+                   archiveBaseName = 'b-foo'
                 }
                 task barJar(type: Jar) {
-                   baseName = 'b-bar'
+                   archiveBaseName = 'b-bar'
                 }
-                tasks.withType(Jar) { destinationDir = buildDir }
+                tasks.withType(Jar) { destinationDirectory = buildDir }
                 artifacts {
                     foo fooJar
                     bar barJar

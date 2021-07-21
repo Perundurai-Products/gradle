@@ -16,16 +16,15 @@
 
 package org.gradle.language.cpp
 
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.language.AbstractNativeLanguageComponentIntegrationTest
 import org.gradle.nativeplatform.MachineArchitecture
-import org.gradle.nativeplatform.OperatingSystemFamily
 import org.gradle.nativeplatform.fixtures.RequiresInstalledToolChain
 import org.gradle.nativeplatform.fixtures.ToolChainRequirement
-import org.gradle.nativeplatform.fixtures.app.SourceElement
-import org.gradle.nativeplatform.platform.internal.DefaultNativePlatform
-import org.gradle.util.GUtil
+import org.gradle.util.internal.GUtil
 
 abstract class AbstractCppComponentIntegrationTest extends AbstractNativeLanguageComponentIntegrationTest {
+    @ToBeFixedForConfigurationCache
     def "can build on current operating system family and architecture when explicitly specified"() {
         given:
         makeSingleProject()
@@ -39,7 +38,7 @@ abstract class AbstractCppComponentIntegrationTest extends AbstractNativeLanguag
         result.assertTasksExecutedAndNotSkipped(tasksToAssembleDevelopmentBinary, ":$taskNameToAssembleDevelopmentBinary")
     }
 
-    def "ignores compile and link tasks when current operating system family is excluded"() {
+    def "assemble task warns when current operating system family is excluded"() {
         given:
         makeSingleProject()
         componentUnderTest.writeToProject(testDirectory)
@@ -49,8 +48,36 @@ abstract class AbstractCppComponentIntegrationTest extends AbstractNativeLanguag
 
         expect:
         succeeds taskNameToAssembleDevelopmentBinary
-        result.assertTasksExecuted(":$taskNameToAssembleDevelopmentBinary")
-        result.assertTasksSkipped(":$taskNameToAssembleDevelopmentBinary")
+
+        and:
+        outputContains("'${componentName}' component in project ':' does not target this operating system.")
+    }
+
+    def "build task warns when current operating system family is excluded"() {
+        given:
+        makeSingleProject()
+        componentUnderTest.writeToProject(testDirectory)
+
+        and:
+        buildFile << configureTargetMachines("machines.os('some-other-family')")
+
+        expect:
+        succeeds "build"
+
+        and:
+        outputContains("'${componentName}' component in project ':' does not target this operating system.")
+    }
+
+    def "does not fail when current operating system family is excluded but assemble is not invoked"() {
+        given:
+        makeSingleProject()
+        componentUnderTest.writeToProject(testDirectory)
+
+        and:
+        buildFile << configureTargetMachines("machines.os('some-other-family')")
+
+        expect:
+        succeeds "help"
     }
 
     def "fails configuration when no target machine is configured"() {
@@ -59,7 +86,7 @@ abstract class AbstractCppComponentIntegrationTest extends AbstractNativeLanguag
         componentUnderTest.writeToProject(testDirectory)
 
         and:
-        buildFile << configureTargetMachines('')
+        buildFile << configureTargetMachines()
 
         expect:
         fails taskNameToAssembleDevelopmentBinary
@@ -67,13 +94,14 @@ abstract class AbstractCppComponentIntegrationTest extends AbstractNativeLanguag
         failure.assertHasCause("A target machine needs to be specified for the ${GUtil.toWords(componentUnderTestDsl, (char) ' ')}.")
     }
 
+    @ToBeFixedForConfigurationCache
     def "can build for current machine when multiple target machines are specified"() {
         given:
         makeSingleProject()
         componentUnderTest.writeToProject(testDirectory)
 
         and:
-        buildFile << configureTargetMachines("machines.linux, machines.macOS, machines.windows")
+        buildFile << configureTargetMachines("machines.linux", "machines.macOS", "machines.windows")
 
         expect:
         succeeds taskNameToAssembleDevelopmentBinary
@@ -81,13 +109,14 @@ abstract class AbstractCppComponentIntegrationTest extends AbstractNativeLanguag
     }
 
     @RequiresInstalledToolChain(ToolChainRequirement.SUPPORTS_32_AND_64)
+    @ToBeFixedForConfigurationCache
     def "can build for multiple target machines"() {
         given:
         makeSingleProject()
         componentUnderTest.writeToProject(testDirectory)
 
         and:
-        buildFile << configureTargetMachines("machines.${currentHostOperatingSystemFamilyDsl}.x86, machines.${currentHostOperatingSystemFamilyDsl}.x86_64")
+        buildFile << configureTargetMachines("machines.${currentHostOperatingSystemFamilyDsl}.x86", "machines.${currentHostOperatingSystemFamilyDsl}.x86_64")
 
         expect:
         succeeds getTaskNameToAssembleDevelopmentBinaryWithArchitecture(MachineArchitecture.X86), getTaskNameToAssembleDevelopmentBinaryWithArchitecture(MachineArchitecture.X86_64)
@@ -97,26 +126,30 @@ abstract class AbstractCppComponentIntegrationTest extends AbstractNativeLanguag
                 getTaskNameToAssembleDevelopmentBinaryWithArchitecture(MachineArchitecture.X86_64))
     }
 
+    @ToBeFixedForConfigurationCache
     def "fails when no target architecture can be built"() {
         given:
         makeSingleProject()
         componentUnderTest.writeToProject(testDirectory)
 
         and:
-        buildFile << configureTargetMachines("machines.os('${currentOsFamilyName}').architecture('foo')")
+        buildFile << configureTargetMachines("machines.${currentHostOperatingSystemFamilyDsl}.architecture('foo')")
+        buildFile << configureToolChainSupport('foo')
 
         expect:
         fails taskNameToAssembleDevelopmentBinary
         failure.assertHasCause("No tool chain is available to build C++")
     }
 
+    @ToBeFixedForConfigurationCache
     def "can build current architecture when other, non-buildable architectures are specified"() {
         given:
         makeSingleProject()
         componentUnderTest.writeToProject(testDirectory)
 
         and:
-        buildFile << configureTargetMachines("machines.${currentHostOperatingSystemFamilyDsl}.architecture('foo'), machines.${currentHostOperatingSystemFamilyDsl}")
+        buildFile << configureTargetMachines("machines.${currentHostOperatingSystemFamilyDsl}.architecture('foo')", "machines.${currentHostOperatingSystemFamilyDsl}")
+        buildFile << configureToolChainSupport('foo')
 
         expect:
         succeeds taskNameToAssembleDevelopmentBinary
@@ -129,34 +162,49 @@ abstract class AbstractCppComponentIntegrationTest extends AbstractNativeLanguag
         componentUnderTest.writeToProject(testDirectory)
 
         and:
-        buildFile << configureTargetMachines("machines.${currentHostOperatingSystemFamilyDsl}.architecture('foo'), machines.${currentHostOperatingSystemFamilyDsl}, machines.${currentHostOperatingSystemFamilyDsl}")
+        buildFile << configureTargetMachines("machines.${currentHostOperatingSystemFamilyDsl}", "machines.${currentHostOperatingSystemFamilyDsl}")
+        buildFile << """
+            task verifyTargetMachineCount {
+                doLast {
+                    assert ${componentUnderTestDsl}.targetMachines.get().size() == 1
+                    assert ${componentUnderTestDsl}.targetMachines.get() == [machines.${currentHostOperatingSystemFamilyDsl}] as Set
+                }
+            }
+        """
+
+        expect:
+        succeeds "verifyTargetMachineCount"
+    }
+
+    @ToBeFixedForConfigurationCache
+    def "can specify unbuildable architecture as a component target machine"() {
+        given:
+        makeSingleProject()
+        componentUnderTest.writeToProject(testDirectory)
+
+        and:
+        buildFile << configureTargetMachines("machines.${currentHostOperatingSystemFamilyDsl}", "machines.${currentHostOperatingSystemFamilyDsl}.architecture('foo')")
+        buildFile << configureToolChainSupport('foo')
 
         expect:
         succeeds taskNameToAssembleDevelopmentBinary
-        result.assertTasksExecutedAndNotSkipped(getTasksToAssembleDevelopmentBinary(currentArchitecture), ":$taskNameToAssembleDevelopmentBinary")
     }
-
-    protected String getCurrentHostOperatingSystemFamilyDsl() {
-        String osFamily = DefaultNativePlatform.getCurrentOperatingSystem().toFamilyName()
-        if (osFamily == OperatingSystemFamily.MACOS) {
-            return "macOS"
-        } else {
-            return osFamily
-        }
-    }
-
-    protected abstract SourceElement getComponentUnderTest()
 
     protected abstract List<String> getTasksToAssembleDevelopmentBinary(String variant = "")
 
-    protected abstract String getTaskNameToAssembleDevelopmentBinary()
-
     protected abstract String getTaskNameToAssembleDevelopmentBinaryWithArchitecture(String architecture)
 
-    protected configureTargetMachines(String targetMachines) {
+    protected abstract String getComponentName()
+
+    protected String configureToolChainSupport(String architecture) {
         return """
-            ${componentUnderTestDsl} {
-                targetMachines = [${targetMachines}]
+            model {
+                toolChains {
+                    toolChainFor${architecture.capitalize()}Architecture(Gcc) {
+                        path "/not/found"
+                        target("host:${architecture}")
+                    }
+                }
             }
         """
     }

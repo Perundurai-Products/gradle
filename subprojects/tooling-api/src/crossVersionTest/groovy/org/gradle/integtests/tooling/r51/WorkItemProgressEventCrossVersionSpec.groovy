@@ -24,21 +24,19 @@ import org.gradle.tooling.BuildException
 import org.gradle.tooling.events.OperationType
 import org.gradle.tooling.events.ProgressListener
 import org.gradle.tooling.events.work.WorkItemOperationDescriptor
-import org.gradle.workers.fixtures.WorkerExecutorFixture
+import org.gradle.util.GradleVersion
 
 @ToolingApiVersion('>=5.1')
 @TargetGradleVersion('>=5.1')
 class WorkItemProgressEventCrossVersionSpec extends ToolingApiSpecification {
 
-    def fixture = new WorkerExecutorFixture(temporaryFolder)
+    def workActionClass = file("buildSrc/src/main/java/org/gradle/test/TestWork.java")
 
-    void setup() {
-        fixture.prepareTaskTypeUsingWorker()
-        fixture.withRunnableClassInBuildSrc()
+    def setup() {
+        prepareTaskTypeUsingWorker()
+        withRunnableClassInBuildSrc()
         buildFile << """
-            task runInWorker(type: WorkerTask) {
-                displayName = "Test Work"
-            }
+            task runInWorker(type: WorkerTask)
         """
     }
 
@@ -49,10 +47,10 @@ class WorkItemProgressEventCrossVersionSpec extends ToolingApiSpecification {
         then:
         def taskOperation = events.operation("Task :runInWorker")
         taskOperation.task
-        with(taskOperation.descendant("Test Work")) {
+        with(taskOperation.descendant("org.gradle.test.TestWork")) {
             successful
             workItem
-            descriptor.className == "org.gradle.test.TestRunnable"
+            descriptor.className == "org.gradle.test.TestWork"
         }
     }
 
@@ -64,7 +62,7 @@ class WorkItemProgressEventCrossVersionSpec extends ToolingApiSpecification {
         then:
         def taskOperation = events.operation("Task :runInWorker")
         taskOperation.task
-        with(taskOperation.descendant("Test Work")) {
+        with(taskOperation.descendant("org.gradle.test.TestWork")) {
             successful
             buildOperation
         }
@@ -77,7 +75,7 @@ class WorkItemProgressEventCrossVersionSpec extends ToolingApiSpecification {
         then:
         def taskOperation = events.operation("Task :runInWorker")
         taskOperation.task
-        taskOperation.descendants { it.descriptor.displayName == "Test Work" }.empty
+        taskOperation.descendants { it.descriptor.displayName == "TestWork" }.empty
     }
 
     def "does not report work item progress events when TASK operations are not requested"() {
@@ -90,13 +88,7 @@ class WorkItemProgressEventCrossVersionSpec extends ToolingApiSpecification {
 
     def "includes failure in progress event"() {
         given:
-        buildFile << """
-            ${fixture.getRunnableThatFails(IllegalStateException, "something went horribly wrong")}
-            runInWorker {
-                displayName = null
-                runnableClass = RunnableThatFails
-            }
-        """
+        withRunnableClassThatFails()
 
         when:
         def events = ProgressEvents.create()
@@ -106,11 +98,11 @@ class WorkItemProgressEventCrossVersionSpec extends ToolingApiSpecification {
         thrown(BuildException)
         def taskOperation = events.operation("Task :runInWorker")
         taskOperation.task
-        with(taskOperation.child("RunnableThatFails")) {
+        with(taskOperation.child("org.gradle.test.TestWork")) {
             !successful
             workItem
             descriptor instanceof WorkItemOperationDescriptor
-            descriptor.className == "RunnableThatFails"
+            descriptor.className == "org.gradle.test.TestWork"
             failures.size() == 1
             with (failures[0]) {
                 message == "something went horribly wrong"
@@ -134,4 +126,56 @@ class WorkItemProgressEventCrossVersionSpec extends ToolingApiSpecification {
         }
     }
 
+    def prepareTaskTypeUsingWorker() {
+        def gradle3Submit = 'workerExecutor.submit(TestWork) { c -> c.displayName = "org.gradle.test.TestWork" }'
+        def submit = 'workerExecutor.noIsolation().submit(TestWork) { }'
+        buildFile << """
+            import javax.inject.Inject
+            import org.gradle.workers.*
+
+            class WorkerTask extends DefaultTask {
+
+                @Inject
+                WorkerExecutor getWorkerExecutor() {
+                    throw new UnsupportedOperationException()
+                }
+
+                @TaskAction
+                void executeTask() {
+                    ${targetVersion < GradleVersion.version("6.0") ? gradle3Submit : submit}
+                }
+            }
+        """
+    }
+
+    void withRunnableClassInBuildSrc() {
+        def gradle3Runnable = """
+            public class TestWork implements Runnable {
+                public void run() {
+                    // DO NOTHING
+                }
+            }
+        """
+        def workAction = """
+            abstract public class TestWork implements WorkAction<WorkParameters.None> {
+                public void execute() {
+                    // DO NOTHING
+                }
+            }
+        """
+
+        workActionClass << """
+            package org.gradle.test;
+            import org.gradle.workers.*;
+            ${targetVersion < GradleVersion.version("6.0") ? gradle3Runnable : workAction}
+        """
+        buildFile.text = """
+            import org.gradle.test.TestWork
+            ${buildFile.text}
+        """
+    }
+
+    void withRunnableClassThatFails() {
+        workActionClass.text = workActionClass.text.replace('// DO NOTHING', 'throw new IllegalStateException("something went horribly wrong");')
+    }
 }

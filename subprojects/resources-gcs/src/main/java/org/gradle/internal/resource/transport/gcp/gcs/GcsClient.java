@@ -119,6 +119,14 @@ public class GcsClient {
         }
     }
 
+    @VisibleForTesting
+    InputStream getResourceStream(URI uri) throws IOException {
+        String path = cleanResourcePath(uri);
+        Storage.Objects.Get getObject = storage.objects().get(uri.getHost(), path);
+        getObject.getMediaHttpDownloader().setDirectDownloadEnabled(false);
+        return getObject.executeMediaAsInputStream();
+    }
+
     @Nullable
     public List<String> list(URI uri) throws ResourceException {
         List<StorageObject> results = new ArrayList<StorageObject>();
@@ -132,7 +140,10 @@ public class GcsClient {
             do {
                 objects = listRequest.execute();
                 // Add the items in this page of results to the list we'll return.
-                results.addAll(objects.getItems());
+                // GCS API will return null on an empty list.
+                if(objects.getItems() != null) {
+                    results.addAll(objects.getItems());
+                }
 
                 // Get the next page, in the next iteration of this loop.
                 listRequest.setPageToken(objects.getNextPageToken());
@@ -147,13 +158,6 @@ public class GcsClient {
         }
 
         return resultStrings;
-    }
-
-    @VisibleForTesting
-    InputStream getResourceStream(StorageObject obj) throws IOException {
-        Storage.Objects.Get getObject = storage.objects().get(obj.getBucket(), obj.getName());
-        getObject.getMediaHttpDownloader().setDirectDownloadEnabled(false);
-        return getObject.executeMediaAsInputStream();
     }
 
     private static String cleanResourcePath(URI uri) {

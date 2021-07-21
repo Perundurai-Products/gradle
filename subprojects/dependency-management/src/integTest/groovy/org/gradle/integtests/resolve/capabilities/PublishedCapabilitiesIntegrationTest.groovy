@@ -18,20 +18,21 @@ package org.gradle.integtests.resolve.capabilities
 
 import org.gradle.integtests.fixtures.GradleMetadataResolveRunner
 import org.gradle.integtests.fixtures.RequiredFeature
-import org.gradle.integtests.fixtures.RequiredFeatures
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.integtests.resolve.AbstractModuleDependencyResolveTest
+import spock.lang.Unroll
 
-@RequiredFeatures(
-    [@RequiredFeature(feature = GradleMetadataResolveRunner.GRADLE_METADATA, value="true")]
-)
+@RequiredFeature(feature = GradleMetadataResolveRunner.GRADLE_METADATA, value = "true")
 class PublishedCapabilitiesIntegrationTest extends AbstractModuleDependencyResolveTest {
 
+    @ToBeFixedForConfigurationCache
     def "can consume published capabilities"() {
         given:
         repository {
             'cglib:cglib:3.2.5'()
             'cglib:cglib-nodep:3.2.5' {
                 variant("runtime") {
+                    capability('cglib', 'cglib-nodep', '3.2.5')
                     capability('cglib', 'cglib', '3.2.5')
                 }
             }
@@ -56,15 +57,20 @@ class PublishedCapabilitiesIntegrationTest extends AbstractModuleDependencyResol
         fails ':checkDeps'
 
         then:
-        failure.assertHasCause("Cannot choose between cglib:cglib-nodep:3.2.5 and cglib:cglib:3.2.5 because they provide the same capability: cglib:cglib:3.2.5")
+        failure.assertHasCause("""Module 'cglib:cglib-nodep' has been rejected:
+   Cannot select module with conflict on capability 'cglib:cglib:3.2.5' also provided by [cglib:cglib:3.2.5(runtime)]""")
+        failure.assertHasCause("""Module 'cglib:cglib' has been rejected:
+   Cannot select module with conflict on capability 'cglib:cglib:3.2.5' also provided by [cglib:cglib-nodep:3.2.5(runtime)]""")
     }
 
-    def "can detect conflict with capability in different versions and upgrade automatically to latest version"() {
+    @Unroll
+    def "can detect conflict with capability in different versions and upgrade to latest version (#rule)"() {
         given:
         repository {
             'cglib:cglib:3.2.5'()
             'cglib:cglib-nodep:3.2.4' {
                 variant("runtime") {
+                    capability('cglib', 'cglib-nodep', '3.2.4')
                     capability('cglib', 'cglib', '3.2.4')
                 }
             }
@@ -75,6 +81,8 @@ class PublishedCapabilitiesIntegrationTest extends AbstractModuleDependencyResol
                conf "cglib:cglib-nodep:3.2.4"
                conf "cglib:cglib:3.2.5"
             }
+
+            configurations.conf.resolutionStrategy.capabilitiesResolution.$rule
         """
 
         when:
@@ -92,17 +100,27 @@ class PublishedCapabilitiesIntegrationTest extends AbstractModuleDependencyResol
         resolve.expectGraph {
             root(":", ":test:") {
                 edge('cglib:cglib-nodep:3.2.4', 'cglib:cglib:3.2.5')
-                    .byConflictResolution('latest version of capability cglib:cglib')
+                    .byConflictResolution(reason)
                 module('cglib:cglib:3.2.5')
             }
         }
+
+        where:
+        rule                                                                                  | reason
+        'all { selectHighestVersion() }'                                                      | 'latest version of capability cglib:cglib'
+        'withCapability("cglib:cglib") { selectHighestVersion() }'                            | 'latest version of capability cglib:cglib'
+        'withCapability("cglib", "cglib") { selectHighestVersion() }'                         | 'latest version of capability cglib:cglib'
+        'all { select(candidates.find { it.id.module == "cglib" }) because "custom reason" }' | 'On capability cglib:cglib custom reason'
+
     }
 
+    @ToBeFixedForConfigurationCache
     def "can detect conflict between local project and capability from external dependency"() {
         given:
         repository {
             'org:test:1.0' {
                 variant("runtime") {
+                    capability('org', 'test', '1.0')
                     capability('org', 'capability', '1.0')
                 }
             }
@@ -110,7 +128,7 @@ class PublishedCapabilitiesIntegrationTest extends AbstractModuleDependencyResol
 
         buildFile << """
             apply plugin: 'java-library'
-            
+
             configurations.api.outgoing {
                 capability 'org:capability:1.0'
             }
@@ -118,7 +136,7 @@ class PublishedCapabilitiesIntegrationTest extends AbstractModuleDependencyResol
             dependencies {
                 conf 'org:test:1.0'
             }
-            
+
             configurations {
                 conf.extendsFrom(api)
             }
@@ -133,23 +151,27 @@ class PublishedCapabilitiesIntegrationTest extends AbstractModuleDependencyResol
         fails ':checkDeps'
 
         then:
-        failure.assertHasCause("Cannot choose between :test:unspecified and org:test:1.0 because they provide the same capability: org:capability:1.0")
+        failure.assertHasCause("""Module 'org:test' has been rejected:
+   Cannot select module with conflict on capability 'org:capability:1.0' also provided by [:test:unspecified(conf)]""")
     }
 
     /**
      * This test illustrates that published modules can declare capabilities, which are then discovered
      * as we visit the graph. And if no published module declares a preference, then build should fail.
      */
+    @ToBeFixedForConfigurationCache
     def "fails with reasonable error message if no module express preference for conflict of modules that publish the same capability"() {
         given:
         repository {
             'org:testA:1.0' {
                 variant('runtime') {
+                    capability('org', 'testA', '1.0')
                     capability('cap')
                 }
             }
             'org:testB:1.0' {
                 variant('runtime') {
+                    capability('org', 'testB', '1.0')
                     capability('cap')
                 }
             }
@@ -174,7 +196,10 @@ class PublishedCapabilitiesIntegrationTest extends AbstractModuleDependencyResol
         fails ":checkDeps"
 
         then:
-        failure.assertHasCause("Cannot choose between org:testA:1.0 and org:testB:1.0 because they provide the same capability: org.test:cap:1.0")
+        failure.assertHasCause("""Module 'org:testA' has been rejected:
+   Cannot select module with conflict on capability 'org.test:cap:1.0' also provided by [org:testB:1.0(runtime)]""")
+        failure.assertHasCause("""Module 'org:testB' has been rejected:
+   Cannot select module with conflict on capability 'org.test:cap:1.0' also provided by [org:testA:1.0(runtime)]""")
     }
 
     def "considers all candidates for conflict resolution"() {
@@ -182,11 +207,13 @@ class PublishedCapabilitiesIntegrationTest extends AbstractModuleDependencyResol
         repository {
             'org:testA:1.0' {
                 variant('runtime') {
+                    capability('org', 'testA', '1.0')
                     capability('org', 'cap', '1')
                 }
             }
             'org:testB:1.0' {
                 variant('runtime') {
+                    capability('org', 'testB', '1.0')
                     capability('org', 'cap', '4')
                 }
             }
@@ -198,6 +225,7 @@ class PublishedCapabilitiesIntegrationTest extends AbstractModuleDependencyResol
             }
             'org:testCC:1.0' {
                 variant('runtime') {
+                    capability('org', 'testCC', '1.0')
                     capability('org', 'cap', '2')
                 }
             }
@@ -210,6 +238,8 @@ class PublishedCapabilitiesIntegrationTest extends AbstractModuleDependencyResol
                 conf 'org:testC:1.0'
                 conf 'org:testD:1.0'
             }
+
+            configurations.conf.resolutionStrategy.capabilitiesResolution.all { selectHighestVersion() }
         """
 
         when:
@@ -248,6 +278,109 @@ class PublishedCapabilitiesIntegrationTest extends AbstractModuleDependencyResol
                 }
             }
         }
+
+    }
+
+    @Unroll
+    def "can select a particular module participating do a capability conflict independently of the version (select #expected)"() {
+        given:
+        repository {
+            'org:testA:1.0' {
+                variant('runtime') {
+                    capability('org', 'testA', '1.0')
+                    capability('org', 'cap', '1')
+                }
+            }
+            'org:testB:1.0' {
+                variant('runtime') {
+                    capability('org', 'testB', '1.0')
+                    capability('org', 'cap', '4')
+                }
+            }
+            'org:testC:1.0' {
+                dependsOn('org:testCC:1.0')
+            }
+            'org:testD:1.0' {
+                dependsOn('org:testA:1.0') // must have a dependency on an evicted edge
+            }
+            'org:testCC:1.0' {
+                variant('runtime') {
+                    capability('org', 'testCC', '1.0')
+                    capability('org', 'cap', '2')
+                }
+            }
+        }
+
+        buildFile << """
+            dependencies {
+                conf 'org:testA:1.0'
+                conf 'org:testB:1.0'
+                conf 'org:testC:1.0'
+                conf 'org:testD:1.0'
+            }
+
+            configurations.conf.resolutionStrategy.capabilitiesResolution.withCapability('org:cap') {
+                select candidates.find { it.id.module == "$expected" }
+                because "prefers module ${expected}"
+            }
+        """
+
+        when:
+        repositoryInteractions {
+            'org:testA:1.0' {
+                if (expected == 'testA') {
+                    expectResolve()
+                } else {
+                    expectGetMetadata()
+                }
+            }
+            'org:testB:1.0' {
+                if (expected == 'testB') {
+                    expectResolve()
+                } else {
+                    expectGetMetadata()
+                }
+            }
+            'org:testC:1.0' {
+                expectResolve()
+            }
+            'org:testD:1.0' {
+                expectResolve()
+            }
+            'org:testCC:1.0' {
+                expectGetMetadata()
+            }
+        }
+        succeeds ':checkDeps'
+
+        then:
+        resolve.expectGraph {
+            root(":", ":test:") {
+                if (expected == 'testB') {
+                    edge('org:testA:1.0', "org:$expected:1.0")
+                        .byConflictResolution("On capability org:cap prefers module $expected")
+                    module('org:testB:1.0')
+                } else {
+                    module('org:testA:1.0')
+                    edge('org:testB:1.0', "org:testA:1.0")
+                        .byConflictResolution("On capability org:cap prefers module $expected")
+                }
+                module('org:testC:1.0') {
+                    edge('org:testCC:1.0', "org:$expected:1.0")
+                        .byConflictResolution("On capability org:cap prefers module $expected")
+                }
+                module('org:testD:1.0') {
+                    edge('org:testA:1.0', "org:$expected:1.0")
+                        .byConflictResolution("On capability org:cap prefers module $expected")
+                }
+            }
+        }
+
+        where:
+        expected << [
+            'testA',
+            'testB'
+        ]
 
     }
 

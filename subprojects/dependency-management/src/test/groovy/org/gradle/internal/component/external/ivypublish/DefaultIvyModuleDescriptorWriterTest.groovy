@@ -35,7 +35,7 @@ import java.text.SimpleDateFormat
 
 class DefaultIvyModuleDescriptorWriterTest extends Specification {
 
-    private @Rule TestNameTestDirectoryProvider temporaryFolder;
+    private @Rule TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider(getClass())
     ModuleComponentIdentifier id = DefaultModuleComponentIdentifier.newId(DefaultModuleIdentifier.newId("org.test", "projectA"), "1.0")
     ComponentSelectorConverter componentSelectorConverter = Mock(ComponentSelectorConverter)
     def ivyXmlModuleDescriptorWriter = new DefaultIvyModuleDescriptorWriter(componentSelectorConverter)
@@ -75,8 +75,8 @@ class DefaultIvyModuleDescriptorWriterTest extends Specification {
 
     def addDependencyDescriptor(BuildableLocalConfigurationMetadata metadata, String organisation = "org.test", String moduleName, String revision = "1.0") {
         def dep = new LocalComponentDependencyMetadata(metadata.getComponentId(),
-            DefaultModuleComponentSelector.newSelector(DefaultModuleIdentifier.newId(organisation, moduleName), new DefaultMutableVersionConstraint(revision)),
-            "runtime", null, ImmutableAttributes.EMPTY, "default", [] as List, [], false, false, true, false, null)
+                DefaultModuleComponentSelector.newSelector(DefaultModuleIdentifier.newId(organisation, moduleName), new DefaultMutableVersionConstraint(revision)),
+                "runtime", null, ImmutableAttributes.EMPTY, "default", [] as List, [], false, false, true, false, false, null)
         metadata.addDependency(dep)
     }
 

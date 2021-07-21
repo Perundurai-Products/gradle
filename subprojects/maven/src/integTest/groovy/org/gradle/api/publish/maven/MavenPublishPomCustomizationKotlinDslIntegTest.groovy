@@ -16,13 +16,10 @@
 
 package org.gradle.api.publish.maven
 
+
 import org.gradle.integtests.fixtures.publish.maven.AbstractMavenPublishIntegTest
 import org.gradle.test.fixtures.file.TestFile
-import org.gradle.util.Requires
 
-import static org.gradle.util.TestPrecondition.KOTLIN_SCRIPT
-
-@Requires([KOTLIN_SCRIPT])
 class MavenPublishPomCustomizationKotlinDslIntegTest extends AbstractMavenPublishIntegTest {
 
     @Override
@@ -141,11 +138,15 @@ class MavenPublishPomCustomizationKotlinDslIntegTest extends AbstractMavenPublis
                                     post.set("devs@lists.example.org")
                                 }
                             }
+                            properties.set(mapOf(
+                                "myProp" to "myValue",
+                                "prop.with.dots" to "anotherValue"
+                            ))
                             withXml {
                                 val dependency = asNode().appendNode("dependencies").appendNode("dependency")
                                 dependency.appendNode("groupId", "junit")
                                 dependency.appendNode("artifactId", "junit")
-                                dependency.appendNode("version", "4.12")
+                                dependency.appendNode("version", "4.13")
                                 dependency.appendNode("scope", "runtime")
                             }
                         }
@@ -161,7 +162,7 @@ class MavenPublishPomCustomizationKotlinDslIntegTest extends AbstractMavenPublis
         module.assertPublished()
         def parsedPom = module.parsedPom
         parsedPom.packaging == 'custom-packaging'
-        parsedPom.scopes.runtime.assertDependsOn("junit:junit:4.12")
+        parsedPom.scopes.runtime.assertDependsOn("junit:junit:4.13")
 
         and:
         parsedPom.name == 'custom-name'
@@ -232,5 +233,10 @@ class MavenPublishPomCustomizationKotlinDslIntegTest extends AbstractMavenPublis
         parsedPom.mailingLists[0].otherArchives.otherArchive.collect { it.text() } == ["http://archive.org/", "http://backup.example.org/"]
         parsedPom.mailingLists[1].name.text() == "Developers"
         parsedPom.mailingLists[1].post.text() == "devs@lists.example.org"
+
+        and:
+        parsedPom.properties.children().size() == 2
+        parsedPom.properties.myProp.text() == "myValue"
+        parsedPom.properties["prop.with.dots"].text() == "anotherValue"
     }
 }

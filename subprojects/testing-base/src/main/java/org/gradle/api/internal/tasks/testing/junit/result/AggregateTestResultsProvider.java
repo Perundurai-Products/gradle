@@ -17,9 +17,7 @@
 package org.gradle.api.internal.tasks.testing.junit.result;
 
 import com.google.common.base.Preconditions;
-import com.google.common.base.Predicate;
 import com.google.common.collect.ArrayListMultimap;
-import com.google.common.collect.Iterables;
 import com.google.common.collect.Multimap;
 import org.gradle.api.Action;
 import org.gradle.api.specs.Spec;
@@ -32,7 +30,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
-import static org.gradle.util.CollectionUtils.any;
+import static org.gradle.util.internal.CollectionUtils.any;
 
 public class AggregateTestResultsProvider implements TestResultsProvider {
     private final Iterable<TestResultsProvider> providers;
@@ -44,25 +42,26 @@ public class AggregateTestResultsProvider implements TestResultsProvider {
 
     @Override
     public void visitClasses(final Action<? super TestClassResult> visitor) {
-        final Map<String, OverlayedIdProxyingTestClassResult> aggregatedTestResults = new LinkedHashMap<String, OverlayedIdProxyingTestClassResult>();
+        final Map<String, OverlaidIdProxyingTestClassResult> aggregatedTestResults = new LinkedHashMap<String, OverlaidIdProxyingTestClassResult>();
         classOutputProviders = ArrayListMultimap.create();
         final AtomicLong newIdCounter = new AtomicLong(0L);
         for (final TestResultsProvider provider : providers) {
             provider.visitClasses(new Action<TestClassResult>() {
+                @Override
                 public void execute(final TestClassResult classResult) {
-                    OverlayedIdProxyingTestClassResult newTestResult = aggregatedTestResults.get(classResult.getClassName());
+                    OverlaidIdProxyingTestClassResult newTestResult = aggregatedTestResults.get(classResult.getClassName());
                     if (newTestResult != null) {
                         newTestResult.addTestClassResult(classResult);
                     } else {
                         long newId = newIdCounter.incrementAndGet();
-                        newTestResult = new OverlayedIdProxyingTestClassResult(newId, classResult);
+                        newTestResult = new OverlaidIdProxyingTestClassResult(newId, classResult);
                         aggregatedTestResults.put(classResult.getClassName(), newTestResult);
                     }
                     classOutputProviders.put(newTestResult.getId(), new DelegateProvider(classResult.getId(), provider));
                 }
             });
         }
-        for (OverlayedIdProxyingTestClassResult classResult : aggregatedTestResults.values()) {
+        for (OverlaidIdProxyingTestClassResult classResult : aggregatedTestResults.values()) {
             visitor.execute(classResult);
         }
     }
@@ -77,10 +76,10 @@ public class AggregateTestResultsProvider implements TestResultsProvider {
         }
     }
 
-    private static class OverlayedIdProxyingTestClassResult extends TestClassResult {
+    private static class OverlaidIdProxyingTestClassResult extends TestClassResult {
         private final Map<Long, TestClassResult> delegates = new LinkedHashMap<Long, TestClassResult>();
 
-        public OverlayedIdProxyingTestClassResult(long id, TestClassResult delegate) {
+        public OverlaidIdProxyingTestClassResult(long id, TestClassResult delegate) {
             super(id, delegate.getClassName(), delegate.getStartTime());
             addTestClassResult(delegate);
         }
@@ -98,19 +97,28 @@ public class AggregateTestResultsProvider implements TestResultsProvider {
     }
 
     @Override
-    public boolean hasOutput(long id, final TestOutputEvent.Destination destination) {
-        return Iterables.any(
-                classOutputProviders.get(id),
-                new Predicate<DelegateProvider>() {
-                    public boolean apply(DelegateProvider delegateProvider) {
-                        return delegateProvider.provider.hasOutput(delegateProvider.id, destination);
-                    }
-                });
+    public boolean hasOutput(long classId, final TestOutputEvent.Destination destination) {
+        for (DelegateProvider delegateProvider : classOutputProviders.get(classId)) {
+            if (delegateProvider.provider.hasOutput(delegateProvider.id, destination)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override
-    public void writeAllOutput(long id, TestOutputEvent.Destination destination, Writer writer) {
-        for (DelegateProvider delegateProvider : classOutputProviders.get(id)) {
+    public boolean hasOutput(long classId, final long testId, final TestOutputEvent.Destination destination) {
+        for (DelegateProvider delegateProvider : classOutputProviders.get(classId)) {
+            if (delegateProvider.provider.hasOutput(delegateProvider.id, testId, destination)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Override
+    public void writeAllOutput(long classId, TestOutputEvent.Destination destination, Writer writer) {
+        for (DelegateProvider delegateProvider : classOutputProviders.get(classId)) {
             delegateProvider.provider.writeAllOutput(delegateProvider.id, destination, writer);
         }
     }
@@ -118,6 +126,7 @@ public class AggregateTestResultsProvider implements TestResultsProvider {
     @Override
     public boolean isHasResults() {
         return any(providers, new Spec<TestResultsProvider>() {
+            @Override
             public boolean isSatisfiedBy(TestResultsProvider element) {
                 return element.isHasResults();
             }
@@ -125,8 +134,8 @@ public class AggregateTestResultsProvider implements TestResultsProvider {
     }
 
     @Override
-    public void writeNonTestOutput(long id, TestOutputEvent.Destination destination, Writer writer) {
-        for (DelegateProvider delegateProvider : classOutputProviders.get(id)) {
+    public void writeNonTestOutput(long classId, TestOutputEvent.Destination destination, Writer writer) {
+        for (DelegateProvider delegateProvider : classOutputProviders.get(classId)) {
             delegateProvider.provider.writeNonTestOutput(delegateProvider.id, destination, writer);
         }
     }

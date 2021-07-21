@@ -18,17 +18,19 @@ package org.gradle.language.base
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 import org.gradle.integtests.fixtures.Sample
+import org.gradle.integtests.fixtures.UnsupportedWithConfigurationCache
 import org.gradle.util.Requires
 import org.gradle.util.TestPrecondition
 import org.junit.Rule
 
 @Requires(TestPrecondition.ONLINE)
+@UnsupportedWithConfigurationCache(because = "software model")
 class LanguageTypeSampleIntegrationTest extends AbstractIntegrationSpec {
     @Rule
-    Sample languageTypeSample = new Sample(temporaryFolder, "customModel/languageType")
+    Sample languageTypeSample = new Sample(temporaryFolder, "customModel/languageType/groovy")
 
     def setup() {
-        //  customModel/languageType sample contains buildSrc, which needs global init script to make mirror work
+        //  customModel/languageType/groovy sample contains buildSrc, which needs global init script to make mirror work
         executer.withGlobalRepositoryMirrors()
     }
 
@@ -64,7 +66,7 @@ Binaries
         succeeds "assemble"
 
         then:
-        executedTasks == [":compileDocsExplodedReference", ":compileDocsExplodedUserguide", ":docsExploded", ":assemble"]
+        result.ignoreBuildSrc.assertTasksExecuted(":compileDocsExplodedReference", ":compileDocsExplodedUserguide", ":docsExploded", ":assemble")
 
         and:
         languageTypeSample.dir.file("build/docs/exploded").assertHasDescendants(

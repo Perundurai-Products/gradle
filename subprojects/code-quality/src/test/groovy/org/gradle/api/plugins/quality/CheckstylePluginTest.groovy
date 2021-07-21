@@ -22,7 +22,7 @@ import org.gradle.api.tasks.SourceSet
 import org.gradle.test.fixtures.AbstractProjectBuilderSpec
 
 import static org.gradle.api.tasks.TaskDependencyMatchers.dependsOn
-import static org.hamcrest.Matchers.*
+import static org.hamcrest.CoreMatchers.*
 import static spock.util.matcher.HamcrestSupport.that
 
 class CheckstylePluginTest extends AbstractProjectBuilderSpec {
@@ -52,7 +52,7 @@ class CheckstylePluginTest extends AbstractProjectBuilderSpec {
         expect:
         CheckstyleExtension extension = project.extensions.checkstyle
         extension.configFile == project.file("config/checkstyle/checkstyle.xml")
-        extension.configDir == project.file("config/checkstyle")
+        extension.configDirectory.get().getAsFile() == project.file("config/checkstyle")
         extension.config.inputFiles.singleFile == project.file("config/checkstyle/checkstyle.xml")
         extension.configProperties == [:]
         extension.reportsDir == project.file("build/reports/checkstyle")
@@ -81,11 +81,11 @@ class CheckstylePluginTest extends AbstractProjectBuilderSpec {
             assert checkstyleClasspath == project.configurations.checkstyle
             assert classpath.files == (sourceSet.output + sourceSet.compileClasspath).files
             assert configFile == project.file("config/checkstyle/checkstyle.xml")
-            assert configDir == project.file("config/checkstyle")
+            assert configDirectory.get().getAsFile() == project.file("config/checkstyle")
             assert config.inputFiles.singleFile == project.file("config/checkstyle/checkstyle.xml")
             assert configProperties == [:]
-            assert reports.xml.destination == project.file("build/reports/checkstyle/${sourceSet.name}.xml")
-            assert reports.html.destination == project.file("build/reports/checkstyle/${sourceSet.name}.html")
+            assert reports.xml.outputLocation.asFile.get() == project.file("build/reports/checkstyle/${sourceSet.name}.xml")
+            assert reports.html.outputLocation.asFile.get() == project.file("build/reports/checkstyle/${sourceSet.name}.html")
             assert !ignoreFailures
             assert showViolations
             assert maxErrors == 0
@@ -101,11 +101,11 @@ class CheckstylePluginTest extends AbstractProjectBuilderSpec {
         task.source.isEmpty()
         task.checkstyleClasspath == project.configurations.checkstyle
         task.configFile == project.file("config/checkstyle/checkstyle.xml")
-        task.configDir == project.file("config/checkstyle")
+        task.configDirectory.get().getAsFile() == project.file("config/checkstyle")
         task.config.inputFiles.singleFile == project.file("config/checkstyle/checkstyle.xml")
         task.configProperties == [:]
-        task.reports.xml.destination == project.file("build/reports/checkstyle/custom.xml")
-        task.reports.html.destination == project.file("build/reports/checkstyle/custom.html")
+        task.reports.xml.outputLocation.asFile.get() == project.file("build/reports/checkstyle/custom.xml")
+        task.reports.html.outputLocation.asFile.get() == project.file("build/reports/checkstyle/custom.html")
         !task.ignoreFailures
     }
 
@@ -132,7 +132,7 @@ class CheckstylePluginTest extends AbstractProjectBuilderSpec {
         ((CheckstyleExtension)project.checkstyle).with {
             sourceSets = [project.sourceSets.main]
             config = project.resources.text.fromFile("checkstyle-config")
-            configDir = project.file("custom")
+            configDirectory.set(project.file("custom"))
             configProperties = [foo: "foo"]
             reportsDir = project.file("checkstyle-reports")
             ignoreFailures = true
@@ -157,11 +157,11 @@ class CheckstylePluginTest extends AbstractProjectBuilderSpec {
             assert source as List == sourceSet.allJava as List
             assert checkstyleClasspath == project.configurations["checkstyle"]
             assert configFile == project.file("checkstyle-config")
-            assert configDir == project.file("custom")
+            assert configDirectory.get().getAsFile() == project.file("custom")
             assert config.inputFiles.singleFile == project.file("checkstyle-config")
             assert configProperties == [foo: "foo"]
-            assert reports.xml.destination == project.file("checkstyle-reports/${sourceSet.name}.xml")
-            assert reports.html.destination == project.file("checkstyle-reports/${sourceSet.name}.html")
+            assert reports.xml.outputLocation.asFile.get() == project.file("checkstyle-reports/${sourceSet.name}.xml")
+            assert reports.html.outputLocation.asFile.get() == project.file("checkstyle-reports/${sourceSet.name}.html")
             assert ignoreFailures
             assert showViolations
             assert maxErrors == 1
@@ -173,7 +173,7 @@ class CheckstylePluginTest extends AbstractProjectBuilderSpec {
         def task = project.tasks.create("checkstyleCustom", Checkstyle)
         ((CheckstyleExtension)project.checkstyle).with {
             config = project.resources.text.fromFile("checkstyle-config")
-            configDir = project.file("custom")
+            configDirectory.set(project.file("custom"))
             configProperties = [foo: "foo"]
             reportsDir = project.file("checkstyle-reports")
             ignoreFailures = true
@@ -184,11 +184,11 @@ class CheckstylePluginTest extends AbstractProjectBuilderSpec {
         task.source.isEmpty()
         task.checkstyleClasspath == project.configurations.checkstyle
         task.configFile == project.file("checkstyle-config")
-        task.configDir == project.file("custom")
+        task.configDirectory.get().getAsFile() == project.file("custom")
         task.config.inputFiles.singleFile == project.file("checkstyle-config")
         task.configProperties == [foo: "foo"]
-        task.reports.xml.destination == project.file("checkstyle-reports/custom.xml")
-        task.reports.html.destination == project.file("checkstyle-reports/custom.html")
+        task.reports.xml.outputLocation.asFile.get() == project.file("checkstyle-reports/custom.xml")
+        task.reports.html.outputLocation.asFile.get() == project.file("checkstyle-reports/custom.html")
         task.ignoreFailures
     }
 
@@ -207,7 +207,7 @@ class CheckstylePluginTest extends AbstractProjectBuilderSpec {
 
     def "changing the config dir changes the config file location"() {
         ((CheckstyleExtension)project.checkstyle).with {
-            configDir = project.file("custom")
+            configDirectory.set(project.file("custom"))
         }
         expect:
         project.checkstyle.configFile == project.file("custom/checkstyle.xml") // computed property

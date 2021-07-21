@@ -24,6 +24,7 @@ import org.gradle.api.plugins.Convention;
 import org.gradle.api.plugins.ExtensionAware;
 import org.gradle.api.provider.Property;
 import org.gradle.api.provider.Provider;
+import org.gradle.api.services.BuildService;
 import org.gradle.api.specs.Spec;
 import org.gradle.api.tasks.Internal;
 import org.gradle.api.tasks.Optional;
@@ -76,7 +77,7 @@ import java.util.Set;
  * next task by throwing a {@link org.gradle.api.tasks.StopExecutionException}. Using these exceptions allows you to
  * have precondition actions which skip execution of the task, or part of the task, if not true.</p>
  *
- * <a id="dependencies"></a><h3>Task Dependencies and Task Ordering</h3>
+ * <a name="dependencies"></a><h3>Task Dependencies and Task Ordering</h3>
  *
  * <p>A task may have dependencies on other tasks or might be scheduled to always run after another task.
  * Gradle ensures that all task dependencies and ordering rules are honored when executing tasks, so that the task is executed after
@@ -94,9 +95,6 @@ import java.util.Set;
  *
  * <li>A {@link Task}.</li>
  *
- * <li>A closure. The closure may take a {@code Task} as parameter. It may return any of the types listed here. Its
- * return value is recursively converted to tasks. A {@code null} return value is treated as an empty collection.</li>
- *
  * <li>A {@link TaskDependency} object.</li>
  *
  * <li>A {@link org.gradle.api.tasks.TaskReference} object.</li>
@@ -113,13 +111,17 @@ import java.util.Set;
  * <li>A {@code Callable}. The {@code call()} method may return any of the types listed here. Its return value is
  * recursively converted to tasks. A {@code null} return value is treated as an empty collection.</li>
  *
- * <li>Anything else is treated as a failure.</li>
+ * <li>A Groovy {@code Closure} or Kotlin function. The closure may take a {@code Task} as parameter.
+ * The closure or function may return any of the types listed here. Its return value is
+ * recursively converted to tasks. A {@code null} return value is treated as an empty collection.</li>
+ *
+ * <li>Anything else is treated as an error.</li>
  *
  * </ul>
  *
  * <h3>Using a Task in a Build File</h3>
  *
- * <a id="properties"></a> <h4>Dynamic Properties</h4>
+ * <a name="properties"></a> <h4>Dynamic Properties</h4>
  *
  * <p>A {@code Task} has 4 'scopes' for properties. You can access these properties by name from the build file or by
  * calling the {@link #property(String)} method. You can change the value of these properties by calling the {@link #setProperty(String, Object)} method.</p>
@@ -174,7 +176,6 @@ public interface Task extends Comparable<Task>, ExtensionAware {
      *
      * @since 4.7
      */
-    @Incubating
     String TASK_CONSTRUCTOR_ARGS = "constructorArgs";
 
     /**
@@ -189,6 +190,7 @@ public interface Task extends Comparable<Task>, ExtensionAware {
      * A {@link org.gradle.api.Namer} namer for tasks that returns {@link #getName()}.
      */
     class Namer implements org.gradle.api.Namer<Task> {
+        @Override
         public String determineName(Task c) {
             return c.getName();
         }
@@ -365,7 +367,6 @@ public interface Task extends Comparable<Task>, ExtensionAware {
      *
      * @since 4.2
      */
-    @Incubating
     Task doFirst(String actionName, Action<? super Task> action);
 
     /**
@@ -385,7 +386,6 @@ public interface Task extends Comparable<Task>, ExtensionAware {
      *
      * @since 4.2
      */
-    @Incubating
     Task doLast(String actionName, Action<? super Task> action);
 
     /**
@@ -508,8 +508,11 @@ public interface Task extends Comparable<Task>, ExtensionAware {
      * contribute properties and methods to this task.</p>
      *
      * @return The convention object. Never returns null.
+     * @deprecated The concept of conventions is deprecated. Use extensions if possible.
+     * @see ExtensionAware#getExtensions()
      */
     @Internal
+    @Deprecated
     Convention getConvention();
 
     /**
@@ -747,6 +750,14 @@ public interface Task extends Comparable<Task>, ExtensionAware {
      */
     @Internal
     @Optional
-    @Incubating
     Property<Duration> getTimeout();
+
+    /**
+     * Registers a {@link BuildService} that is used by this task.
+     *
+     * @param service The service provider.
+     * @since 6.1
+     */
+    @Incubating
+    void usesService(Provider<? extends BuildService<?>> service);
 }

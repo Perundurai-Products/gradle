@@ -16,87 +16,42 @@
 
 package org.gradle.api.internal.tasks.execution;
 
-import com.google.common.collect.ImmutableCollection;
 import org.gradle.api.NonNullApi;
-import org.gradle.api.file.FileCollection;
 import org.gradle.api.internal.TaskInternal;
-import org.gradle.api.internal.TaskOutputsInternal;
 import org.gradle.api.internal.changedetection.TaskExecutionMode;
 import org.gradle.api.internal.changedetection.TaskExecutionModeResolver;
-import org.gradle.api.internal.file.collections.ImmutableFileCollection;
-import org.gradle.api.internal.file.collections.LazilyInitializedFileCollection;
 import org.gradle.api.internal.tasks.TaskExecuter;
 import org.gradle.api.internal.tasks.TaskExecuterResult;
 import org.gradle.api.internal.tasks.TaskExecutionContext;
 import org.gradle.api.internal.tasks.TaskStateInternal;
-import org.gradle.api.internal.tasks.properties.PropertyWalker;
-import org.gradle.internal.execution.history.AfterPreviousExecutionState;
-import org.gradle.internal.file.PathToFileResolver;
-import org.gradle.internal.fingerprint.FileCollectionFingerprint;
 import org.gradle.internal.time.Time;
 import org.gradle.internal.time.Timer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.File;
-import java.util.HashSet;
-import java.util.Set;
-
 @NonNullApi
 public class ResolveTaskExecutionModeExecuter implements TaskExecuter {
     private static final Logger LOGGER = LoggerFactory.getLogger(ResolveTaskExecutionModeExecuter.class);
 
-    private final PropertyWalker propertyWalker;
-    private final PathToFileResolver fileResolver;
     private final TaskExecuter executer;
     private final TaskExecutionModeResolver executionModeResolver;
 
-    public ResolveTaskExecutionModeExecuter(TaskExecutionModeResolver executionModeResolver, PathToFileResolver fileResolver, PropertyWalker propertyWalker, TaskExecuter executer) {
-        this.propertyWalker = propertyWalker;
-        this.fileResolver = fileResolver;
+    public ResolveTaskExecutionModeExecuter(TaskExecutionModeResolver executionModeResolver, TaskExecuter executer) {
         this.executer = executer;
         this.executionModeResolver = executionModeResolver;
     }
 
     @Override
-    public TaskExecuterResult execute(TaskInternal task, TaskStateInternal state, final TaskExecutionContext context) {
+    public TaskExecuterResult execute(final TaskInternal task, TaskStateInternal state, final TaskExecutionContext context) {
         Timer clock = Time.startTimer();
-        TaskProperties taskProperties = DefaultTaskProperties.resolve(propertyWalker, fileResolver, task);
-        context.setTaskProperties(taskProperties);
-        TaskExecutionMode taskExecutionMode = executionModeResolver.getExecutionMode(task, taskProperties);
-        TaskOutputsInternal outputs = task.getOutputs();
-
+        TaskExecutionMode taskExecutionMode = executionModeResolver.getExecutionMode(task, context.getTaskProperties());
         context.setTaskExecutionMode(taskExecutionMode);
-        outputs.setPreviousOutputFiles(new LazilyInitializedFileCollection() {
-            @Override
-            public FileCollection createDelegate() {
-                AfterPreviousExecutionState previousExecution = context.getAfterPreviousExecution();
-                if (previousExecution == null) {
-                    return ImmutableFileCollection.of();
-                }
-                ImmutableCollection<FileCollectionFingerprint> outputFingerprints = previousExecution.getOutputFileProperties().values();
-                Set<File> outputs = new HashSet<File>();
-                for (FileCollectionFingerprint fileCollectionFingerprint : outputFingerprints) {
-                    for (String absolutePath : fileCollectionFingerprint.getFingerprints().keySet()) {
-                        outputs.add(new File(absolutePath));
-                    }
-                }
-                return ImmutableFileCollection.of(outputs);
-            }
-
-            @Override
-            public String getDisplayName() {
-                return "previous output files";
-            }
-        });
         LOGGER.debug("Putting task artifact state for {} into context took {}.", task, clock.getElapsed());
         try {
             return executer.execute(task, state, context);
         } finally {
-            outputs.setPreviousOutputFiles(null);
             context.setTaskExecutionMode(null);
-            context.setTaskProperties(null);
-            LOGGER.debug("Removed task artifact state for {} from context.");
+            LOGGER.debug("Removed task artifact state for {} from context.", task);
         }
     }
 

@@ -17,34 +17,31 @@
 package org.gradle.performance.regression.java
 
 import org.gradle.performance.AbstractCrossVersionPerformanceTest
-import spock.lang.Unroll
+import org.gradle.performance.annotations.RunFor
+import org.gradle.performance.annotations.Scenario
 
-import static org.gradle.performance.generator.JavaTestProject.*
+import static org.gradle.performance.annotations.ScenarioType.PER_COMMIT
+import static org.gradle.performance.annotations.ScenarioType.PER_DAY
+import static org.gradle.performance.results.OperatingSystem.LINUX
 
+@RunFor([
+    @Scenario(type = PER_COMMIT, operatingSystems = [LINUX], testProjects = ["largeJavaMultiProject", "largeMonolithicJavaProject", "mediumJavaCompositeBuild"]),
+    @Scenario(type = PER_DAY, operatingSystems = [LINUX], testProjects = ["mediumJavaPredefinedCompositeBuild"])
+])
 class JavaCleanAssemblePerformanceTest extends AbstractCrossVersionPerformanceTest {
 
-    @Unroll
-    def "clean assemble on #testProject"() {
+    def "clean assemble"() {
         given:
-        runner.testProject = testProject
-        runner.gradleOpts = ["-Xms${testProject.daemonMemory}", "-Xmx${testProject.daemonMemory}"]
-        runner.warmUpRuns = warmUpRuns
-        runner.runs = runs
+        runner.warmUpRuns = 2
+        runner.runs = 6
         runner.tasksToRun = ["clean", "assemble"]
-        runner.targetVersions = ["5.2-20181218000039+0000"]
-        runner.minimumVersion = minimumVersion
+        runner.targetVersions = ["7.2-20210713113638+0000"]
+        runner.minimumBaseVersion = runner.testProject.contains("Composite") ? "4.0" : null
 
         when:
         def result = runner.run()
 
         then:
         result.assertCurrentVersionHasNotRegressed()
-
-        where:
-        testProject                            | warmUpRuns | runs  | minimumVersion
-        LARGE_MONOLITHIC_JAVA_PROJECT          | 2          | 6     | null
-        LARGE_JAVA_MULTI_PROJECT               | 2          | 6     | null
-        MEDIUM_JAVA_COMPOSITE_BUILD            | 2          | 6     | "4.0"
-        MEDIUM_JAVA_PREDEFINED_COMPOSITE_BUILD | 2          | 6     | "4.0"
     }
 }

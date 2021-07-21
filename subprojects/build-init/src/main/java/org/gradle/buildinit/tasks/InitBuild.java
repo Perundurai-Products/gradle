@@ -18,8 +18,9 @@ package org.gradle.buildinit.tasks;
 
 import org.gradle.api.DefaultTask;
 import org.gradle.api.GradleException;
-import org.gradle.api.Incubating;
+import org.gradle.api.file.Directory;
 import org.gradle.api.internal.tasks.userinput.UserInputHandler;
+import org.gradle.api.provider.Property;
 import org.gradle.api.tasks.Input;
 import org.gradle.api.tasks.Internal;
 import org.gradle.api.tasks.Optional;
@@ -32,7 +33,11 @@ import org.gradle.buildinit.plugins.internal.InitSettings;
 import org.gradle.buildinit.plugins.internal.ProjectLayoutSetupRegistry;
 import org.gradle.buildinit.plugins.internal.modifiers.BuildInitDsl;
 import org.gradle.buildinit.plugins.internal.modifiers.BuildInitTestFramework;
+import org.gradle.buildinit.plugins.internal.modifiers.ComponentType;
+import org.gradle.buildinit.plugins.internal.modifiers.Language;
+import org.gradle.buildinit.plugins.internal.modifiers.ModularizationOption;
 import org.gradle.internal.logging.text.TreeFormatter;
+import org.gradle.work.DisableCachingByDefault;
 
 import javax.annotation.Nullable;
 import java.util.List;
@@ -43,8 +48,11 @@ import static org.gradle.buildinit.plugins.internal.PackageNameBuilder.toPackage
 /**
  * Generates a Gradle project structure.
  */
+@DisableCachingByDefault(because = "Not worth caching")
 public class InitBuild extends DefaultTask {
+    private final Directory projectDir = getProject().getLayout().getProjectDirectory();
     private String type;
+    private final Property<Boolean> splitProject = getProject().getObjects().property(Boolean.class);
     private String dsl;
     private String testFramework;
     private String projectName;
@@ -64,13 +72,26 @@ public class InitBuild extends DefaultTask {
     }
 
     /**
+     * Should the build be split into multiple subprojects?
+     *
+     * This property can be set via command-line option '--split-project'.
+     *
+     * @since 6.7
+     */
+    @Input
+    @Optional
+    @Option(option = "split-project", description = "Split functionality across multiple subprojects?")
+    public Property<Boolean> getSplitProject() {
+        return splitProject;
+    }
+
+    /**
      * The desired DSL of build scripts to create, defaults to 'groovy'.
      *
      * This property can be set via command-line option '--dsl'.
      *
      * @since 4.5
      */
-    @Incubating
     @Optional
     @Input
     public String getDsl() {
@@ -84,10 +105,9 @@ public class InitBuild extends DefaultTask {
      *
      * @since 5.0
      */
-    @Incubating
     @Input
     public String getProjectName() {
-        return projectName == null ? getProject().getProjectDir().getName() : projectName;
+        return projectName == null ? projectDir.getAsFile().getName() : projectName;
     }
 
     /**
@@ -97,7 +117,6 @@ public class InitBuild extends DefaultTask {
      *
      * @since 5.0
      */
-    @Incubating
     @Input
     public String getPackageName() {
         return packageName == null ? "" : packageName;
@@ -128,22 +147,43 @@ public class InitBuild extends DefaultTask {
         UserInputHandler inputHandler = getServices().get(UserInputHandler.class);
         ProjectLayoutSetupRegistry projectLayoutRegistry = getProjectLayoutRegistry();
 
-        String type = null;
-        if (isNullOrEmpty(this.type)) {
+        BuildInitializer initDescriptor = null;
+        if (isNullOrEmpty(type)) {
             BuildConverter converter = projectLayoutRegistry.getBuildConverter();
-            if (converter.canApplyToCurrentDirectory()) {
+            if (converter.canApplyToCurrentDirectory(projectDir)) {
                 if (inputHandler.askYesNoQuestion("Found a " + converter.getSourceBuildDescription() + " build. Generate a Gradle build from this?", true)) {
-                    type = converter.getId();
+                    initDescriptor = converter;
                 }
             }
-            if (type == null) {
-                type = inputHandler.selectOption("Select type of project to generate", projectLayoutRegistry.getBuildGenerators(), projectLayoutRegistry.getDefault().getId());
+            if (initDescriptor == null) {
+                ComponentType componentType = inputHandler.selectOption("Select type of project to generate", projectLayoutRegistry.getComponentTypes(), projectLayoutRegistry.getDefault().getComponentType());
+                List<Language> languages = projectLayoutRegistry.getLanguagesFor(componentType);
+                if (languages.size() == 1) {
+                    initDescriptor = projectLayoutRegistry.get(componentType, languages.get(0));
+                } else {
+                    if (!languages.contains(Language.JAVA)) {
+                        // Not yet implemented
+                        throw new UnsupportedOperationException();
+                    }
+                    Language language = inputHandler.selectOption("Select implementation language", languages, Language.JAVA);
+                    initDescriptor = projectLayoutRegistry.get(componentType, language);
+                }
             }
         } else {
-            type = this.type;
+            initDescriptor = projectLayoutRegistry.get(type);
         }
 
-        BuildInitializer initDescriptor = projectLayoutRegistry.get(type);
+        ModularizationOption modularizationOption;
+        if (splitProject.isPresent()) {
+            modularizationOption = splitProject.get() ? ModularizationOption.WITH_LIBRARY_PROJECTS : ModularizationOption.SINGLE_PROJECT;
+        } else if (initDescriptor.getModularizationOptions().size() == 1) {
+            modularizationOption = initDescriptor.getModularizationOptions().iterator().next();
+        } else if (!isNullOrEmpty(type)) {
+            modularizationOption = ModularizationOption.SINGLE_PROJECT;
+        } else {
+            modularizationOption = inputHandler.selectOption("Split functionality across multiple subprojects?",
+                initDescriptor.getModularizationOptions(), ModularizationOption.SINGLE_PROJECT);
+        }
 
         BuildInitDsl dsl;
         if (isNullOrEmpty(this.dsl)) {
@@ -154,12 +194,15 @@ public class InitBuild extends DefaultTask {
         } else {
             dsl = BuildInitDsl.fromName(getDsl());
             if (!initDescriptor.getDsls().contains(dsl)) {
-                throw new GradleException("The requested DSL '" + dsl + "' is not supported for '" + type + "' setup type");
+                throw new GradleException("The requested DSL '" + getDsl() + "' is not supported for '" + initDescriptor.getId() + "' build type");
             }
         }
 
         BuildInitTestFramework testFramework = null;
-        if (isNullOrEmpty(this.testFramework)) {
+        if (modularizationOption == ModularizationOption.WITH_LIBRARY_PROJECTS) {
+            // currently we only support JUnit5 tests for this combination
+            testFramework = BuildInitTestFramework.JUNIT_JUPITER;
+        } else if (isNullOrEmpty(this.testFramework)) {
             testFramework = initDescriptor.getDefaultTestFramework();
             if (initDescriptor.getTestFrameworks().size() > 1) {
                 testFramework = inputHandler.selectOption("Select test framework", initDescriptor.getTestFrameworks(), testFramework);
@@ -173,7 +216,7 @@ public class InitBuild extends DefaultTask {
             }
             if (testFramework == null) {
                 TreeFormatter formatter = new TreeFormatter();
-                formatter.node("The requested test framework '" + getTestFramework() + "' is not supported for '" + type + "' setup type. Supported frameworks");
+                formatter.node("The requested test framework '" + getTestFramework() + "' is not supported for '" + initDescriptor.getId() + "' build type. Supported frameworks");
                 formatter.startChildren();
                 for (BuildInitTestFramework framework : initDescriptor.getTestFrameworks()) {
                     formatter.node("'" + framework.getId() + "'");
@@ -189,7 +232,7 @@ public class InitBuild extends DefaultTask {
                 projectName = inputHandler.askQuestion("Project name", getProjectName());
             }
         } else if (!isNullOrEmpty(projectName)) {
-            throw new GradleException("Project name is not supported for '" + type + "' setup type.");
+            throw new GradleException("Project name is not supported for '" + initDescriptor.getId() + "' build type.");
         }
 
         String packageName = this.packageName;
@@ -198,10 +241,15 @@ public class InitBuild extends DefaultTask {
                 packageName = inputHandler.askQuestion("Source package", toPackageName(projectName));
             }
         } else if (!isNullOrEmpty(packageName)) {
-            throw new GradleException("Package name is not supported for '" + type + "' setup type.");
+            throw new GradleException("Package name is not supported for '" + initDescriptor.getId() + "' build type.");
         }
 
-        initDescriptor.generate(new InitSettings(projectName, dsl, packageName, testFramework));
+        List<String> subprojectNames = initDescriptor.getComponentType().getDefaultProjectNames();
+        InitSettings settings = new InitSettings(projectName, subprojectNames,
+            modularizationOption, dsl, packageName, testFramework, projectDir);
+        initDescriptor.generate(settings);
+
+        initDescriptor.getFurtherReading(settings).ifPresent(link -> getLogger().lifecycle("Get more help with your project: {}", link));
     }
 
     @Option(option = "type", description = "Set the type of project to generate.")
@@ -210,7 +258,6 @@ public class InitBuild extends DefaultTask {
     }
 
     @OptionValues("type")
-    @SuppressWarnings("unused")
     public List<String> getAvailableBuildTypes() {
         return getProjectLayoutRegistry().getAllTypes();
     }
@@ -220,7 +267,6 @@ public class InitBuild extends DefaultTask {
      *
      * @since 4.5
      */
-    @Incubating
     @Option(option = "dsl", description = "Set the build script DSL to be used in generated scripts.")
     public void setDsl(String dsl) {
         this.dsl = dsl;
@@ -231,9 +277,7 @@ public class InitBuild extends DefaultTask {
      *
      * @since 4.5
      */
-    @Incubating
     @OptionValues("dsl")
-    @SuppressWarnings("unused")
     public List<String> getAvailableDSLs() {
         return BuildInitDsl.listSupported();
     }
@@ -250,7 +294,6 @@ public class InitBuild extends DefaultTask {
      * Available test frameworks.
      */
     @OptionValues("test-framework")
-    @SuppressWarnings("unused")
     public List<String> getAvailableTestFrameworks() {
         return BuildInitTestFramework.listSupported();
     }
@@ -260,7 +303,6 @@ public class InitBuild extends DefaultTask {
      *
      * @since 5.0
      */
-    @Incubating
     @Option(option = "project-name", description = "Set the project name.")
     public void setProjectName(String projectName) {
         this.projectName = projectName;
@@ -271,7 +313,6 @@ public class InitBuild extends DefaultTask {
      *
      * @since 5.0
      */
-    @Incubating
     @Option(option = "package", description = "Set the package for source files.")
     public void setPackageName(String packageName) {
         this.packageName = packageName;
@@ -284,7 +325,7 @@ public class InitBuild extends DefaultTask {
     private String detectType() {
         ProjectLayoutSetupRegistry projectLayoutRegistry = getProjectLayoutRegistry();
         BuildConverter buildConverter = projectLayoutRegistry.getBuildConverter();
-        if (buildConverter.canApplyToCurrentDirectory()) {
+        if (buildConverter.canApplyToCurrentDirectory(projectDir)) {
             return buildConverter.getId();
         }
         return projectLayoutRegistry.getDefault().getId();

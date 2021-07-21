@@ -35,7 +35,12 @@ class TestWorkerLeaseService implements WorkerLeaseService {
     }
 
     @Override
-    void stop() {
+    void releaseCurrentProjectLocks() {
+    }
+
+    @Override
+    boolean getAllowsParallelExecution() {
+        return false
     }
 
     @Override
@@ -87,6 +92,26 @@ class TestWorkerLeaseService implements WorkerLeaseService {
     @Override
     void withoutLocks(Iterable<? extends ResourceLock> locks, Runnable action) {
         action.run()
+    }
+
+    @Override
+    <T> T whileDisallowingProjectLockChanges(Factory<T> action) {
+        return action.create()
+    }
+
+    @Override
+    void blocking(Runnable action) {
+        action.run()
+    }
+
+    @Override
+    <T> T allowUncontrolledAccessToAnyProject(Factory<T> factory) {
+        return factory.create()
+    }
+
+    @Override
+    boolean isAllowedUncontrolledAccessToAnyProject() {
+        return false
     }
 
     private WorkerLeaseRegistry.WorkerLease workerLease() {

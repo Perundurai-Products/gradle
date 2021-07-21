@@ -17,14 +17,15 @@
 package org.gradle.integtests.resolve
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.integtests.fixtures.FluidDependenciesResolveRunner
-import org.junit.runner.RunWith
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
+import org.gradle.integtests.fixtures.extensions.FluidDependenciesResolveTest
 import spock.lang.Issue
 
-@RunWith(FluidDependenciesResolveRunner)
+@FluidDependenciesResolveTest
 class DetachedConfigurationsIntegrationTest extends AbstractIntegrationSpec {
 
     @Issue("GRADLE-2889")
+    @ToBeFixedForConfigurationCache(because = "Task.getProject() during execution")
     def "detached configurations may have separate dependencies"() {
         settingsFile << "include 'a', 'b'"
         mavenRepo.module("org", "foo").publish()

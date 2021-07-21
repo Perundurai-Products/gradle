@@ -17,15 +17,10 @@
 package org.gradle.integtests.resolve.transform
 
 import org.gradle.integtests.fixtures.AbstractDependencyResolutionTest
-import org.gradle.integtests.fixtures.ExperimentalIncrementalArtifactTransformationsRunner
 import org.gradle.integtests.fixtures.build.BuildTestFile
 import org.gradle.test.fixtures.server.http.BlockingHttpServer
 import org.junit.Rule
-import org.junit.runner.RunWith
 
-import static org.gradle.integtests.fixtures.ExperimentalIncrementalArtifactTransformationsRunner.configureIncrementalArtifactTransformations
-
-@RunWith(ExperimentalIncrementalArtifactTransformationsRunner)
 class ArtifactTransformParallelIntegrationTest extends AbstractDependencyResolutionTest {
     @Rule
     BlockingHttpServer server = new BlockingHttpServer()
@@ -34,19 +29,21 @@ class ArtifactTransformParallelIntegrationTest extends AbstractDependencyResolut
         server.start()
 
         setupBuild(new BuildTestFile(testDirectory, "root"))
+
+        executer.beforeExecute {
+            withArguments("--max-workers=10")
+        }
     }
 
     private void setupBuild(BuildTestFile buildTestFile) {
         buildTestFile.with {
-            configureIncrementalArtifactTransformations(buildTestFile.settingsFile)
-
             settingsFile << """
                 rootProject.name = '${rootProjectName}'
             """
             buildFile << """
                 def usage = Attribute.of('usage', String)
                 def artifactType = Attribute.of('artifactType', String)
-    
+
                 allprojects {
                     dependencies {
                         attributesSchema {
@@ -59,30 +56,34 @@ class ArtifactTransformParallelIntegrationTest extends AbstractDependencyResolut
                         }
                     }
                     dependencies {
-                        registerTransform {
+                        registerTransform(SynchronizedTransform) {
                             from.attribute(artifactType, "jar")
                             to.attribute(artifactType, "size")
-                            artifactTransform(SynchronizedTransform)
                         }
                     }
                     configurations {
                         compile
-                    }            
+                    }
                 }
-    
-                class SynchronizedTransform extends ArtifactTransform {
-                    List<File> transform(File input) {
+
+                import org.gradle.api.artifacts.transform.TransformParameters
+
+                abstract class SynchronizedTransform implements TransformAction<TransformParameters.None> {
+                    @InputArtifact
+                    abstract Provider<FileSystemLocation> getInputArtifact()
+
+                    void transform(TransformOutputs outputs) {
+                        def input = inputArtifact.get().asFile
                         ${server.callFromBuildUsingExpression("input.name")}
                         if (input.name.startsWith("bad")) {
                             throw new RuntimeException("Transform Failure: " + input.name)
-                        }        
+                        }
                         if (!input.exists()) {
                             throw new IllegalStateException("Input file \${input} does not exist")
                         }
-                        def output = new File(outputDirectory, input.name + ".txt")
+                        def output = outputs.file(input.name + ".txt")
                         println "Transforming \${input.name} to \${output.name}"
                         output.text = String.valueOf(input.length())
-                        return [output]
                     }
                 }
             """
@@ -95,7 +96,7 @@ class ArtifactTransformParallelIntegrationTest extends AbstractDependencyResolut
         def m2 = mavenRepo.module("test", "test2", "2.3").publish()
         m2.artifactFile.text = "12"
         def m3 = mavenRepo.module("test", "test3", "3.3").publish()
-        m3.artifactFile.text = "12"
+        m3.artifactFile.text = "123"
 
         given:
 
@@ -137,12 +138,12 @@ class ArtifactTransformParallelIntegrationTest extends AbstractDependencyResolut
             include "lib1", "lib2", "lib3"
         """
 
-        buildFile << """            
+        buildFile << """
             configure([project(":lib1"), project(":lib2"), project(":lib3")]) {
 
                 task jar(type: Jar) {
-                    archiveName = "\${project.name}.jar"
-                    destinationDir = buildDir
+                    archiveFileName = "\${project.name}.jar"
+                    destinationDirectory = buildDir
                 }
                 artifacts {
                     compile jar
@@ -220,16 +221,16 @@ class ArtifactTransformParallelIntegrationTest extends AbstractDependencyResolut
         def m2 = mavenRepo.module("test", "test2", "2.3").publish()
         m2.artifactFile.text = "12"
         def m3 = mavenRepo.module("test", "test3", "3.3").publish()
-        m3.artifactFile.text = "12"
+        m3.artifactFile.text = "123"
 
         given:
         buildFile << """
             def a = file('a.jar')
-            a.text = '1234'
+            a.text = '12345'
             def b = file('b.jar')
-            b.text = '12'
+            b.text = '124'
             def c = file('c.jar')
-            c.text = '123'
+            c.text = '1236'
 
             repositories {
                 maven { url "${mavenRepo.uri}" }
@@ -256,7 +257,6 @@ class ArtifactTransformParallelIntegrationTest extends AbstractDependencyResolut
         server.expectConcurrent("a.jar", "b.jar", "c.jar", "test-1.3.jar", "test2-2.3.jar", "test3-3.3.jar")
 
         when:
-        executer.withArguments("--max-workers=6")
         succeeds ":resolve"
 
         then:
@@ -311,7 +311,7 @@ class ArtifactTransformParallelIntegrationTest extends AbstractDependencyResolut
         server.expect(server.get("test2-2.3.jar"))
 
         when:
-        def build = executer.withArguments("--max-workers=4").withTasks(':resolve').start()
+        def build = executer.withTasks(':resolve').start()
 
         // 4 concurrent operations -> both artifacts are being downloaded and both local files are being transformed
         handle.waitForAllPendingCalls()
@@ -353,6 +353,7 @@ class ArtifactTransformParallelIntegrationTest extends AbstractDependencyResolut
                     attributes { it.attribute(artifactType, 'size') }
                 }.artifacts
                 inputs.files(artifacts.artifactFiles)
+                outputs.upToDateWhen { false }
 
                 doLast {
                     println artifacts.artifactFiles.collect { it.name }
@@ -366,8 +367,8 @@ class ArtifactTransformParallelIntegrationTest extends AbstractDependencyResolut
         fails ":resolve"
 
         then:
-        failure.assertHasCause("Failed to transform file 'bad-b.jar' to match attributes {artifactType=size}")
-        failure.assertHasCause("Failed to transform file 'bad-c.jar' to match attributes {artifactType=size}")
+        failure.assertHasCause("Failed to transform bad-b.jar to match attributes {artifactType=size}")
+        failure.assertHasCause("Failed to transform bad-c.jar to match attributes {artifactType=size}")
     }
 
     def "only one transformer execution per workspace"() {
@@ -376,15 +377,15 @@ class ArtifactTransformParallelIntegrationTest extends AbstractDependencyResolut
             include "lib", "app1", "app2"
         """
 
-        buildFile << """            
+        buildFile << """
             project(":lib") {
                 dependencies {
                     compile files("lib1.jar")
                 }
 
                 task jar2(type: Jar) {
-                    archiveName = 'lib2.jar'
-                    destinationDir = buildDir
+                    archiveFileName = 'lib2.jar'
+                    destinationDirectory = buildDir
                 }
                 artifacts {
                     compile jar2
@@ -413,7 +414,7 @@ class ArtifactTransformParallelIntegrationTest extends AbstractDependencyResolut
         server.expect("lib1.jar")
 
         when:
-        def handle = executer.withArguments("--max-workers=4", "--parallel").withTasks("app1:resolve", "app2:resolve").start()
+        def handle = executer.withArguments("--parallel").withTasks("app1:resolve", "app2:resolve").start()
         then:
         handle.waitForFinish()
     }
@@ -421,24 +422,39 @@ class ArtifactTransformParallelIntegrationTest extends AbstractDependencyResolut
     def "only one process can run immutable transforms at the same time"() {
         given:
         List<BuildTestFile> builds = (1..3).collect { idx ->
+            def lib = mavenRepo.module("org.test.foo", "build${idx}").publish()
             def build = new BuildTestFile(file("build${idx}"), "build${idx}")
             setupBuild(build)
             build.with {
                 def toBeTransformed = file(build.rootProjectName + ".jar")
                 toBeTransformed.text = '1234'
                 buildFile << """
-                    dependencies {
-                        compile files(name + ".jar")
+                    repositories {
+                        maven { url '${mavenRepo.uri}' }
                     }
+
+                    dependencies {
+                        compile '${lib.groupId}:${lib.artifactId}:${lib.version}'
+                    }
+
+                    task beforeResolve {
+                        def projectName = project.name
+                        doLast {
+                            ${server.callFromBuildUsingExpression('"resolveStarted_" + projectName')}
+                        }
+                    }
+
                     task resolve {
                         def artifacts = configurations.compile.incoming.artifactView {
                             attributes { it.attribute(artifactType, 'size') }
                         }.artifacts
                         inputs.files(artifacts.artifactFiles)
 
-                        doLast { 
-                            ${server.callFromBuildUsingExpression('"resolveStarted_" + project.name')}
-                            assert artifacts.artifactFiles.collect { it.name } == [project.name + '.jar.txt']
+                        dependsOn(beforeResolve)
+
+                        def projectName = project.name
+                        doLast {
+                            assert artifacts.artifactFiles.collect { it.name } == [projectName + '-1.0.jar.txt']
                         }
                     }
                 """
@@ -449,7 +465,7 @@ class ArtifactTransformParallelIntegrationTest extends AbstractDependencyResolut
 
         expect:
         server.expectConcurrent(buildNames.collect { "resolveStarted_" + it })
-        def transformations = server.expectConcurrentAndBlock(1, buildNames.collect { it + ".jar" } as String[])
+        def transformations = server.expectConcurrentAndBlock(1, buildNames.collect { it + "-1.0.jar" } as String[])
         def buildHandles = builds.collect {
             executer.inDirectory(it).withTasks("resolve").start()
         }

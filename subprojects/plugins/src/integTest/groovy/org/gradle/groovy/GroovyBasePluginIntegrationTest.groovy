@@ -30,7 +30,7 @@ sourceSets {
 ${mavenCentralRepository()}
 
 dependencies {
-    customCompile "$dependency"
+    customImplementation "$dependency"
 }
 
 task groovydoc(type: Groovydoc) {
@@ -66,7 +66,7 @@ sourceSets {
 ${mavenCentralRepository()}
 
 dependencies {
-    customCompile "org.codehaus.groovy:groovy-all:2.4.10"
+    customImplementation "org.codehaus.groovy:groovy-all:2.4.10"
 }
 
 task groovydoc(type: Groovydoc) {
@@ -75,8 +75,8 @@ task groovydoc(type: Groovydoc) {
 
 task verify {
     doLast {
-        assert configurations.customCompile.state.toString() == "UNRESOLVED"
-        assert configurations.customRuntime.state.toString() == "UNRESOLVED"
+        assert configurations.customCompileClasspath.state.toString() == "UNRESOLVED"
+        assert configurations.customRuntimeClasspath.state.toString() == "UNRESOLVED"
     }
 }
         """
@@ -97,7 +97,7 @@ task verify {
             ${mavenCentralRepository()}
 
             dependencies {
-                compile "com.google.guava:guava:11.0.2"
+                implementation "com.google.guava:guava:11.0.2"
             }
         """
 
@@ -114,21 +114,21 @@ task verify {
     }
 
     @Issue("https://github.com/gradle/gradle/issues/5722")
-    def "can override sourceSet language outputDir to override compile task destinationDir"() {
+    def "can override sourceSet language destinationDirectory to override compile task destinationDirectory"() {
         given:
         buildFile << '''
             apply plugin: 'groovy-base'
 
             sourceSets {
                 main {
-                    groovy.outputDir = file("$buildDir/bin")
+                    groovy.destinationDirectory.set(file("$buildDir/bin"))
                 }
             }
 
             task assertDirectoriesAreEquals {
                 doLast {
-                    assert sourceSets.main.groovy.outputDir == compileGroovy.destinationDir
-                    assert sourceSets.main.groovy.outputDir == file("$buildDir/bin")
+                    assert sourceSets.main.groovy.destinationDirectory.get().asFile == compileGroovy.destinationDirectory.get().asFile
+                    assert sourceSets.main.groovy.destinationDirectory.get().asFile == file("$buildDir/bin")
                 }
             }
         '''

@@ -15,7 +15,6 @@
  */
 package org.gradle.api.artifacts.repositories;
 
-import org.gradle.api.Incubating;
 import org.gradle.api.attributes.Attribute;
 
 /**
@@ -28,14 +27,14 @@ import org.gradle.api.attributes.Attribute;
  *
  * @since 5.1
  */
-@Incubating
-public interface RepositoryContentDescriptor {
+public interface RepositoryContentDescriptor extends InclusiveRepositoryContentDescriptor {
 
     /**
      * Declares that an entire group should be searched for in this repository.
      *
      * @param group the group name
      */
+    @Override
     void includeGroup(String group);
 
     /**
@@ -43,6 +42,7 @@ public interface RepositoryContentDescriptor {
      *
      * @param groupRegex a regular expression of the group name
      */
+    @Override
     void includeGroupByRegex(String groupRegex);
 
     /**
@@ -51,6 +51,7 @@ public interface RepositoryContentDescriptor {
      * @param group the group name
      * @param moduleName the module name
      */
+    @Override
     void includeModule(String group, String moduleName);
 
     /**
@@ -59,24 +60,31 @@ public interface RepositoryContentDescriptor {
      * @param groupRegex the group name regular expression
      * @param moduleNameRegex the module name regular expression
      */
+    @Override
     void includeModuleByRegex(String groupRegex, String moduleNameRegex);
 
     /**
      * Declares that a specific module version should be searched for in this repository.
+     * <p>
+     * The version notation supports range notations like {@code [1.0,2.0[}.
      *
      * @param group the group name
      * @param moduleName the module name
      * @param version the module version
      */
+    @Override
     void includeVersion(String group, String moduleName, String version);
 
     /**
      * Declares that a specific module version should be searched for in this repository, using regular expressions.
+     * <p>
+     * The version notation for a regex will be matched against a single version and does not support range notations.
      *
      * @param groupRegex the group name regular expression
      * @param moduleNameRegex the module name regular expression
      * @param versionRegex the module version regular expression
      */
+    @Override
     void includeVersionByRegex(String groupRegex, String moduleNameRegex, String versionRegex);
 
     /**
@@ -111,6 +119,8 @@ public interface RepositoryContentDescriptor {
 
     /**
      * Declares that a specific module version shouldn't be searched for in this repository.
+     * <p>
+     * The version notation for a regex will be matched against a single version and does not support range notations.
      *
      * @param group the group name
      * @param moduleName the module name
@@ -120,6 +130,8 @@ public interface RepositoryContentDescriptor {
 
     /**
      * Declares that a specific module version shouldn't be searched for in this repository, using regular expressions.
+     * <p>
+     * The version notation for a regex will be matched against a single version and does not support range notations.
      *
      * @param groupRegex the group name
      * @param moduleNameRegex the module name

@@ -16,14 +16,16 @@
 
 package org.gradle.caching.local.internal
 
+import org.gradle.api.internal.file.temp.DefaultTemporaryFileProvider
 import org.gradle.cache.PersistentCache
 import org.gradle.caching.BuildCacheEntryReader
 import org.gradle.caching.BuildCacheEntryWriter
 import org.gradle.caching.BuildCacheKey
+import org.gradle.internal.file.FileAccessTracker
 import org.gradle.internal.resource.local.DefaultPathKeyFileStore
-import org.gradle.internal.resource.local.FileAccessTracker
 import org.gradle.test.fixtures.file.CleanupTestDirectory
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
+import org.gradle.util.TestUtil
 import org.gradle.util.UsesNativeServices
 import org.junit.Rule
 import spock.lang.Specification
@@ -31,14 +33,14 @@ import spock.lang.Specification
 @UsesNativeServices
 @CleanupTestDirectory
 class DirectoryBuildCacheServiceTest extends Specification {
-    @Rule TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider()
+    @Rule TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider(getClass())
     def cacheDir = temporaryFolder.createDir("cache")
-    def fileStore = new DefaultPathKeyFileStore(cacheDir)
+    def fileStore = new DefaultPathKeyFileStore(TestUtil.checksumService, cacheDir)
     def persistentCache = Mock(PersistentCache) {
         getBaseDir() >> cacheDir
         withFileLock(_) >> { Runnable r -> r.run() }
     }
-    def tempFileStore = new DefaultBuildCacheTempFileStore(cacheDir)
+    def tempFileStore = new DefaultBuildCacheTempFileStore(new DefaultTemporaryFileProvider(() -> cacheDir))
     def fileAccessTracker = Mock(FileAccessTracker)
     def service = new DirectoryBuildCacheService(fileStore, persistentCache, tempFileStore, fileAccessTracker, ".failed")
     def hashCode = "1234abcd"

@@ -33,12 +33,12 @@ import org.junit.Rule
 import spock.lang.Specification
 
 import static org.gradle.api.internal.file.copy.CopyActionExecuterUtil.visit
-import static org.hamcrest.Matchers.equalTo
+import static org.hamcrest.CoreMatchers.equalTo
 
 @CleanupTestDirectory
 public class TarCopyActionSpec extends Specification {
     @Rule
-    public final TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider();
+    public final TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider(getClass());
     private TarCopyAction action;
 
 

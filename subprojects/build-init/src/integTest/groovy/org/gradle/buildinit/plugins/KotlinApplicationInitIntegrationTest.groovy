@@ -28,6 +28,9 @@ class KotlinApplicationInitIntegrationTest extends AbstractInitIntegrationSpec {
     public static final String SAMPLE_APP_CLASS = "some/thing/App.kt"
     public static final String SAMPLE_APP_TEST_CLASS = "some/thing/AppTest.kt"
 
+    @Override
+    String subprojectName() { 'app' }
+
     def "defaults to kotlin build scripts"() {
         when:
         run ('init', '--type', 'kotlin-application')
@@ -42,25 +45,23 @@ class KotlinApplicationInitIntegrationTest extends AbstractInitIntegrationSpec {
         run('init', '--type', 'kotlin-application', '--dsl', scriptDsl.id)
 
         then:
-        targetDir.file("src/main/kotlin").assertHasDescendants(SAMPLE_APP_CLASS)
-        targetDir.file("src/test/kotlin").assertHasDescendants(SAMPLE_APP_TEST_CLASS)
+        subprojectDir.file("src/main/kotlin").assertHasDescendants(SAMPLE_APP_CLASS)
+        subprojectDir.file("src/test/kotlin").assertHasDescendants(SAMPLE_APP_TEST_CLASS)
 
         and:
         commonJvmFilesGenerated(scriptDsl)
 
         when:
-        executer.expectDeprecationWarning()
         run("build")
 
         then:
-        assertTestPassed("some.thing.AppTest", "testAppHasAGreeting")
+        assertTestPassed("some.thing.AppTest", "appHasAGreeting")
 
         when:
-        executer.expectDeprecationWarning()
         run("run")
 
         then:
-        outputContains("Hello world")
+        outputContains("Hello World!")
 
         where:
         scriptDsl << ScriptDslFixture.SCRIPT_DSLS
@@ -72,25 +73,23 @@ class KotlinApplicationInitIntegrationTest extends AbstractInitIntegrationSpec {
         run('init', '--type', 'kotlin-application', '--package', 'my.app', '--dsl', scriptDsl.id)
 
         then:
-        targetDir.file("src/main/kotlin").assertHasDescendants("my/app/App.kt")
-        targetDir.file("src/test/kotlin").assertHasDescendants("my/app/AppTest.kt")
+        subprojectDir.file("src/main/kotlin").assertHasDescendants("my/app/App.kt")
+        subprojectDir.file("src/test/kotlin").assertHasDescendants("my/app/AppTest.kt")
 
         and:
         commonJvmFilesGenerated(scriptDsl)
 
         when:
-        executer.expectDeprecationWarning()
         run("build")
 
         then:
-        assertTestPassed("my.app.AppTest", "testAppHasAGreeting")
+        assertTestPassed("my.app.AppTest", "appHasAGreeting")
 
         when:
-        executer.expectDeprecationWarning()
         run("run")
 
         then:
-        outputContains("Hello world")
+        outputContains("Hello World!")
 
         where:
         scriptDsl << ScriptDslFixture.SCRIPT_DSLS
@@ -99,13 +98,13 @@ class KotlinApplicationInitIntegrationTest extends AbstractInitIntegrationSpec {
     @Unroll
     def "setupProjectLayout is skipped when kotlin sources detected with #scriptDsl build scripts"() {
         setup:
-        targetDir.file("src/main/kotlin/org/acme/SampleMain.kt") << """
+        subprojectDir.file("src/main/kotlin/org/acme/SampleMain.kt") << """
         package org.acme
 
         class SampleMain {
         }
 """
-        targetDir.file("src/test/kotlin/org/acme/SampleMainTest.kt") << """
+        subprojectDir.file("src/test/kotlin/org/acme/SampleMainTest.kt") << """
                 package org.acme
 
                 class SampleMainTest {
@@ -115,16 +114,15 @@ class KotlinApplicationInitIntegrationTest extends AbstractInitIntegrationSpec {
         run('init', '--type', 'kotlin-application', '--dsl', scriptDsl.id)
 
         then:
-        targetDir.file("src/main/kotlin").assertHasDescendants("org/acme/SampleMain.kt")
-        targetDir.file("src/test/kotlin").assertHasDescendants("org/acme/SampleMainTest.kt")
+        subprojectDir.file("src/main/kotlin").assertHasDescendants("org/acme/SampleMain.kt")
+        subprojectDir.file("src/test/kotlin").assertHasDescendants("org/acme/SampleMainTest.kt")
         dslFixtureFor(scriptDsl).assertGradleFilesGenerated()
 
         when:
-        executer.expectDeprecationWarning()
         run("build")
 
         then:
-        executed(":test")
+        executed(":app:test")
 
         where:
         scriptDsl << ScriptDslFixture.SCRIPT_DSLS

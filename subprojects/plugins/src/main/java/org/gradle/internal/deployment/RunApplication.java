@@ -23,12 +23,15 @@ import org.gradle.api.tasks.Input;
 import org.gradle.api.tasks.Internal;
 import org.gradle.api.tasks.TaskAction;
 import org.gradle.deployment.internal.DeploymentRegistry;
+import org.gradle.internal.jvm.Jvm;
 import org.gradle.process.internal.JavaExecHandleBuilder;
 import org.gradle.process.internal.JavaExecHandleFactory;
+import org.gradle.work.DisableCachingByDefault;
 
 import javax.inject.Inject;
 import java.util.Collection;
 
+@DisableCachingByDefault(because = "Produces no cacheable output")
 public class RunApplication extends DefaultTask {
     private String mainClassName;
     private Collection<String> arguments;
@@ -68,8 +71,9 @@ public class RunApplication extends DefaultTask {
         JavaApplicationHandle handle = registry.get(getPath(), JavaApplicationHandle.class);
         if (handle == null) {
             JavaExecHandleBuilder builder = getExecActionFactory().newJavaExec();
+            builder.setExecutable(Jvm.current().getJavaExecutable());
             builder.setClasspath(classpath);
-            builder.setMain(mainClassName);
+            builder.getMainClass().set(mainClassName);
             builder.setArgs(arguments);
             registry.start(getPath(), changeBehavior, JavaApplicationHandle.class, builder);
         }

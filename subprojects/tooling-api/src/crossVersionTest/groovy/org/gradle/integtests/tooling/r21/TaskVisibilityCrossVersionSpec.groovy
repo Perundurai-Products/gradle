@@ -54,8 +54,8 @@ project(':b:c') {
     }
 
     def "task visibility is correct"() {
-        def publicTasks = rootProjectImplicitTasks + ['t2']
-        def publicSelectors = rootProjectImplicitSelectors + ['t1', 't2']
+        def publicTasks = rootProjectImplicitTasks - rootProjectImplicitInvisibleTasks + ['t2']
+        def publicSelectors = rootProjectImplicitSelectors - rootProjectImplicitInvisibleSelectors + ['t1', 't2']
 
         when:
         BuildInvocations model = withConnection { connection ->

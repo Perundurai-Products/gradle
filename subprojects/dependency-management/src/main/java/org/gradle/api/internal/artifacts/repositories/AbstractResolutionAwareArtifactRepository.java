@@ -20,11 +20,12 @@ import org.gradle.api.internal.artifacts.repositories.descriptor.RepositoryDescr
 import org.gradle.api.model.ObjectFactory;
 
 public abstract class AbstractResolutionAwareArtifactRepository extends AbstractArtifactRepository implements ResolutionAwareRepository {
+
+    private RepositoryDescriptor descriptor;
+
     protected AbstractResolutionAwareArtifactRepository(ObjectFactory objectFactory) {
         super(objectFactory);
     }
-
-    private RepositoryDescriptor descriptor;
 
     @Override
     final public RepositoryDescriptor getDescriptor() {

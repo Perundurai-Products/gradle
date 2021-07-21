@@ -16,18 +16,54 @@
 
 package org.gradle.api
 
-class TaskContainerIntegrationTest extends AbstractDomainObjectContainerIntegrationTest {
-    @Override
+import groovy.transform.SelfType
+import spock.lang.Issue
+
+@SelfType(AbstractDomainObjectContainerIntegrationTest)
+trait AbstractTaskContainerIntegrationTest {
     String makeContainer() {
         return "tasks"
     }
 
-    @Override
     String getContainerStringRepresentation() {
         return "task set"
     }
 
     static String getContainerType() {
         return "DefaultTaskContainer"
+    }
+}
+
+class TaskContainerIntegrationTest extends AbstractDomainObjectContainerIntegrationTest implements AbstractTaskContainerIntegrationTest {
+
+    def "chained lookup of tasks.withType.matching"() {
+        buildFile """
+            tasks.withType(Copy).matching({ it.name.endsWith("foo") }).all { task ->
+                assert task.path in [':foo']
+            }
+
+            tasks.register("foo", Copy)
+            tasks.register("bar", Copy)
+            tasks.register("foobar", Delete)
+            tasks.register("barfoo", Delete)
+        """
+        expect:
+        succeeds "help"
+    }
+
+    @Issue("https://github.com/gradle/gradle/issues/9446")
+    def "chained lookup of tasks.matching.withType"() {
+        buildFile """
+            tasks.matching({ it.name.endsWith("foo") }).withType(Copy).all { task ->
+                assert task.path in [':foo']
+            }
+
+            tasks.register("foo", Copy)
+            tasks.register("bar", Copy)
+            tasks.register("foobar", Delete)
+            tasks.register("barfoo", Delete)
+        """
+        expect:
+        succeeds "help"
     }
 }

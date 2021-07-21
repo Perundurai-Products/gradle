@@ -34,21 +34,26 @@ public class ArchiveTaskBasedMavenArtifact extends AbstractMavenArtifact {
 
     @Override
     public File getFile() {
-        return archiveTask.getArchivePath();
+        return archiveTask.getArchiveFile().get().getAsFile();
     }
 
     @Override
     protected String getDefaultExtension() {
-        return archiveTask.getExtension();
+        return archiveTask.getArchiveExtension().getOrNull();
     }
 
     @Override
     protected String getDefaultClassifier() {
-        return archiveTask.getClassifier();
+        return archiveTask.getArchiveClassifier().getOrNull();
     }
 
     @Override
     protected TaskDependencyInternal getDefaultBuildDependencies() {
         return buildDependencies;
+    }
+
+    @Override
+    public boolean shouldBePublished() {
+        return archiveTask.isEnabled();
     }
 }

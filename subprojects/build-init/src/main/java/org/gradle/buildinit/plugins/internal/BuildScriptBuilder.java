@@ -21,9 +21,12 @@ import com.google.common.base.Splitter;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.MultimapBuilder;
 import org.apache.commons.lang.StringUtils;
+import org.gradle.api.Action;
 import org.gradle.api.GradleException;
+import org.gradle.api.file.Directory;
 import org.gradle.buildinit.plugins.internal.modifiers.BuildInitDsl;
-import org.gradle.internal.file.PathToFileResolver;
+import org.gradle.internal.Cast;
+import org.gradle.util.internal.GFileUtils;
 
 import javax.annotation.Nullable;
 import java.io.File;
@@ -43,16 +46,24 @@ import java.util.Map;
 public class BuildScriptBuilder {
 
     private final BuildInitDsl dsl;
-    private final PathToFileResolver fileResolver;
     private final String fileNameWithoutExtension;
+    private boolean externalComments;
 
-    private final List<String> headerLines = new ArrayList<String>();
+    private final List<String> headerLines = new ArrayList<>();
     private final TopLevelBlock block = new TopLevelBlock();
 
-    public BuildScriptBuilder(BuildInitDsl dsl, PathToFileResolver fileResolver, String fileNameWithoutExtension) {
+    public BuildScriptBuilder(BuildInitDsl dsl, String fileNameWithoutExtension) {
         this.dsl = dsl;
-        this.fileResolver = fileResolver;
         this.fileNameWithoutExtension = fileNameWithoutExtension;
+    }
+
+    public BuildScriptBuilder withExternalComments() {
+        this.externalComments = true;
+        return this;
+    }
+
+    public String getFileNameWithoutExtension() {
+        return fileNameWithoutExtension;
     }
 
     /**
@@ -74,6 +85,16 @@ public class BuildScriptBuilder {
      */
     public BuildScriptBuilder plugin(@Nullable String comment, String pluginId) {
         block.plugins.add(new PluginSpec(pluginId, null, comment));
+        return this;
+    }
+
+    /**
+     * Adds the plugin and config needed to support writing pre-compiled script plugins in the selected DSL in this project.
+     */
+    public BuildScriptBuilder conventionPluginSupport(@Nullable String comment) {
+        Syntax syntax = syntaxFor(dsl);
+        block.repositories.gradlePluginPortal("Use the plugin portal to apply community plugins in convention plugins.");
+        syntax.configureConventionPlugin(comment, block.plugins, block.repositories);
         return this;
     }
 
@@ -110,6 +131,17 @@ public class BuildScriptBuilder {
     }
 
     /**
+     * Adds one or more dependency constraints to the implementation scope.
+     *
+     * @param comment A description of why the constraints are required
+     * @param dependencies The constraints, in string notation
+     */
+    public BuildScriptBuilder implementationDependencyConstraint(@Nullable String comment, String... dependencies) {
+        dependencies().dependencyConstraint("implementation", comment, dependencies);
+        return this;
+    }
+
+    /**
      * Adds one or more external test implementation dependencies.
      *
      * @param comment A description of why the dependencies are required
@@ -133,18 +165,32 @@ public class BuildScriptBuilder {
      * Creates a method invocation expression, to use as a method argument or the RHS of a property assignment.
      */
     public Expression methodInvocationExpression(String methodName, Object... methodArgs) {
-        return new MethodInvocationValue(methodName, expressionValues(methodArgs));
+        return new MethodInvocationExpression(null, methodName, expressionValues(methodArgs));
     }
 
     /**
-     * Creates a property expression. to use as a method argument or the RHS of a property assignment.
+     * Creates a property expression, to use as a method argument or the RHS of a property assignment.
      */
     public Expression propertyExpression(String value) {
         return new LiteralValue(value);
     }
 
+    /**
+     * Creates a property expression, to use as a method argument or the RHS of a property assignment.
+     */
+    public Expression propertyExpression(Expression expression, String value) {
+        return new ChainedPropertyExpression((ExpressionValue) expression, new LiteralValue(value));
+    }
+
+    /**
+     * Creates an expression that references an element in a container.
+     */
+    public Expression containerElementExpression(String container, String element) {
+        return new ContainerElementExpression(container, element);
+    }
+
     private static List<ExpressionValue> expressionValues(Object... expressions) {
-        List<ExpressionValue> result = new ArrayList<ExpressionValue>(expressions.length);
+        List<ExpressionValue> result = new ArrayList<>(expressions.length);
         for (Object expression : expressions) {
             result.add(expressionValue(expression));
         }
@@ -152,7 +198,7 @@ public class BuildScriptBuilder {
     }
 
     private static Map<String, ExpressionValue> expressionMap(Map<String, ?> expressions) {
-        LinkedHashMap<String, ExpressionValue> result = new LinkedHashMap<String, ExpressionValue>();
+        LinkedHashMap<String, ExpressionValue> result = new LinkedHashMap<>();
         for (Map.Entry<String, ?> entry : expressions.entrySet()) {
             result.put(entry.getKey(), expressionValue(entry.getValue()));
         }
@@ -170,7 +216,10 @@ public class BuildScriptBuilder {
             return new LiteralValue(expression);
         }
         if (expression instanceof Map) {
-            return new MapLiteralValue(expressionMap((Map<String, ?>) expression));
+            return new MapLiteralValue(expressionMap(Cast.uncheckedNonnullCast(expression)));
+        }
+        if (expression instanceof Enum) {
+            return new EnumValue(expression);
         }
         throw new IllegalArgumentException("Don't know how to treat " + expression + " as an expression.");
     }
@@ -185,26 +234,14 @@ public class BuildScriptBuilder {
     /**
      * Allows dependencies to be added to this script.
      */
-    DependenciesBuilder dependencies() {
+    public DependenciesBuilder dependencies() {
         return block.dependencies;
     }
 
     /**
-     * Allows statements to be added to the allprojects block.
-     */
-    public CrossConfigurationScriptBlockBuilder allprojects() {
-        return block.allprojects;
-    }
-
-    /**
-     * Allows statements to be added to the subprojects block.
-     */
-    public CrossConfigurationScriptBlockBuilder subprojects() {
-        return block.subprojects;
-    }
-
-    /**
      * Adds a top level method invocation statement.
+     *
+     * @return this
      */
     public BuildScriptBuilder methodInvocation(@Nullable String comment, String methodName, Object... methodArgs) {
         block.methodInvocation(comment, methodName, methodArgs);
@@ -212,10 +249,22 @@ public class BuildScriptBuilder {
     }
 
     /**
+     * Adds a top level method invocation statement.
+     *
+     * @return this
+     */
+    public BuildScriptBuilder methodInvocation(@Nullable String comment, Expression target, String methodName, Object... methodArgs) {
+        block.methodInvocation(comment, target, methodName, methodArgs);
+        return this;
+    }
+
+    /**
      * Adds a top level property assignment statement.
+     *
+     * @return this
      */
     public BuildScriptBuilder propertyAssignment(@Nullable String comment, String propertyName, Object propertyValue) {
-        block.propertyAssignment(comment, propertyName, propertyValue);
+        block.propertyAssignment(comment, propertyName, propertyValue, true);
         return this;
     }
 
@@ -229,12 +278,20 @@ public class BuildScriptBuilder {
     }
 
     /**
+     * Adds a top level block statement.
+     */
+    public BuildScriptBuilder block(@Nullable String comment, String methodName, Action<? super ScriptBlockBuilder> blockContentBuilder) {
+        blockContentBuilder.execute(block.block(comment, methodName));
+        return this;
+    }
+
+    /**
      * Adds a method invocation statement to the configuration of a particular task.
      */
     public BuildScriptBuilder taskMethodInvocation(@Nullable String comment, String taskName, String taskType, String methodName, Object... methodArgs) {
         block.tasks.add(
             new TaskSelector(taskName, taskType),
-            new MethodInvocation(comment, new MethodInvocationValue(methodName, expressionValues(methodArgs))));
+            new MethodInvocation(comment, new MethodInvocationExpression(null, methodName, expressionValues(methodArgs))));
         return this;
     }
 
@@ -244,7 +301,7 @@ public class BuildScriptBuilder {
     public BuildScriptBuilder taskPropertyAssignment(@Nullable String comment, String taskName, String taskType, String propertyName, Object propertyValue) {
         block.tasks.add(
             new TaskSelector(taskName, taskType),
-            new PropertyAssignment(comment, propertyName, expressionValue(propertyValue)));
+            new PropertyAssignment(comment, propertyName, expressionValue(propertyValue), true));
         return this;
     }
 
@@ -254,58 +311,57 @@ public class BuildScriptBuilder {
     public BuildScriptBuilder taskPropertyAssignment(@Nullable String comment, String taskType, String propertyName, Object propertyValue) {
         block.taskTypes.add(
             new TaskTypeSelector(taskType),
-            new PropertyAssignment(comment, propertyName, expressionValue(propertyValue)));
+            new PropertyAssignment(comment, propertyName, expressionValue(propertyValue), true));
         return this;
     }
 
     /**
      * Registers a task.
      *
-     * @return The body of the configuration action for the task.
+     * @return An expression that can be used to refer to the task later.
      */
-    public ScriptBlockBuilder taskRegistration(String comment, String taskName, String taskType) {
+    public Expression taskRegistration(@Nullable String comment, String taskName, String taskType, Action<? super ScriptBlockBuilder> blockContentsBuilder) {
         TaskRegistration registration = new TaskRegistration(comment, taskName, taskType);
-        block.tasksRegistrations.add(registration);
-        return registration.body;
+        block.add(registration);
+        blockContentsBuilder.execute(registration.body);
+        return registration;
     }
 
     /**
-     * Adds a property assignment statement to the configuration of a particular convention.
+     * Creates an element in the given container.
+     *
+     * @param varName A variable to use to reference the element, if required by the DSL. If {@code null}, then use the element name.
+     *
+     * @return An expression that can be used to refer to the element later in the script.
      */
-    public BuildScriptBuilder conventionPropertyAssignment(@Nullable String comment, String conventionName, String propertyName, Object propertyValue) {
-        block.conventions.add(
-            new ConventionSelector(conventionName),
-            new PropertyAssignment(comment, propertyName, expressionValue(propertyValue)));
-        return this;
+    public Expression createContainerElement(@Nullable String comment, String container, String elementName, @Nullable String varName) {
+        ContainerElement containerElement = new ContainerElement(comment, container, elementName, null, varName);
+        block.add(containerElement);
+        return containerElement;
     }
 
-    public TemplateOperation create() {
-        return new TemplateOperation() {
-            @Override
-            public void generate() {
-                File target = getTargetFile();
-                try {
-                    PrintWriter writer = new PrintWriter(new FileWriter(target));
-                    try {
-                        PrettyPrinter printer = prettyPrinterFor(dsl, writer);
-                        printer.printFileHeader(headerLines);
-                        block.writeBodyTo(printer);
-                    } finally {
-                        writer.close();
-                    }
-                } catch (Exception e) {
-                    throw new GradleException("Could not generate file " + target + ".", e);
+    public TemplateOperation create(Directory targetDirectory) {
+        return () -> {
+            File target = getTargetFile(targetDirectory);
+            GFileUtils.mkdirs(target.getParentFile());
+            try {
+                try (PrintWriter writer = new PrintWriter(new FileWriter(target))) {
+                    PrettyPrinter printer = new PrettyPrinter(syntaxFor(dsl), writer, externalComments);
+                    printer.printFileHeader(headerLines);
+                    block.writeBodyTo(printer);
                 }
+            } catch (Exception e) {
+                throw new GradleException("Could not generate file " + target + ".", e);
             }
         };
     }
 
-    private File getTargetFile() {
-        return fileResolver.resolve(dsl.fileNameFor(fileNameWithoutExtension));
+    public List<String> extractComments() {
+        return block.extractComments();
     }
 
-    private static PrettyPrinter prettyPrinterFor(BuildInitDsl dsl, PrintWriter writer) {
-        return new PrettyPrinter(syntaxFor(dsl), writer);
+    private File getTargetFile(Directory targetDirectory) {
+        return targetDirectory.file(dsl.fileNameFor(fileNameWithoutExtension)).getAsFile();
     }
 
     private static Syntax syntaxFor(BuildInitDsl dsl) {
@@ -326,6 +382,26 @@ public class BuildScriptBuilder {
         boolean isBooleanType();
 
         String with(Syntax syntax);
+    }
+
+    private static class ChainedPropertyExpression implements Expression, ExpressionValue {
+        private final ExpressionValue left;
+        private final ExpressionValue right;
+
+        public ChainedPropertyExpression(ExpressionValue left, ExpressionValue right) {
+            this.left = left;
+            this.right = right;
+        }
+
+        @Override
+        public boolean isBooleanType() {
+            return false;
+        }
+
+        @Override
+        public String with(Syntax syntax) {
+            return left.with(syntax) + "." + right.with(syntax);
+        }
     }
 
     private static class StringValue implements ExpressionValue {
@@ -364,6 +440,24 @@ public class BuildScriptBuilder {
         }
     }
 
+    private static class EnumValue implements ExpressionValue {
+        final Enum<?> literal;
+
+        EnumValue(Object literal) {
+            this.literal = Cast.uncheckedNonnullCast(literal);
+        }
+
+        @Override
+        public boolean isBooleanType() {
+            return false;
+        }
+
+        @Override
+        public String with(Syntax syntax) {
+            return literal.getClass().getSimpleName() + "." + literal.name();
+        }
+    }
+
     private static class MapLiteralValue implements ExpressionValue {
         final Map<String, ExpressionValue> literal;
 
@@ -382,17 +476,20 @@ public class BuildScriptBuilder {
         }
     }
 
-    private static class MethodInvocationValue implements ExpressionValue {
+    private static class MethodInvocationExpression implements ExpressionValue {
+        @Nullable
+        private final ExpressionValue target;
         final String methodName;
         final List<ExpressionValue> arguments;
 
-        MethodInvocationValue(String methodName, List<ExpressionValue> arguments) {
+        MethodInvocationExpression(@Nullable ExpressionValue target, String methodName, List<ExpressionValue> arguments) {
+            this.target = target;
             this.methodName = methodName;
             this.arguments = arguments;
         }
 
-        MethodInvocationValue(String methodName) {
-            this(methodName, Collections.<ExpressionValue>emptyList());
+        MethodInvocationExpression(String methodName) {
+            this(null, methodName, Collections.emptyList());
         }
 
         @Override
@@ -403,6 +500,10 @@ public class BuildScriptBuilder {
         @Override
         public String with(Syntax syntax) {
             StringBuilder result = new StringBuilder();
+            if (target != null) {
+                result.append(target.with(syntax));
+                result.append('.');
+            }
             result.append(methodName);
             result.append("(");
             for (int i = 0; i < arguments.size(); i++) {
@@ -416,6 +517,26 @@ public class BuildScriptBuilder {
             }
             result.append(")");
             return result.toString();
+        }
+    }
+
+    private static class ContainerElementExpression implements ExpressionValue {
+        private final String container;
+        private final String element;
+
+        public ContainerElementExpression(String container, String element) {
+            this.container = container;
+            this.element = element;
+        }
+
+        @Override
+        public boolean isBooleanType() {
+            return false;
+        }
+
+        @Override
+        public String with(Syntax syntax) {
+            return syntax.containerElement(container, element);
         }
     }
 
@@ -433,17 +554,6 @@ public class BuildScriptBuilder {
         @Override
         public void writeCodeTo(PrettyPrinter printer) {
             printer.println(printer.syntax.pluginDependencySpec(id, version));
-        }
-    }
-
-    public static class NestedPluginSpec extends PluginSpec {
-        NestedPluginSpec(String id, @Nullable String version, String comment) {
-            super(id, version, comment);
-        }
-
-        @Override
-        public void writeCodeTo(PrettyPrinter printer) {
-            printer.println(printer.syntax.nestedPluginDependencySpec(id, version));
         }
     }
 
@@ -465,6 +575,24 @@ public class BuildScriptBuilder {
         }
     }
 
+    private static class PlatformDepSpec extends AbstractStatement {
+        private final String configuration;
+        private final String dep;
+
+        PlatformDepSpec(String configuration, String comment, String dep) {
+            super(comment);
+            this.configuration = configuration;
+            this.dep = dep;
+        }
+
+        @Override
+        public void writeCodeTo(PrettyPrinter printer) {
+            printer.println(printer.syntax.dependencySpec(
+                configuration, "platform(" + printer.syntax.string(dep) + ")"
+            ));
+        }
+    }
+
     private static class ProjectDepSpec extends AbstractStatement {
         private final String configuration;
         private final String projectPath;
@@ -478,27 +606,6 @@ public class BuildScriptBuilder {
         @Override
         public void writeCodeTo(PrettyPrinter printer) {
             printer.println(printer.syntax.dependencySpec(configuration, "project(" + printer.syntax.string(projectPath) + ")"));
-        }
-    }
-
-    /**
-     * A configuration to be applied to a Gradle model object.
-     */
-    private static class ConfigSpec {
-
-        /**
-         * Selects the model object to be configured.
-         */
-        final ConfigSelector selector;
-
-        /**
-         * The statement to be applied to the selected model object.
-         */
-        final Statement statement;
-
-        ConfigSpec(ConfigSelector selector, Statement statement) {
-            this.selector = selector;
-            this.statement = statement;
         }
     }
 
@@ -552,7 +659,7 @@ public class BuildScriptBuilder {
         @Nullable
         @Override
         public String codeBlockSelectorFor(Syntax syntax) {
-            return "tasks.withType(" + taskType + ")";
+            return syntax.taskByTypeSelector(taskType);
         }
 
         @Override
@@ -639,11 +746,6 @@ public class BuildScriptBuilder {
         }
 
         @Override
-        public void writeCodeTo(PrettyPrinter printer) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
         public Type type() {
             return Type.Single;
         }
@@ -651,9 +753,9 @@ public class BuildScriptBuilder {
 
     private static class MethodInvocation extends AbstractStatement {
 
-        final MethodInvocationValue invocationExpression;
+        final MethodInvocationExpression invocationExpression;
 
-        private MethodInvocation(String comment, MethodInvocationValue invocationExpression) {
+        private MethodInvocation(String comment, MethodInvocationExpression invocationExpression) {
             super(comment);
             this.invocationExpression = invocationExpression;
         }
@@ -664,15 +766,54 @@ public class BuildScriptBuilder {
         }
     }
 
+    private static class ContainerElement extends AbstractStatement implements ExpressionValue {
+
+        private final String comment;
+        private final String container;
+        private final String elementName;
+        @Nullable
+        private final String varName;
+        @Nullable
+        private final String elementType;
+        private final ScriptBlockImpl body = new ScriptBlockImpl();
+
+        public ContainerElement(String comment, String container, String elementName, @Nullable String elementType, @Nullable String varName) {
+            super(null);
+            this.comment = comment;
+            this.container = container;
+            this.elementName = elementName;
+            this.elementType = elementType;
+            this.varName = varName;
+        }
+
+        @Override
+        public boolean isBooleanType() {
+            return false;
+        }
+
+        @Override
+        public void writeCodeTo(PrettyPrinter printer) {
+            Statement statement = printer.syntax.createContainerElement(comment, container, elementName, elementType, varName, body.statements);
+            printer.printStatement(statement);
+        }
+
+        @Override
+        public String with(Syntax syntax) {
+            return syntax.referenceCreatedContainerElement(container, elementName, varName);
+        }
+    }
+
     private static class PropertyAssignment extends AbstractStatement {
 
         final String propertyName;
         final ExpressionValue propertyValue;
+        final boolean legacyProperty;
 
-        private PropertyAssignment(String comment, String propertyName, ExpressionValue propertyValue) {
+        private PropertyAssignment(String comment, String propertyName, ExpressionValue propertyValue, boolean legacyProperty) {
             super(comment);
             this.propertyName = propertyName;
             this.propertyValue = propertyValue;
+            this.legacyProperty = legacyProperty;
         }
 
         @Override
@@ -686,30 +827,8 @@ public class BuildScriptBuilder {
      */
     private interface BlockBody {
         void writeBodyTo(PrettyPrinter printer);
-    }
 
-    private static class StatementSequence implements Statement {
-        final ScriptBlockImpl statements = new ScriptBlockImpl();
-
-        public void add(Statement statement) {
-            statements.add(statement);
-        }
-
-        @Nullable
-        @Override
-        public String getComment() {
-            return null;
-        }
-
-        @Override
-        public Statement.Type type() {
-            return statements.type();
-        }
-
-        @Override
-        public void writeCodeTo(PrettyPrinter printer) {
-            statements.writeBodyTo(printer);
-        }
+        List<Statement> getStatements();
     }
 
     private static class BlockStatement implements Statement {
@@ -718,11 +837,10 @@ public class BuildScriptBuilder {
         final ScriptBlockImpl body = new ScriptBlockImpl();
 
         BlockStatement(String blockSelector) {
-            this.comment = null;
-            this.blockSelector = blockSelector;
+            this(null, blockSelector);
         }
 
-        BlockStatement(String comment, String blockSelector) {
+        BlockStatement(@Nullable String comment, String blockSelector) {
             this.comment = comment;
             this.blockSelector = blockSelector;
         }
@@ -749,8 +867,8 @@ public class BuildScriptBuilder {
     }
 
     private static class ScriptBlock extends BlockStatement {
-        ScriptBlock(String comment, String methodName) {
-            super(comment, methodName);
+        ScriptBlock(String comment, String blockSelector) {
+            super(comment, blockSelector);
         }
 
         @Override
@@ -767,12 +885,17 @@ public class BuildScriptBuilder {
 
         @Override
         public void mavenLocal(String comment) {
-            add(new MethodInvocation(comment, new MethodInvocationValue("mavenLocal")));
+            add(new MethodInvocation(comment, new MethodInvocationExpression("mavenLocal")));
         }
 
         @Override
-        public void jcenter(@Nullable String comment) {
-            add(new MethodInvocation(comment, new MethodInvocationValue("jcenter")));
+        public void mavenCentral(@Nullable String comment) {
+            add(new MethodInvocation(comment, new MethodInvocationExpression("mavenCentral")));
+        }
+
+        @Override
+        public void gradlePluginPortal(@Nullable String comment) {
+            add(new MethodInvocation(comment, new MethodInvocationExpression("gradlePluginPortal")));
         }
 
         @Override
@@ -783,10 +906,21 @@ public class BuildScriptBuilder {
 
     private static class DependenciesBlock implements DependenciesBuilder, Statement, BlockBody {
         final ListMultimap<String, Statement> dependencies = MultimapBuilder.linkedHashKeys().arrayListValues().build();
+        final ListMultimap<String, Statement> constraints = MultimapBuilder.linkedHashKeys().arrayListValues().build();
 
         @Override
         public void dependency(String configuration, @Nullable String comment, String... dependencies) {
             this.dependencies.put(configuration, new DepSpec(configuration, comment, Arrays.asList(dependencies)));
+        }
+
+        @Override
+        public void dependencyConstraint(String configuration, @Nullable String comment, String... constraints) {
+            this.constraints.put(configuration, new DepSpec(configuration, comment, Arrays.asList(constraints)));
+        }
+
+        @Override
+        public void platformDependency(String configuration, @Nullable String comment, String dependency) {
+            this.dependencies.put(configuration, new PlatformDepSpec(configuration, comment, dependency));
         }
 
         @Override
@@ -802,7 +936,7 @@ public class BuildScriptBuilder {
 
         @Override
         public Type type() {
-            return dependencies.isEmpty() ? Type.Empty : Type.Group;
+            return dependencies.isEmpty() && constraints.isEmpty() ? Type.Empty : Type.Group;
         }
 
         @Override
@@ -812,11 +946,40 @@ public class BuildScriptBuilder {
 
         @Override
         public void writeBodyTo(PrettyPrinter printer) {
+            if (!this.constraints.isEmpty()) {
+                ScriptBlockImpl constraintsBlock = new ScriptBlockImpl();
+                for (String config : this.constraints.keySet()) {
+                    for (Statement constraintSpec : this.constraints.get(config)) {
+                            constraintsBlock.add(constraintSpec);
+                    }
+                }
+                printer.printBlock("constraints", constraintsBlock);
+            }
+
             for (String config : dependencies.keySet()) {
                 for (Statement depSpec : dependencies.get(config)) {
                     printer.printStatement(depSpec);
                 }
             }
+        }
+
+        @Override
+        public List<Statement> getStatements() {
+            List<Statement> statements = new ArrayList<>();
+            if (!constraints.isEmpty()) {
+                ScriptBlock constraintsBlock = new ScriptBlock(null, "constraints");
+                for (String config : constraints.keySet()) {
+                    for(Statement statement : constraints.get(config)) {
+                        constraintsBlock.add(statement);
+                    }
+                }
+                statements.add(constraintsBlock);
+            }
+
+            for (String config : dependencies.keySet()) {
+                statements.addAll(dependencies.get(config));
+            }
+            return statements;
         }
     }
 
@@ -831,16 +994,21 @@ public class BuildScriptBuilder {
         @Override
         public void writeCodeTo(PrettyPrinter printer) {
             ScriptBlockImpl statements = new ScriptBlockImpl();
-            statements.propertyAssignment(null, "url", url);
+            statements.propertyAssignment(null, "url", new MethodInvocationExpression(null, "uri", Collections.singletonList(new StringValue(url))), true);
             printer.printBlock("maven", statements);
         }
     }
 
     private static class ScriptBlockImpl implements ScriptBlockBuilder, BlockBody {
-        final List<Statement> statements = new ArrayList<Statement>();
+        final List<Statement> statements = new ArrayList<>();
 
         public void add(Statement statement) {
             statements.add(statement);
+        }
+
+        @Override
+        public List<Statement> getStatements() {
+            return statements;
         }
 
         public Statement.Type type() {
@@ -858,13 +1026,18 @@ public class BuildScriptBuilder {
         }
 
         @Override
-        public void propertyAssignment(String comment, String propertyName, Object propertyValue) {
-            statements.add(new PropertyAssignment(comment, propertyName, expressionValue(propertyValue)));
+        public void propertyAssignment(String comment, String propertyName, Object propertyValue, boolean legacyProperty) {
+            statements.add(new PropertyAssignment(comment, propertyName, expressionValue(propertyValue), legacyProperty));
         }
 
         @Override
         public void methodInvocation(String comment, String methodName, Object... methodArgs) {
-            statements.add(new MethodInvocation(comment, new MethodInvocationValue(methodName, expressionValues(methodArgs))));
+            statements.add(new MethodInvocation(comment, new MethodInvocationExpression(null, methodName, expressionValues(methodArgs))));
+        }
+
+        @Override
+        public void methodInvocation(@Nullable String comment, Expression target, String methodName, Object... methodArgs) {
+            statements.add(new MethodInvocation(comment, new MethodInvocationExpression(expressionValue(target), methodName, expressionValues(methodArgs))));
         }
 
         @Override
@@ -875,129 +1048,72 @@ public class BuildScriptBuilder {
         }
 
         @Override
+        public void block(@Nullable String comment, String methodName, Action<? super ScriptBlockBuilder> blockContentsBuilder) {
+            blockContentsBuilder.execute(block(comment, methodName));
+        }
+
+        @Override
+        public Expression containerElement(@Nullable String comment, String container, String elementName, @Nullable String elementType, Action<? super ScriptBlockBuilder> blockContentsBuilder) {
+            ContainerElement containerElement = new ContainerElement(comment, container, elementName, elementType, null);
+            statements.add(containerElement);
+            blockContentsBuilder.execute(containerElement.body);
+            return containerElement;
+        }
+
+        @Override
         public Expression propertyExpression(String value) {
             return new LiteralValue(value);
         }
     }
 
-    private static class CrossConfigBlock extends ScriptBlockImpl implements CrossConfigurationScriptBlockBuilder, Statement {
-        final String blockName;
-        final RepositoriesBlock repositories = new RepositoriesBlock();
-        final DependenciesBlock dependencies = new DependenciesBlock();
-        final StatementSequence plugins = new StatementSequence();
-        final StatementSequence taskRegistrations = new StatementSequence();
-        final ConfigurationStatements<TaskTypeSelector> taskTypes = new ConfigurationStatements<TaskTypeSelector>();
-        final ConfigurationStatements<TaskSelector> tasks = new ConfigurationStatements<TaskSelector>();
-        final ConfigurationStatements<ConventionSelector> conventions = new ConfigurationStatements<ConventionSelector>();
-
-        CrossConfigBlock(String blockName) {
-            this.blockName = blockName;
-        }
-
-        @Override
-        public RepositoriesBuilder repositories() {
-            return repositories;
-        }
-
-        @Override
-        public DependenciesBuilder dependencies() {
-            return dependencies;
-        }
-
-        @Override
-        public void plugin(String comment, String pluginId) {
-            plugins.add(new NestedPluginSpec(pluginId, null, comment));
-        }
-
-        @Override
-        public void taskPropertyAssignment(String comment, String taskType, String propertyName, Object propertyValue) {
-            taskTypes.add(new TaskTypeSelector(taskType), new PropertyAssignment(comment, propertyName, expressionValue(propertyValue)));
-        }
-
-        @Override
-        public void taskMethodInvocation(@Nullable String comment, String taskName, String taskType, String methodName, Object... methodArgs) {
-            tasks.add(new TaskSelector(taskName, taskType), new MethodInvocation(comment, new MethodInvocationValue(methodName, expressionValues(methodArgs))));
-        }
-
-        @Override
-        public ScriptBlockBuilder taskRegistration(String comment, String taskName, String taskType) {
-            TaskRegistration registration = new TaskRegistration(comment, taskName, taskType);
-            taskRegistrations.add(registration);
-            return registration.body;
-        }
-
-        @Override
-        public Type type() {
-            if (super.type() == Type.Empty
-                && repositories.type() == Type.Empty
-                && plugins.type() == Type.Empty
-                && taskRegistrations.type() == Type.Empty
-                && conventions.type() == Type.Empty
-                && tasks.type() == Type.Empty
-                && taskTypes.type() == Type.Empty
-                && dependencies.type() == Type.Empty) {
-                return Type.Empty;
-            }
-            return Type.Group;
-        }
-
-        @Nullable
-        @Override
-        public String getComment() {
-            return null;
-        }
-
-        @Override
-        public void writeCodeTo(PrettyPrinter printer) {
-            printer.printBlock(blockName, this);
-        }
-
-        @Override
-        public void writeBodyTo(PrettyPrinter printer) {
-            printer.printStatement(plugins);
-            printer.printStatement(repositories);
-            printer.printStatement(dependencies);
-            printer.printStatement(taskRegistrations);
-            super.writeBodyTo(printer);
-            printer.printStatement(conventions);
-            printer.printStatement(taskTypes);
-            printer.printStatement(tasks);
-        }
-    }
-
     private static class TopLevelBlock extends ScriptBlockImpl {
         final BlockStatement plugins = new BlockStatement("plugins");
-        final StatementSequence tasksRegistrations = new StatementSequence();
         final RepositoriesBlock repositories = new RepositoriesBlock();
         final DependenciesBlock dependencies = new DependenciesBlock();
-        final CrossConfigBlock allprojects = new CrossConfigBlock("allprojects");
-        final CrossConfigBlock subprojects = new CrossConfigBlock("subprojects");
-        final ConfigurationStatements<TaskTypeSelector> taskTypes = new ConfigurationStatements<TaskTypeSelector>();
-        final ConfigurationStatements<TaskSelector> tasks = new ConfigurationStatements<TaskSelector>();
-        final ConfigurationStatements<ConventionSelector> conventions = new ConfigurationStatements<ConventionSelector>();
+        final ConfigurationStatements<TaskTypeSelector> taskTypes = new ConfigurationStatements<>();
+        final ConfigurationStatements<TaskSelector> tasks = new ConfigurationStatements<>();
+        final ConfigurationStatements<ConventionSelector> conventions = new ConfigurationStatements<>();
 
         @Override
         public void writeBodyTo(PrettyPrinter printer) {
             printer.printStatement(plugins);
-            printer.printStatement(allprojects);
-            printer.printStatement(subprojects);
             printer.printStatement(repositories);
             printer.printStatement(dependencies);
-            printer.printStatement(tasksRegistrations);
             super.writeBodyTo(printer);
             printer.printStatement(conventions);
             printer.printStatement(taskTypes);
             printer.printStatement(tasks);
         }
+
+        public List<String> extractComments() {
+            List<String> comments = new ArrayList<>();
+            collectComments(plugins.body, comments);
+            collectComments(repositories.body, comments);
+            collectComments(dependencies, comments);
+            for (Statement otherBlock : getStatements()) {
+                if (otherBlock instanceof BlockStatement) {
+                    collectComments(((BlockStatement) otherBlock).body, comments);
+                }
+            }
+            return comments;
+        }
+
+        private void collectComments(BlockBody body, List<String> comments) {
+            for (Statement statement : body.getStatements()) {
+                if (statement.getComment() != null) {
+                    comments.add(statement.getComment());
+                }
+            }
+        }
     }
 
-    private static class TaskRegistration implements Statement {
+    private static class TaskRegistration implements Statement, ExpressionValue {
         final String taskName;
         final String taskType;
         final String comment;
         final ScriptBlockImpl body = new ScriptBlockImpl();
 
-        TaskRegistration(String comment, String taskName, String taskType) {
+        TaskRegistration(@Nullable String comment, String taskName, String taskType) {
             this.comment = comment;
             this.taskName = taskName;
             this.taskType = taskType;
@@ -1017,6 +1133,16 @@ public class BuildScriptBuilder {
         @Override
         public void writeCodeTo(PrettyPrinter printer) {
             printer.printBlock(printer.syntax.taskRegistration(taskName, taskType), body);
+        }
+
+        @Override
+        public boolean isBooleanType() {
+            return false;
+        }
+
+        @Override
+        public String with(Syntax syntax) {
+            return syntax.referenceRegisteredTask(taskName);
         }
     }
 
@@ -1057,17 +1183,24 @@ public class BuildScriptBuilder {
 
         private final Syntax syntax;
         private final PrintWriter writer;
+        private final boolean externalComments;
         private String indent = "";
+        private String eolComment = null;
+        private int commentCount = 0;
         private boolean needSeparatorLine = true;
         private boolean firstStatementOfBlock = false;
         private boolean hasSeparatorLine = false;
 
-        PrettyPrinter(Syntax syntax, PrintWriter writer) {
+        PrettyPrinter(Syntax syntax, PrintWriter writer, boolean externalComments) {
             this.syntax = syntax;
             this.writer = writer;
+            this.externalComments = externalComments;
         }
 
         public void printFileHeader(Collection<String> lines) {
+            if (externalComments) {
+                return;
+            }
             println("/*");
             println(" * This file was generated by the Gradle 'init' task.");
             if (!lines.isEmpty()) {
@@ -1130,8 +1263,13 @@ public class BuildScriptBuilder {
             printStatementSeparator();
 
             if (hasComment) {
-                for (String line : splitComment(statement.getComment())) {
-                    println("// " + line);
+                if (externalComments) {
+                    commentCount++;
+                    eolComment = " // <" + commentCount + ">";
+                } else {
+                    for (String line : splitComment(statement.getComment())) {
+                        println("// " + line);
+                    }
                 }
             }
 
@@ -1147,7 +1285,12 @@ public class BuildScriptBuilder {
             if (!indent.isEmpty()) {
                 writer.print(indent);
             }
-            writer.println(s);
+            if (eolComment != null) {
+                writer.println(s + eolComment);
+                eolComment = null;
+            } else {
+                writer.println(s);
+            }
             hasSeparatorLine = false;
         }
 
@@ -1172,13 +1315,25 @@ public class BuildScriptBuilder {
 
         String taskSelector(TaskSelector selector);
 
+        String taskByTypeSelector(String taskType);
+
         String string(String string);
 
         String taskRegistration(String taskName, String taskType);
 
+        String referenceRegisteredTask(String taskName);
+
         String mapLiteral(Map<String, ExpressionValue> map);
 
         String firstArg(ExpressionValue argument);
+
+        Statement createContainerElement(@Nullable String comment, String container, String elementName, @Nullable String elementType, @Nullable String varName, List<Statement> body);
+
+        String referenceCreatedContainerElement(String container, String elementName, @Nullable String varName);
+
+        String containerElement(String container, String element);
+
+        void configureConventionPlugin(@Nullable String comment, BlockStatement plugins, RepositoriesBlock repositories);
     }
 
     private static final class KotlinSyntax implements Syntax {
@@ -1214,7 +1369,9 @@ public class BuildScriptBuilder {
         @Override
         public String pluginDependencySpec(String pluginId, @Nullable String version) {
             if (version != null) {
-                return "id(\"" + pluginId + "\").version(\"" + version + "\")";
+                return "id(\"" + pluginId + "\") version \"" + version + "\"";
+            } else if (pluginId.contains(".")) {
+                return "id(\"" + pluginId + "\")";
             }
             return pluginId.matches("[a-z]+") ? pluginId : "`" + pluginId + "`";
         }
@@ -1236,17 +1393,21 @@ public class BuildScriptBuilder {
         public String propertyAssignment(PropertyAssignment expression) {
             String propertyName = expression.propertyName;
             ExpressionValue propertyValue = expression.propertyValue;
-            if (propertyValue.isBooleanType()) {
-                return booleanPropertyNameFor(propertyName) + " = " + propertyValue.with(this);
+            if (expression.legacyProperty) {
+                if (propertyValue.isBooleanType()) {
+                    return booleanPropertyNameFor(propertyName) + " = " + propertyValue.with(this);
+                }
+                return propertyName + " = " + propertyValue.with(this);
+            } else {
+                return propertyName + ".set(" + propertyValue.with(this) + ")";
             }
-            return propertyName + " = " + propertyValue.with(this);
         }
 
         // In Kotlin:
         //
         // > Boolean accessor methods (where the name of the getter starts with is and the name of
         // > the setter starts with set) are represented as properties which have the same name as
-        // > the getter method. Boolean properties are visibile with a `is` prefix in Kotlin
+        // > the getter method. Boolean properties are visible with a `is` prefix in Kotlin
         //
         // https://kotlinlang.org/docs/reference/java-interop.html#getters-and-setters
         //
@@ -1263,12 +1424,64 @@ public class BuildScriptBuilder {
 
         @Override
         public String taskSelector(TaskSelector selector) {
-            return "val " + selector.taskName + " by tasks.getting(" + selector.taskType + "::class)";
+            return "tasks." + selector.taskName;
+        }
+
+        @Override
+        public String taskByTypeSelector(String taskType) {
+            return "tasks.withType<" + taskType + ">()";
         }
 
         @Override
         public String taskRegistration(String taskName, String taskType) {
-            return "val " + taskName + " by tasks.creating(" + taskType + "::class)";
+            return "val " + taskName + " by tasks.registering(" + taskType + "::class)";
+        }
+
+        @Override
+        public String referenceRegisteredTask(String taskName) {
+            return taskName;
+        }
+
+        @Override
+        public Statement createContainerElement(String comment, String container, String elementName, @Nullable String elementType, String varName, List<Statement> body) {
+            String literal;
+            if (varName == null) {
+                if (elementType == null) {
+                    literal = "val " + elementName + " by " + container + ".creating";
+                } else {
+                    literal = container + ".create<" + elementType + ">(" + string(elementName) + ")";
+                }
+            } else {
+                if (elementType == null) {
+                    literal = "val " + varName + " = " + container + ".create(" + string(elementName) + ")";
+                } else {
+                    literal = "val " + varName + " = " + container + ".create<" + elementType + ">(" + string(elementName) + ")";
+                }
+            }
+            BlockStatement blockStatement = new ScriptBlock(comment, literal);
+            for (Statement statement : body) {
+                blockStatement.add(statement);
+            }
+            return blockStatement;
+        }
+
+        @Override
+        public String referenceCreatedContainerElement(String container, String elementName, String varName) {
+            if (varName == null) {
+                return elementName;
+            } else {
+                return varName;
+            }
+        }
+
+        @Override
+        public String containerElement(String container, String element) {
+            return container + "[" + string(element) + "]";
+        }
+
+        @Override
+        public void configureConventionPlugin(@Nullable String comment, BlockStatement plugins, RepositoriesBlock repositories) {
+            plugins.add(new PluginSpec("kotlin-dsl", null, comment));
         }
     }
 
@@ -1348,12 +1561,48 @@ public class BuildScriptBuilder {
 
         @Override
         public String taskSelector(TaskSelector selector) {
-            return selector.taskName;
+            return "tasks.named('" + selector.taskName + "')";
+        }
+
+        @Override
+        public String taskByTypeSelector(String taskType) {
+            return "tasks.withType(" + taskType + ")";
         }
 
         @Override
         public String taskRegistration(String taskName, String taskType) {
-            return "task " + taskName + "(type: " + taskType + ")";
+            return "tasks.register('" + taskName + "', " + taskType + ")";
+        }
+
+        @Override
+        public String referenceRegisteredTask(String taskName) {
+            return "tasks." + taskName;
+        }
+
+        @Override
+        public Statement createContainerElement(String comment, String container, String elementName, @Nullable String elementType, String varName, List<Statement> body) {
+            ScriptBlock outerBlock = new ScriptBlock(comment, container);
+            ScriptBlock innerBlock = new ScriptBlock(null, elementType == null ? elementName : (elementName + "(" + elementType + ")"));
+            outerBlock.add(innerBlock);
+            for (Statement statement : body) {
+                innerBlock.add(statement);
+            }
+            return outerBlock;
+        }
+
+        @Override
+        public String referenceCreatedContainerElement(String container, String elementName, String varName) {
+            return container + "." + elementName;
+        }
+
+        @Override
+        public String containerElement(String container, String element) {
+            return container + "." + element;
+        }
+
+        @Override
+        public void configureConventionPlugin(@Nullable String comment, BlockStatement plugins, RepositoriesBlock repositories) {
+            plugins.add(new PluginSpec("groovy-gradle-plugin", null, comment));
         }
     }
 }

@@ -73,7 +73,7 @@ class PackageListGeneratorIntegrationTest extends AbstractIntegrationSpec {
                 dependsOn jar
                 excludes = ['${DEFAULT_EXCLUDES_FOR_TEST.join("', '")}']
                 outputFile = file("\$buildDir/package-list.txt")
-                classpath = files(jar.archivePath)
+                classpath = files(jar.archiveFile)
             }
         """
 
@@ -126,8 +126,8 @@ class PackageListGeneratorIntegrationTest extends AbstractIntegrationSpec {
     private void aJar() {
         buildFile << '''
             task jar(type: Jar) {
-                archiveName = 'mylib.jar'
-                destinationDir = buildDir
+                archiveFileName = 'mylib.jar'
+                destinationDirectory = buildDir
                 from file('build/classes')
             }
         '''

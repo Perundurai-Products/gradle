@@ -17,8 +17,13 @@
 package org.gradle.api
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.internal.os.OperatingSystem
 import org.gradle.test.fixtures.plugin.PluginBuilder
+import spock.lang.IgnoreIf
+import spock.lang.Issue
 
+@Issue("https://github.com/gradle/gradle-private/issues/3247")
+@IgnoreIf({ OperatingSystem.current().macOsX && JavaVersion.current() == JavaVersion.VERSION_1_8})
 class PluginApplicationErrorIntegrationTest extends AbstractIntegrationSpec {
     def pluginBuilder = new PluginBuilder(file("plugin"))
 
@@ -40,7 +45,7 @@ apply plugin: 'broken'
         fails()
 
         then:
-        failure.assertHasCause("Failed to apply plugin [id 'broken']")
+        failure.assertHasCause("Failed to apply plugin 'broken'")
         failure.assertHasCause("throwing plugin")
     }
 
@@ -59,7 +64,7 @@ class BrokenPlugin implements Plugin<Project> {
         fails()
 
         then:
-        failure.assertHasCause("Failed to apply plugin [class 'BrokenPlugin']")
+        failure.assertHasCause("Failed to apply plugin class 'BrokenPlugin'")
         failure.assertHasCause("throwing plugin")
     }
 
@@ -77,7 +82,7 @@ class BrokenPlugin {
         fails()
 
         then:
-        failure.assertHasCause("Failed to apply plugin [class 'BrokenPlugin']")
+        failure.assertHasCause("Failed to apply plugin class 'BrokenPlugin'")
         failure.assertHasCause("'BrokenPlugin' is neither a plugin or a rule source and cannot be applied.")
     }
 }

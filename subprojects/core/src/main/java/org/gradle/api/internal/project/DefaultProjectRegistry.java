@@ -16,9 +16,9 @@
 package org.gradle.api.internal.project;
 
 import org.gradle.api.InvalidUserDataException;
-import org.gradle.api.Project;
 import org.gradle.api.specs.Spec;
-import org.gradle.util.GUtil;
+import org.gradle.util.Path;
+import org.gradle.util.internal.GUtil;
 
 import java.io.File;
 import java.util.HashMap;
@@ -27,9 +27,10 @@ import java.util.Map;
 import java.util.Set;
 
 public class DefaultProjectRegistry<T extends ProjectIdentifier> implements ProjectRegistry<T> {
-    private Map<String, T> projects = new HashMap<String, T>();
-    private Map<String, Set<T>> subProjects = new HashMap<String, Set<T>>();
+    private final Map<String, T> projects = new HashMap<String, T>();
+    private final Map<String, Set<T>> subProjects = new HashMap<String, Set<T>>();
 
+    @Override
     public void addProject(T project) {
         projects.put(project.getPath(), project);
         subProjects.put(project.getPath(), new HashSet<T>());
@@ -61,32 +62,37 @@ public class DefaultProjectRegistry<T extends ProjectIdentifier> implements Proj
         return projects.size();
     }
 
+    @Override
     public Set<T> getAllProjects() {
         return new HashSet<T>(projects.values());
     }
 
     @Override
     public T getRootProject() {
-        return getProject(Project.PATH_SEPARATOR);
+        return getProject(Path.ROOT.getPath());
     }
 
+    @Override
     public T getProject(String path) {
         return projects.get(path);
     }
 
+    @Override
     public T getProject(final File projectDir) {
         Set<T> projects = findAll(new Spec<T>() {
+            @Override
             public boolean isSatisfiedBy(T element) {
                 return element.getProjectDir().equals(projectDir);
             }
         });
         if (projects.size() > 1) {
             throw new InvalidUserDataException(String.format("Found multiple projects with project directory '%s': %s",
-                    projectDir, projects));
+                projectDir, projects));
         }
         return projects.size() == 1 ? projects.iterator().next() : null;
     }
 
+    @Override
     public Set<T> getAllProjects(String path) {
         Set<T> result = new HashSet<T>(getSubProjects(path));
         if (projects.get(path) != null) {
@@ -95,10 +101,12 @@ public class DefaultProjectRegistry<T extends ProjectIdentifier> implements Proj
         return result;
     }
 
+    @Override
     public Set<T> getSubProjects(String path) {
-        return GUtil.elvis(subProjects.get(path), new HashSet<T>());
+        return GUtil.getOrDefault(subProjects.get(path), HashSet::new);
     }
 
+    @Override
     public Set<T> findAll(Spec<? super T> constraint) {
         Set<T> matches = new HashSet<T>();
         for (T project : projects.values()) {

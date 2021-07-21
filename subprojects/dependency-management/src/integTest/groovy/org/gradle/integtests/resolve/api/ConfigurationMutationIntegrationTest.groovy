@@ -16,13 +16,14 @@
 package org.gradle.integtests.resolve.api
 
 import org.gradle.integtests.fixtures.AbstractDependencyResolutionTest
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.integtests.fixtures.resolve.ResolveTestFixture
 
 class ConfigurationMutationIntegrationTest extends AbstractDependencyResolutionTest {
     ResolveTestFixture resolve
 
     def setup() {
-        resolve = new ResolveTestFixture(buildFile).expectDefaultConfiguration("runtime")
+        resolve = new ResolveTestFixture(buildFile, "compile").expectDefaultConfiguration("runtime")
         resolve.addDefaultVariantDerivationStrategy()
 
         mavenRepo.module("org", "foo").publish()
@@ -163,6 +164,7 @@ configurations.compile.withDependencies { deps ->
         }
     }
 
+    @ToBeFixedForConfigurationCache
     def "provides useful error message when withDependencies action fails to execute"() {
         when:
         buildFile << """
@@ -206,11 +208,11 @@ configurations.compile.withDependencies {
 
         then:
         fails "mutateResolved"
-        failure.assertHasCause("Cannot change dependencies of configuration ':compile' after it has been resolved.")
+        failure.assertHasCause("Cannot change dependencies of dependency configuration ':compile' after it has been resolved.")
 
         and:
         fails "mutateParent"
-        failure.assertHasCause("Cannot change dependencies of configuration ':conf' after it has been included in dependency resolution.")
+        failure.assertHasCause("Cannot change dependencies of dependency configuration ':conf' after it has been included in dependency resolution.")
     }
 
     void resolvedGraph(@DelegatesTo(ResolveTestFixture.NodeBuilder) Closure closure) {
@@ -236,7 +238,7 @@ subprojects {
 
 project(":producer") {
     configurations {
-        compile {
+        implementation {
             withDependencies { deps ->
                 deps.each {
                     it.version {
@@ -248,22 +250,22 @@ project(":producer") {
         }
     }
     dependencies {
-        compile "org:explicit-dependency"
+        implementation "org:explicit-dependency"
     }
 }
 
 project(":consumer") {
     dependencies {
-        compile project(":producer")
+        implementation project(":producer")
     }
 }
 
 subprojects {
     task resolve {
-        dependsOn configurations.compile
+        inputs.files(configurations.runtimeClasspath)
 
         doLast {
-            def resolvedJars = configurations.compile.files.collect { it.name }
+            def resolvedJars = configurations.runtimeClasspath.files.collect { it.name }
             assert "explicit-dependency-3.4.jar" in resolvedJars
             assert "added-dependency-3.4.jar" in resolvedJars
         }
@@ -278,6 +280,7 @@ include 'consumer', 'producer'
         succeeds("resolve")
 
     }
+
     def "can use defaultDependencies in a composite build"() {
         buildTestFixture.withBuildInSubDir()
         mavenRepo.module("org", "explicit-dependency", "3.4").publish()
@@ -291,7 +294,7 @@ include 'consumer', 'producer'
         maven { url '${mavenRepo.uri}' }
     }
     configurations {
-        compile {
+        implementation {
             withDependencies { deps ->
                 deps.each {
                     it.version {
@@ -303,7 +306,7 @@ include 'consumer', 'producer'
         }
     }
     dependencies {
-        compile "org:explicit-dependency"
+        implementation "org:explicit-dependency"
     }
 """
         }
@@ -322,13 +325,13 @@ include 'consumer', 'producer'
         maven { url '${mavenRepo.uri}' }
     }
     dependencies {
-        compile 'org.test:producer:1.0'
+        implementation 'org.test:producer:1.0'
     }
     task resolve {
-        dependsOn configurations.compile
+        dependsOn configurations.runtimeClasspath
 
         doLast {
-            def resolvedJars = configurations.compile.files.collect { it.name }
+            def resolvedJars = configurations.runtimeClasspath.files.collect { it.name }
             assert "explicit-dependency-3.4.jar" in resolvedJars
             assert "added-dependency-3.4.jar" in resolvedJars
         }

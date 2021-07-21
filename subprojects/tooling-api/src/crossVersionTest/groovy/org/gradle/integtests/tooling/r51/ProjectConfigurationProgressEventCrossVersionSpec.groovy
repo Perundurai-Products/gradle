@@ -30,6 +30,7 @@ import org.gradle.tooling.events.OperationType
 import org.gradle.tooling.events.ScriptPluginIdentifier
 import org.gradle.tooling.events.configuration.ProjectConfigurationOperationDescriptor
 import org.gradle.tooling.events.configuration.ProjectConfigurationOperationResult
+import org.gradle.util.GradleVersion
 import org.junit.Rule
 
 import java.time.Duration
@@ -43,7 +44,7 @@ class ProjectConfigurationProgressEventCrossVersionSpec extends ToolingApiSpecif
     ProgressEvents events = ProgressEvents.create()
 
     @Rule
-    BlockingHttpServer server = new BlockingHttpServer()
+    public BlockingHttpServer server = new BlockingHttpServer()
 
     def setup() {
         file("buildSrc/settings.gradle") << """
@@ -76,10 +77,9 @@ class ProjectConfigurationProgressEventCrossVersionSpec extends ToolingApiSpecif
         with(events.operation("Configure project $displayName")) {
             assert successful
             assert projectConfiguration
-            with((ProjectConfigurationOperationDescriptor) descriptor) {
-                assert project.projectPath == projectPath
-                assert project.buildIdentifier.rootDir == rootDir
-            }
+            def projectConfigurationDescriptor = (ProjectConfigurationOperationDescriptor) descriptor
+            assert projectConfigurationDescriptor.project.projectPath == projectPath
+            assert projectConfigurationDescriptor.project.buildIdentifier.rootDir == rootDir
         }
     }
 
@@ -207,16 +207,23 @@ class ProjectConfigurationProgressEventCrossVersionSpec extends ToolingApiSpecif
 
         then:
         def plugins = getPluginConfigurationOperationResult(":").getPluginApplicationResults().collect { it.plugin.displayName }
-        plugins == [
+        def expectedPlugins = [
             "org.gradle.build-init", "org.gradle.wrapper", "org.gradle.help-tasks",
             "build.gradle", "script.gradle",
-            "org.gradle.java", "org.gradle.api.plugins.JavaBasePlugin", "org.gradle.api.plugins.BasePlugin",
-            "org.gradle.language.base.plugins.LifecycleBasePlugin", "org.gradle.api.plugins.ReportingBasePlugin"
+            "org.gradle.java", "org.gradle.api.plugins.JavaBasePlugin",
+            "org.gradle.api.plugins.BasePlugin",
+            "org.gradle.language.base.plugins.LifecycleBasePlugin",
+            "org.gradle.api.plugins.ReportingBasePlugin"
         ]
+        if (targetVersion >= GradleVersion.version("6.7")) {
+            expectedPlugins << "org.gradle.api.plugins.JvmEcosystemPlugin"
+        }
+        plugins.sort() == expectedPlugins.sort()
     }
 
     def "reports plugin configuration results for remote script plugins"() {
         given:
+        toolingApi.requireIsolatedUserHome() // So that the script is not cached
         server.start()
         def scriptUri = server.uri("script.gradle")
         server.expect(server.get("script.gradle").send("""
@@ -279,7 +286,7 @@ class ProjectConfigurationProgressEventCrossVersionSpec extends ToolingApiSpecif
         def sleepMillis = 250
         file("build.gradle") << """
             apply plugin: MyPlugin
-            
+
             configurations {
                 foo
             }

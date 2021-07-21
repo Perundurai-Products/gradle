@@ -15,12 +15,12 @@
  */
 package org.gradle.util
 
-
-import org.gradle.util.ConfigureUtil.IncompleteInputException
+import org.gradle.util.internal.ConfigureUtil
+import org.gradle.util.internal.ConfigureUtil.IncompleteInputException
 import spock.lang.Specification
 
-import static org.hamcrest.Matchers.equalTo
-import static org.junit.Assert.assertThat
+import static org.hamcrest.CoreMatchers.equalTo
+import static org.hamcrest.MatcherAssert.assertThat
 
 class ConfigureUtilTest extends Specification {
 

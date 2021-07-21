@@ -19,12 +19,12 @@ package org.gradle.nativeplatform.toolchain.internal.msvcpp.version
 import net.rubygrapefruit.platform.MissingRegistryEntryException
 import net.rubygrapefruit.platform.WindowsRegistry
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
-import org.gradle.util.VersionNumber
+import org.gradle.util.internal.VersionNumber
 import org.junit.Rule
 import spock.lang.Specification
 
 class DefaultVisualCppMetadataProviderTest extends Specification {
-    @Rule TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
+    @Rule TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider(getClass())
 
     def windowsRegistry = Mock(WindowsRegistry)
     def metadataProvider = new DefaultVisualCppMetadataProvider(windowsRegistry)

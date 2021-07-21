@@ -186,7 +186,8 @@ class TestLauncherCrossVersionSpec extends TestLauncherSpec {
         assertTestExecuted(className: "example.MyTest", methodName: "foo2", task: ":secondTest")
         assertTestExecuted(className: "example.MyTest", methodName: "foo3", task: ":secondTest")
         assertTestExecuted(className: "example.MyTest", methodName: "foo4", task: ":secondTest")
-        events.tests.size() in (supportsEfficientClassFiltering() ? [7, 14] : [8, 16]) // also accept it as a valid result when the build gets executed twice.
+        events.testTasksAndExecutors.size() in [2, 3, 4] // also accept it as a valid result when the test task get started twice (event: 'Gradle Test Run :secondTest')
+        events.testClassesAndMethods.size() in (supportsEfficientClassFiltering() ? [5, 10] : [6, 12]) // also accept it as a valid result when tests get executed twice
     }
 
     public <T> T withCancellation(@ClosureParams(value = SimpleType, options = ["org.gradle.tooling.CancellationToken"]) Closure<T> cl) {
@@ -322,7 +323,7 @@ class TestLauncherCrossVersionSpec extends TestLauncherSpec {
     }
 
     def "can execute multiple test classes passed by name"() {
-        setup: "add testcase that should not be exeucted"
+        setup: "add testcase that should not be executed"
         withFailingTest()
 
         when:
@@ -449,11 +450,12 @@ class TestLauncherCrossVersionSpec extends TestLauncherSpec {
         settingsFile << "rootProject.name = 'testproject'\n"
         buildFile.text = simpleJavaProject()
 
+        def classesDir = 'file("build/classes/moreTests")'
         buildFile << """
             sourceSets {
                 moreTests {
                     java.srcDir "src/test"
-                    ${separateClassesDirs(targetVersion) ? "java.outputDir" : "output.classesDir"} = file("build/classes/moreTests")
+                    ${destinationDirectoryCode(classesDir)}
                     compileClasspath = compileClasspath + sourceSets.test.compileClasspath
                     runtimeClasspath = runtimeClasspath + sourceSets.test.runtimeClasspath
                 }
@@ -510,12 +512,12 @@ class TestLauncherCrossVersionSpec extends TestLauncherSpec {
         """
     }
 
-    def simpleJavaProject() {
+    String simpleJavaProject() {
         """
         allprojects{
             apply plugin: 'java'
             ${mavenCentralRepository()}
-            dependencies { testCompile 'junit:junit:4.12' }
+            dependencies { ${testImplementationConfiguration} 'junit:junit:4.13' }
         }
         """
     }

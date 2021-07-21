@@ -22,8 +22,15 @@ import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 import org.gradle.integtests.fixtures.DefaultTestExecutionResult
 import org.gradle.test.fixtures.file.TestFile
 
-class AbstractInitIntegrationSpec extends AbstractIntegrationSpec {
+import static org.hamcrest.MatcherAssert.assertThat
+import static org.hamcrest.Matchers.containsString
+import static org.hamcrest.Matchers.not
+
+abstract class AbstractInitIntegrationSpec extends AbstractIntegrationSpec {
     final def targetDir = testDirectory.createDir("some-thing")
+    final def subprojectDir = subprojectName() ? targetDir.file(subprojectName()) : targetDir
+
+    abstract String subprojectName()
 
     def setup() {
         executer.withRepositoryMirrors()
@@ -34,23 +41,36 @@ class AbstractInitIntegrationSpec extends AbstractIntegrationSpec {
     }
 
     void assertTestPassed(String className, String name) {
-        def result = new DefaultTestExecutionResult(targetDir)
+        def result = new DefaultTestExecutionResult(subprojectDir)
         result.assertTestClassesExecuted(className)
         result.testClass(className).assertTestPassed(name)
     }
 
-    protected void commonFilesGenerated(BuildInitDsl scriptDsl) {
-        dslFixtureFor(scriptDsl).assertGradleFilesGenerated()
-        targetDir.file(".gitignore").assertIsFile()
+    void assertFunctionalTestPassed(String className, String name) {
+        def result = new DefaultTestExecutionResult(subprojectDir, 'build', '', '', 'functionalTest')
+        result.assertTestClassesExecuted(className)
+        result.testClass(className).assertTestPassed(name)
     }
+
+    protected void commonFilesGenerated(BuildInitDsl scriptDsl, dslFixture = dslFixtureFor(scriptDsl)) {
+        dslFixture.assertGradleFilesGenerated()
+        targetDir.file(".gitignore").assertIsFile()
+        targetDir.file(".gitattributes").assertIsFile()
+        mavenCentralRepositoryDeclared(scriptDsl)
+    }
+
     protected void commonJvmFilesGenerated(BuildInitDsl scriptDsl) {
         commonFilesGenerated(scriptDsl)
-        targetDir.file("src/main/resources").assertIsDir()
-        targetDir.file("src/test/resources").assertIsDir()
+        subprojectDir.file("src/main/resources").assertIsDir()
+        subprojectDir.file("src/test/resources").assertIsDir()
     }
 
     protected ScriptDslFixture dslFixtureFor(BuildInitDsl dsl) {
-        ScriptDslFixture.of(dsl, targetDir)
+        ScriptDslFixture.of(dsl, targetDir, subprojectName())
+    }
+
+    protected ScriptDslFixture rootProjectDslFixtureFor(BuildInitDsl dsl) {
+        ScriptDslFixture.of(dsl, targetDir, null)
     }
 
     protected TestFile pom() {
@@ -64,4 +84,16 @@ class AbstractInitIntegrationSpec extends AbstractIntegrationSpec {
         <packaging>jar</packaging>
       </project>"""
     }
+
+    private void mavenCentralRepositoryDeclared(BuildInitDsl scriptDsl) {
+        def scriptFile = subprojectDir.file(scriptDsl.fileNameFor("build"))
+        def scriptText = scriptFile.exists() ? scriptFile.text : ""
+        if (scriptText.contains("repositories")) {
+            assertThat(scriptText, containsString("mavenCentral()"))
+            assertThat(scriptText, containsString("Use Maven Central for resolving dependencies."))
+            assertThat(scriptText, not(containsString("jcenter()")))
+            assertThat(scriptText, not(containsString("Use JCenter for resolving dependencies.")))
+        }
+    }
+
 }

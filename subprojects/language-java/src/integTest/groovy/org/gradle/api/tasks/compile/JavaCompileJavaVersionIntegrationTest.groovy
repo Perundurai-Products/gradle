@@ -20,7 +20,7 @@ import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 import org.gradle.integtests.fixtures.AvailableJavaHomes
 import org.gradle.internal.jvm.Jvm
 import org.gradle.util.Requires
-import org.gradle.util.TextUtil
+import org.gradle.util.internal.TextUtil
 
 import static org.gradle.api.JavaVersion.VERSION_1_8
 import static org.gradle.api.JavaVersion.VERSION_1_9
@@ -57,20 +57,20 @@ class JavaCompileJavaVersionIntegrationTest extends AbstractIntegrationSpec {
         executer.withJavaHome AvailableJavaHomes.getJdk(VERSION_1_8).javaHome
         succeeds "compileJava"
         then:
-        nonSkippedTasks.contains ":compileJava"
+        executedAndNotSkipped ":compileJava"
 
         when:
         executer.withJavaHome AvailableJavaHomes.getJdk(VERSION_1_8).javaHome
         succeeds "compileJava"
         then:
-        skippedTasks.contains ":compileJava"
+        skipped ":compileJava"
 
         when:
         executer.withJavaHome AvailableJavaHomes.getJdk(VERSION_1_9).javaHome
         succeeds "compileJava", "--info"
         then:
-        nonSkippedTasks.contains ":compileJava"
-        output.contains "Value of input property 'toolChain.version' has changed for task ':compileJava'"
+        executedAndNotSkipped ":compileJava"
+        output.contains "Value of input property 'javaVersion' has changed for task ':compileJava'"
     }
 
     def "not up-to-date when java version for forking changes"() {
@@ -91,21 +91,21 @@ class JavaCompileJavaVersionIntegrationTest extends AbstractIntegrationSpec {
         executer.withJavaHome jdk9.javaHome
         succeeds "compileJava"
         then:
-        nonSkippedTasks.contains ":compileJava"
+        executedAndNotSkipped ":compileJava"
 
         when:
         executer.withJavaHome jdk8.javaHome
         succeeds "compileJava"
         then:
-        skippedTasks.contains ":compileJava"
+        skipped ":compileJava"
 
         when:
         executer.withJavaHome jdk8.javaHome
         buildFile.text = forkedJavaCompilation(jdk9)
         succeeds "compileJava", "--info"
         then:
-        nonSkippedTasks.contains ":compileJava"
-        output.contains "Value of input property 'toolChain.version' has changed for task ':compileJava'"
+        executedAndNotSkipped ":compileJava"
+        output.contains "Value of input property 'javaVersion' has changed for task ':compileJava'"
     }
 
     private static String forkedJavaCompilation(Jvm jdk) {
@@ -115,14 +115,14 @@ class JavaCompileJavaVersionIntegrationTest extends AbstractIntegrationSpec {
 
             sourceCompatibility = "1.6"
             targetCompatibility = "1.6"
-            
+
             compileJava {
                 options.with {
                     fork = true
                     forkOptions.javaHome=file('${javaHome}')
                 }
             }
-            
+
         """
     }
 }

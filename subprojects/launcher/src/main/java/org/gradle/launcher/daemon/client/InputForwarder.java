@@ -15,12 +15,13 @@
  */
 package org.gradle.launcher.daemon.client;
 
+import org.gradle.internal.SystemProperties;
 import org.gradle.internal.UncheckedException;
 import org.gradle.internal.concurrent.ExecutorFactory;
 import org.gradle.internal.concurrent.Stoppable;
 import org.gradle.internal.concurrent.ManagedExecutor;
 import org.gradle.internal.io.TextStream;
-import org.gradle.util.DisconnectableInputStream;
+import org.gradle.util.internal.DisconnectableInputStream;
 import org.gradle.internal.io.LineBufferingOutputStream;
 
 import java.io.IOException;
@@ -63,10 +64,13 @@ public class InputForwarder implements Stoppable {
             }
 
             disconnectableInput = new DisconnectableInputStream(input, bufferSize);
-            outputBuffer = new LineBufferingOutputStream(handler, bufferSize);
+            outputBuffer = new LineBufferingOutputStream(handler,
+                SystemProperties.getInstance().getLineSeparator(),
+                bufferSize);
 
             forwardingExecuter = executorFactory.create("Forward input");
             forwardingExecuter.execute(new Runnable() {
+                @Override
                 public void run() {
                     byte[] buffer = new byte[bufferSize];
                     int readCount;
@@ -105,6 +109,7 @@ public class InputForwarder implements Stoppable {
         return this;
     }
 
+    @Override
     public void stop() {
         lifecycleLock.lock();
         try {

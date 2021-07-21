@@ -16,6 +16,7 @@
 
 package org.gradle.api.internal.tasks.testing.junit.result;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.gradle.api.Action;
 import org.gradle.api.GradleException;
 import org.gradle.api.logging.Logger;
@@ -29,7 +30,7 @@ import org.gradle.internal.operations.BuildOperationQueue;
 import org.gradle.internal.operations.RunnableBuildOperation;
 import org.gradle.internal.time.Time;
 import org.gradle.internal.time.Timer;
-import org.gradle.util.GFileUtils;
+import org.gradle.util.internal.GFileUtils;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -39,14 +40,17 @@ public class Binary2JUnitXmlReportGenerator {
 
     private final File testResultsDir;
     private final TestResultsProvider testResultsProvider;
-    private JUnitXmlResultWriter xmlWriter;
+
+    @VisibleForTesting
+    JUnitXmlResultWriter xmlWriter;
+
     private final BuildOperationExecutor buildOperationExecutor;
     private final static Logger LOG = Logging.getLogger(Binary2JUnitXmlReportGenerator.class);
 
-    public Binary2JUnitXmlReportGenerator(File testResultsDir, TestResultsProvider testResultsProvider, TestOutputAssociation outputAssociation, BuildOperationExecutor buildOperationExecutor, String hostName) {
+    public Binary2JUnitXmlReportGenerator(File testResultsDir, TestResultsProvider testResultsProvider, JUnitXmlResultOptions options, BuildOperationExecutor buildOperationExecutor, String hostName) {
         this.testResultsDir = testResultsDir;
         this.testResultsProvider = testResultsProvider;
-        this.xmlWriter = new JUnitXmlResultWriter(hostName, testResultsProvider, outputAssociation);
+        this.xmlWriter = new JUnitXmlResultWriter(hostName, testResultsProvider, options);
         this.buildOperationExecutor = buildOperationExecutor;
     }
 
@@ -78,6 +82,7 @@ public class Binary2JUnitXmlReportGenerator {
             @Override
             public void execute(final BuildOperationQueue<JUnitXmlReportFileGenerator> queue) {
                 testResultsProvider.visitClasses(new Action<TestClassResult>() {
+                    @Override
                     public void execute(final TestClassResult result) {
                         final File reportFile = new File(testResultsDir, getReportFileName(result));
                         queue.add(new JUnitXmlReportFileGenerator(result, reportFile, xmlWriter));

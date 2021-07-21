@@ -15,8 +15,11 @@
  */
 
 package org.gradle.language.base
-import org.gradle.api.reporting.model.ModelReportOutput
 
+import org.gradle.api.reporting.model.ModelReportOutput
+import org.gradle.integtests.fixtures.UnsupportedWithConfigurationCache
+
+@UnsupportedWithConfigurationCache(because = "software model")
 class ComponentBinariesIntegrationTest extends AbstractComponentModelIntegrationTest {
     def setup() {
         withCustomComponentType()
@@ -160,6 +163,26 @@ model {
                 def binaries = $.components.mylib.binaries
                 assert binaries.main.data == '([main])'
                 assert binaries.test.data == '([test])'
+            }
+        }
+    }
+}
+'''
+
+        expect:
+        succeeds "verify"
+    }
+
+    def "binary has check task"() {
+        given:
+        buildFile << '''
+model {
+    tasks {
+        verify(Task) {
+            doLast {
+                def binaries = $.components.mylib.binaries
+                assert binaries.main.checkTask != null
+                assert binaries.test.checkTask != null
             }
         }
     }

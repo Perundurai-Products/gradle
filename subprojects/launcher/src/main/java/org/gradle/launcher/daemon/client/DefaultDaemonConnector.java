@@ -42,7 +42,7 @@ import org.gradle.launcher.daemon.registry.DaemonRegistry;
 import org.gradle.launcher.daemon.registry.DaemonStopEvent;
 import org.gradle.launcher.daemon.registry.DaemonStopEvents;
 import org.gradle.launcher.daemon.server.api.DaemonStateControl;
-import org.gradle.util.CollectionUtils;
+import org.gradle.util.internal.CollectionUtils;
 
 import java.util.Collection;
 import java.util.Date;
@@ -95,10 +95,12 @@ public class DefaultDaemonConnector implements DaemonConnector {
         return daemonRegistry;
     }
 
+    @Override
     public DaemonClientConnection maybeConnect(ExplainingSpec<DaemonContext> constraint) {
         return findConnection(getCompatibleDaemons(daemonRegistry.getAll(), constraint));
     }
 
+    @Override
     public DaemonClientConnection maybeConnect(DaemonConnectDetails daemon) {
         try {
             return connectToDaemon(daemon, new CleanupOnStaleAddress(daemon, true));
@@ -108,6 +110,12 @@ public class DefaultDaemonConnector implements DaemonConnector {
         return null;
     }
 
+    @Override
+    public void markDaemonAsUnavailable(DaemonConnectDetails daemon) {
+        removeDaemonFromRegistry(daemon, "unable to communicate with daemon");
+    }
+
+    @Override
     public DaemonClientConnection connect(ExplainingSpec<DaemonContext> constraint) {
         final Pair<Collection<DaemonInfo>, Collection<DaemonInfo>> idleBusy = partitionByState(daemonRegistry.getAll(), Idle);
         final Collection<DaemonInfo> idleDaemons = idleBusy.getLeft();
@@ -171,6 +179,7 @@ public class DefaultDaemonConnector implements DaemonConnector {
 
     private Pair<Collection<DaemonInfo>, Collection<DaemonInfo>> partitionByState(final Collection<DaemonInfo> daemons, final DaemonStateControl.State state) {
         return CollectionUtils.partition(daemons, new Spec<DaemonInfo>() {
+            @Override
             public boolean isSatisfiedBy(DaemonInfo daemonInfo) {
                 return daemonInfo.getState() == state;
             }
@@ -202,6 +211,7 @@ public class DefaultDaemonConnector implements DaemonConnector {
         return null;
     }
 
+    @Override
     public DaemonClientConnection startDaemon(ExplainingSpec<DaemonContext> constraint) {
         return doStartDaemon(constraint, false);
     }
@@ -271,6 +281,14 @@ public class DefaultDaemonConnector implements DaemonConnector {
         return new DaemonClientConnection(connection, daemon, staleAddressDetector);
     }
 
+    private void removeDaemonFromRegistry(DaemonConnectDetails daemon, String reason) {
+        LOGGER.info("{}{}", DaemonMessages.REMOVING_DAEMON_ADDRESS_ON_FAILURE, daemon);
+        final Date timestamp = new Date(System.currentTimeMillis());
+        final DaemonStopEvent stopEvent = new DaemonStopEvent(timestamp, daemon.getPid(), null, reason);
+        daemonRegistry.storeStopEvent(stopEvent);
+        daemonRegistry.remove(daemon.getAddress());
+    }
+
     private class CleanupOnStaleAddress implements DaemonClientConnection.StaleAddressDetector {
         private final DaemonConnectDetails daemon;
         private final boolean exposeAsStale;
@@ -280,12 +298,9 @@ public class DefaultDaemonConnector implements DaemonConnector {
             this.exposeAsStale = exposeAsStale;
         }
 
+        @Override
         public boolean maybeStaleAddress(Exception failure) {
-            LOGGER.info("{}{}", DaemonMessages.REMOVING_DAEMON_ADDRESS_ON_FAILURE, daemon);
-            final Date timestamp = new Date(System.currentTimeMillis());
-            final DaemonStopEvent stopEvent = new DaemonStopEvent(timestamp, daemon.getPid(), null, "by user or operating system");
-            daemonRegistry.storeStopEvent(stopEvent);
-            daemonRegistry.remove(daemon.getAddress());
+            removeDaemonFromRegistry(daemon, "by user or operating system");
             return exposeAsStale;
         }
     }

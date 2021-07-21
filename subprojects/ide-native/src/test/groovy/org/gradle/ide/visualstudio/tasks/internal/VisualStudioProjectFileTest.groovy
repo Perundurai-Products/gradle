@@ -23,13 +23,13 @@ import org.gradle.ide.visualstudio.internal.VisualStudioTargetBinary
 import org.gradle.internal.xml.XmlTransformer
 import org.gradle.test.fixtures.file.TestFile
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
-import org.gradle.util.VersionNumber
+import org.gradle.util.internal.VersionNumber
 import org.junit.Rule
 import spock.lang.Specification
 
 class VisualStudioProjectFileTest extends Specification {
     @Rule
-    final TestNameTestDirectoryProvider testDirectoryProvider = new TestNameTestDirectoryProvider()
+    final TestNameTestDirectoryProvider testDirectoryProvider = new TestNameTestDirectoryProvider(getClass())
 
     Transformer<String, File> fileNameTransformer = { it.name } as Transformer<String, File>
     def generator = new VisualStudioProjectFile(new XmlTransformer(), fileNameTransformer)
@@ -160,6 +160,7 @@ class VisualStudioProjectFileTest extends Specification {
                 getIncludePaths() >> includes.collect { file(it) }
                 getOutputFile() >> new File("out")
             }
+            isBuildable() >> true
         }
     }
 

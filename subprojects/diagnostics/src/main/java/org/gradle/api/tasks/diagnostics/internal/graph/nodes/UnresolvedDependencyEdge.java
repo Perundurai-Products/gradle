@@ -25,9 +25,9 @@ import org.gradle.api.artifacts.result.UnresolvedDependencyResult;
 import org.gradle.api.internal.artifacts.DefaultProjectComponentIdentifier;
 import org.gradle.internal.component.external.model.DefaultModuleComponentIdentifier;
 import org.gradle.internal.component.local.model.DefaultProjectComponentSelector;
-import org.gradle.internal.component.local.model.OpaqueComponentIdentifier;
 
 import java.util.Collections;
+import java.util.List;
 import java.util.Set;
 
 public class UnresolvedDependencyEdge implements DependencyEdge {
@@ -44,7 +44,7 @@ public class UnresolvedDependencyEdge implements DependencyEdge {
             DefaultProjectComponentSelector attempted = (DefaultProjectComponentSelector) dependency.getAttempted();
             actual = new DefaultProjectComponentIdentifier(attempted.getBuildIdentifier(), attempted.getIdentityPath(), attempted.projectPath(), attempted.getProjectName());
         } else {
-            actual = new OpaqueComponentIdentifier(dependency.getAttempted().getDisplayName());
+            actual = () -> dependency.getAttempted().getDisplayName();
         }
     }
 
@@ -73,8 +73,8 @@ public class UnresolvedDependencyEdge implements DependencyEdge {
     }
 
     @Override
-    public ResolvedVariantResult getSelectedVariant() {
-        return null;
+    public List<ResolvedVariantResult> getSelectedVariants() {
+        return Collections.emptyList();
     }
 
     @Override

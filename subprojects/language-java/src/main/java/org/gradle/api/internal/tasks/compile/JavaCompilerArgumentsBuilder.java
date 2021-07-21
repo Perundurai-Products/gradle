@@ -17,21 +17,21 @@
 package org.gradle.api.internal.tasks.compile;
 
 import com.google.common.base.Joiner;
-import com.google.common.collect.Lists;
 import org.gradle.api.InvalidUserDataException;
 import org.gradle.api.JavaVersion;
-import org.gradle.api.logging.Logger;
-import org.gradle.api.logging.Logging;
-import org.gradle.api.tasks.compile.ForkOptions;
-import org.gradle.util.GUtil;
+import org.gradle.internal.Cast;
+import org.gradle.util.internal.GUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.stream.Collectors;
 
 public class JavaCompilerArgumentsBuilder {
-    public static final Logger LOGGER = Logging.getLogger(JavaCompilerArgumentsBuilder.class);
+    public static final Logger LOGGER = LoggerFactory.getLogger(JavaCompilerArgumentsBuilder.class);
     public static final String USE_UNSHARED_COMPILER_TABLE_OPTION = "-XDuseUnsharedTable=true";
     public static final String EMPTY_SOURCE_PATH_REF_DIR = "emptySourcePathRef";
 
@@ -75,9 +75,13 @@ public class JavaCompilerArgumentsBuilder {
     }
 
     public List<String> build() {
-        args = new ArrayList<String>();
+        args = new ArrayList<>();
         // Take a deep copy of the compilerArgs because the following methods mutate it.
-        List<String> compArgs = Lists.newArrayList(spec.getCompileOptions().getCompilerArgs());
+        List<Object> compilerArgs = Cast.uncheckedCast(spec.getCompileOptions().getCompilerArgs());
+        List<String> compArgs = compilerArgs
+            .stream()
+            .map(Object::toString)
+            .collect(Collectors.toList());
 
         validateCompilerArgs(compArgs);
 
@@ -91,13 +95,25 @@ public class JavaCompilerArgumentsBuilder {
     }
 
     private void validateCompilerArgs(List<String> compilerArgs) {
-        if (compilerArgs.contains("-sourcepath") || compilerArgs.contains("--source-path")) {
-            throw new InvalidUserDataException("Cannot specify -sourcepath or --source-path via `CompileOptions.compilerArgs`. " +
-                "Use the `CompileOptions.sourcepath` property instead.");
-        }
-        if (compilerArgs.contains("-processorpath") || compilerArgs.contains("--processor-path")) {
-            throw new InvalidUserDataException("Cannot specify -processorpath or --processor-path via `CompileOptions.compilerArgs`. " +
-                "Use the `CompileOptions.annotationProcessorPath` property instead.");
+        for (String arg : compilerArgs) {
+            if ("-sourcepath".equals(arg) || "--source-path".equals(arg)) {
+                throw new InvalidUserDataException("Cannot specify -sourcepath or --source-path via `CompileOptions.compilerArgs`. " +
+                    "Use the `CompileOptions.sourcepath` property instead.");
+            }
+
+            if ("-processorpath".equals(arg) || "--processor-path".equals(arg)) {
+                throw new InvalidUserDataException("Cannot specify -processorpath or --processor-path via `CompileOptions.compilerArgs`. " +
+                    "Use the `CompileOptions.annotationProcessorPath` property instead.");
+            }
+
+            if (arg != null && arg.startsWith("-J")) {
+                throw new InvalidUserDataException("Cannot specify -J flags via `CompileOptions.compilerArgs`. " +
+                    "Use the `CompileOptions.forkOptions.jvmArgs` property instead.");
+            }
+
+            if ("--release".equals(arg) && spec.getRelease() != null) {
+                throw new InvalidUserDataException("Cannot specify --release via `CompileOptions.compilerArgs` when using `JavaCompile.release`.");
+            }
         }
     }
 
@@ -106,7 +122,7 @@ public class JavaCompilerArgumentsBuilder {
             return;
         }
 
-        ForkOptions forkOptions = spec.getCompileOptions().getForkOptions();
+        MinimalJavaCompilerDaemonForkOptions forkOptions = spec.getCompileOptions().getForkOptions();
         if (forkOptions.getMemoryInitialSize() != null) {
             args.add("-J-Xms" + forkOptions.getMemoryInitialSize().trim());
         }
@@ -122,9 +138,13 @@ public class JavaCompilerArgumentsBuilder {
         if (!includeMainOptions) {
             return;
         }
-
+        Integer release = spec.getRelease();
         final MinimalJavaCompileOptions compileOptions = spec.getCompileOptions();
-        if (!releaseOptionIsSet(compilerArgs)) {
+
+        if (release != null) {
+            args.add("--release");
+            args.add(release.toString());
+        } else if (!releaseOptionIsSet(compilerArgs)) {
             String sourceCompatibility = spec.getSourceCompatibility();
             if (sourceCompatibility != null) {
                 args.add("-source");
@@ -247,8 +267,21 @@ public class JavaCompilerArgumentsBuilder {
         }
 
         List<File> classpath = spec.getCompileClasspath();
-        args.add("-classpath");
-        args.add(classpath == null ? "" : Joiner.on(File.pathSeparatorChar).join(classpath));
+        List<File> modulePath = spec.getModulePath();
+        String moduleVersion = spec.getCompileOptions().getJavaModuleVersion();
+
+        if (!classpath.isEmpty()) {
+            args.add("-classpath");
+            args.add(Joiner.on(File.pathSeparatorChar).join(classpath));
+        }
+        if (!modulePath.isEmpty()) {
+            if (moduleVersion != null) {
+                args.add("--module-version");
+                args.add(moduleVersion);
+            }
+            args.add("--module-path");
+            args.add(Joiner.on(File.pathSeparatorChar).join(modulePath));
+        }
     }
 
     private void addSourceFiles() {

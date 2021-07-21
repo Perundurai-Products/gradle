@@ -18,137 +18,171 @@ package org.gradle.api.internal.artifacts.ivyservice.resolveengine.artifact
 
 import org.gradle.api.Buildable
 import org.gradle.api.artifacts.component.ComponentArtifactIdentifier
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.api.internal.attributes.AttributeContainerInternal
+import org.gradle.api.internal.file.FileCollectionInternal
 import org.gradle.api.internal.tasks.TaskDependencyResolveContext
 import org.gradle.internal.Describables
+import org.gradle.internal.Try
+import org.gradle.internal.component.local.model.ComponentFileArtifactIdentifier
+import org.gradle.internal.component.model.VariantResolveMetadata
+import org.gradle.internal.model.CalculatedValue
 import org.gradle.internal.operations.TestBuildOperationExecutor
 import spock.lang.Specification
 
 class ArtifactBackedResolvedVariantTest extends Specification {
     def variant = Mock(AttributeContainerInternal)
     def variantDisplayName = Describables.of("<variant>")
+    def id = Mock(VariantResolveMetadata.Identifier)
     def queue = new TestBuildOperationExecutor.TestBuildOperationQueue()
     def artifact1 = Mock(TestArtifact)
     def artifact2 = Mock(TestArtifact)
 
     def "visits empty variant"() {
-        def visitor = Mock(ArtifactVisitor)
-        def listener = Mock(ResolvedArtifactSet.AsyncArtifactListener)
+        def visitor = Mock(ResolvedArtifactSet.Visitor)
         def set1 = of([])
 
         when:
-        set1.artifacts.startVisit(queue, listener).visit(visitor)
+        set1.artifacts.visit(visitor)
 
         then:
         0 * _
     }
 
     def "visits local artifacts of empty variant"() {
-        def visitor = Mock(ResolvedArtifactSet.LocalArtifactVisitor)
+        def visitor = Mock(ResolvedArtifactSet.TransformSourceVisitor)
         def set1 = of([])
 
         when:
-        set1.artifacts.visitLocalArtifacts(visitor)
+        set1.artifacts.visitTransformSources(visitor)
 
         then:
         0 * _
     }
 
     def "visits artifacts and retains order when artifact files are not required"() {
-        def visitor = Mock(ArtifactVisitor)
-        def listener = Mock(ResolvedArtifactSet.AsyncArtifactListener)
+        def artifactVisitor = Mock(ArtifactVisitor)
+        def visitor = Mock(ResolvedArtifactSet.Visitor)
         def set1 = of([artifact1, artifact2])
         def set2 = of([artifact1])
 
         when:
-        set1.artifacts.startVisit(queue, listener).visit(visitor)
+        set1.artifacts.visit(visitor)
 
         then:
-        _ * listener.requireArtifactFiles() >> false
-        1 * visitor.visitArtifact(variantDisplayName, variant, artifact1)
+        1 * visitor.visitArtifacts(_) >> { ResolvedArtifactSet.Artifacts artifacts ->
+            artifacts.startFinalization(queue, false)
+            artifacts.visit(artifactVisitor)
+        }
+        1 * artifactVisitor.requireArtifactFiles() >> false
+        1 * artifactVisitor.visitArtifact(variantDisplayName, variant, artifact1)
+        1 * artifactVisitor.endVisitCollection(FileCollectionInternal.OTHER) // each artifact is treated as a separate collection, the entire variant could instead be treated as a collection
 
         then:
-        1 * visitor.visitArtifact(variantDisplayName, variant, artifact2)
+        1 * visitor.visitArtifacts(_) >> { ResolvedArtifactSet.Artifacts artifacts ->
+            artifacts.startFinalization(queue, false)
+            artifacts.visit(artifactVisitor)
+        }
+        1 * artifactVisitor.requireArtifactFiles() >> false
+        1 * artifactVisitor.visitArtifact(variantDisplayName, variant, artifact2)
+        1 * artifactVisitor.endVisitCollection(FileCollectionInternal.OTHER)
         0 * _
 
         when:
-        set2.artifacts.startVisit(queue, listener).visit(visitor)
+        set2.artifacts.visit(visitor)
 
         then:
-        _ * listener.requireArtifactFiles() >> false
-        1 * visitor.visitArtifact(variantDisplayName, variant, artifact1)
+        1 * visitor.visitArtifacts(_) >> { ResolvedArtifactSet.Artifacts artifacts ->
+            artifacts.startFinalization(queue, false)
+            artifacts.visit(artifactVisitor)
+        }
+        1 * artifactVisitor.requireArtifactFiles() >> false
+        1 * artifactVisitor.visitArtifact(variantDisplayName, variant, artifact1)
+        1 * artifactVisitor.endVisitCollection(FileCollectionInternal.OTHER)
         0 * _
     }
 
     def "visits artifacts when artifact files are required"() {
-        def visitor = Mock(ArtifactVisitor)
-        def listener = Mock(ResolvedArtifactSet.AsyncArtifactListener)
+        def artifactVisitor = Mock(ArtifactVisitor)
+        def visitor = Mock(ResolvedArtifactSet.Visitor)
         def f1 = new File("f1")
         def f2 = new File("f2")
+        def source1 = Mock(CalculatedValue)
+        def source2 = Mock(CalculatedValue)
         def set1 = of([artifact1, artifact2])
         def set2 = of([artifact1])
 
         when:
-        def result = set1.artifacts.startVisit(queue, listener)
+        set1.artifacts.visit(visitor)
 
         then:
-        _ * listener.requireArtifactFiles() >> true
         _ * artifact1.id >> Stub(ComponentArtifactIdentifier)
+        1 * artifact1.resolveSynchronously >> false
+        _ * artifact1.fileSource >> source1
+        1 * source1.finalizeIfNotAlready()
+        _ * source1.value >> Try.successful(f1)
+        1 * visitor.visitArtifacts(_) >> { ResolvedArtifactSet.Artifacts artifacts ->
+            artifacts.startFinalization(queue, true)
+            artifacts.visit(artifactVisitor)
+        }
+        1 * artifactVisitor.requireArtifactFiles() >> true
+        1 * artifactVisitor.visitArtifact(variantDisplayName, variant, artifact1)
+        1 * artifactVisitor.endVisitCollection(FileCollectionInternal.OTHER)
+
+        then:
         _ * artifact2.id >> Stub(ComponentArtifactIdentifier)
-        1 * artifact1.resolveSynchronously >> false
-        1 * artifact1.file >> f1
-        1 * listener.artifactAvailable(artifact1)
         1 * artifact2.resolveSynchronously >> false
-        1 * artifact2.file >> f2
-        1 * listener.artifactAvailable(artifact2)
+        _ * artifact2.fileSource >> source2
+        1 * source2.finalizeIfNotAlready()
+        _ * source2.value >> Try.successful(f2)
+        1 * visitor.visitArtifacts(_) >> { ResolvedArtifactSet.Artifacts artifacts ->
+            artifacts.startFinalization(queue, true)
+            artifacts.visit(artifactVisitor)
+        }
+        1 * artifactVisitor.requireArtifactFiles() >> true
+        1 * artifactVisitor.visitArtifact(variantDisplayName, variant, artifact2)
+        1 * artifactVisitor.endVisitCollection(FileCollectionInternal.OTHER)
         0 * _
 
         when:
-        result.visit(visitor)
+        set2.artifacts.visit(visitor)
 
         then:
-        1 * visitor.visitArtifact(variantDisplayName, variant, artifact1)
-
-        then:
-        1 * visitor.visitArtifact(variantDisplayName, variant, artifact2)
-        0 * _
-
-        when:
-        def result2 = set2.artifacts.startVisit(queue, listener)
-
-        then:
-        _ * listener.requireArtifactFiles() >> true
         _ * artifact1.id >> Stub(ComponentArtifactIdentifier)
         1 * artifact1.resolveSynchronously >> false
-        1 * artifact1.file >> f1
-        1 * listener.artifactAvailable(artifact1)
-        0 * _
-
-        when:
-        result2.visit(visitor)
-
-        then:
-        1 * visitor.visitArtifact(variantDisplayName, variant, artifact1)
+        _ * artifact1.fileSource >> source1
+        1 * source1.finalizeIfNotAlready()
+        _ * source1.value >> Try.successful(f1)
+        1 * visitor.visitArtifacts(_) >> { ResolvedArtifactSet.Artifacts artifacts ->
+            artifacts.startFinalization(queue, true)
+            artifacts.visit(artifactVisitor)
+        }
+        1 * artifactVisitor.requireArtifactFiles() >> true
+        1 * artifactVisitor.visitArtifact(variantDisplayName, variant, artifact1)
+        1 * artifactVisitor.endVisitCollection(FileCollectionInternal.OTHER)
         0 * _
     }
 
     def "visits local artifacts"() {
-        def visitor = Mock(ResolvedArtifactSet.LocalArtifactVisitor)
+        def visitor = Mock(ResolvedArtifactSet.TransformSourceVisitor)
         def set1 = of([artifact1, artifact2])
         def set2 = of([artifact1])
 
         when:
-        set1.artifacts.visitLocalArtifacts(visitor)
+        set1.artifacts.visitTransformSources(visitor)
 
         then:
+        1 * artifact1.id >> new ComponentFileArtifactIdentifier(Stub(ProjectComponentIdentifier), "some-file")
+        1 * artifact2.id >> new ComponentFileArtifactIdentifier(Stub(ModuleComponentIdentifier), "some-file")
         1 * visitor.visitArtifact(artifact1)
-        1 * visitor.visitArtifact(artifact2)
         0 * _
 
         when:
-        set2.artifacts.visitLocalArtifacts(visitor)
+        set2.artifacts.visitTransformSources(visitor)
 
         then:
+        1 * artifact1.id >> new ComponentFileArtifactIdentifier(Stub(ProjectComponentIdentifier), "some-file")
         1 * visitor.visitArtifact(artifact1)
         0 * _
     }
@@ -175,9 +209,9 @@ class ArtifactBackedResolvedVariantTest extends Specification {
     }
 
     ResolvedVariant of(artifacts) {
-        return ArtifactBackedResolvedVariant.create(variantDisplayName, variant, artifacts)
+        return ArtifactBackedResolvedVariant.create(id, variantDisplayName, variant, artifacts)
     }
 
-    interface TestArtifact extends ResolvableArtifact, Buildable { }
+    interface TestArtifact extends ResolvableArtifact, Buildable {}
 
 }

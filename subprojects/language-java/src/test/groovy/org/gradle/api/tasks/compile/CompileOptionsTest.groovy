@@ -16,10 +16,8 @@
 
 package org.gradle.api.tasks.compile
 
-import org.gradle.api.file.ProjectLayout
 import org.gradle.util.TestUtil
 import spock.lang.Specification
-import spock.lang.Unroll
 
 class CompileOptionsTest extends Specification {
     static final TEST_DEBUG_OPTION_MAP = [someDebugOption: 'someDebugOptionValue']
@@ -28,7 +26,7 @@ class CompileOptionsTest extends Specification {
     CompileOptions compileOptions
 
     def setup()  {
-        compileOptions = new CompileOptions(Stub(ProjectLayout), TestUtil.objectFactory())
+        compileOptions = new CompileOptions(TestUtil.objectFactory())
         compileOptions.debugOptions = [optionMap: {TEST_DEBUG_OPTION_MAP}] as DebugOptions
         compileOptions.forkOptions = [optionMap: {TEST_FORK_OPTION_MAP}] as ForkOptions
     }
@@ -52,68 +50,6 @@ class CompileOptionsTest extends Specification {
 
         compileOptions.forkOptions != null
         compileOptions.debugOptions != null
-    }
-
-    def "option map for debug options"() {
-        Map optionMap = compileOptions.optionMap()
-        expect:
-        optionMap.subMap(TEST_DEBUG_OPTION_MAP.keySet()) == TEST_DEBUG_OPTION_MAP
-        optionMap.subMap(TEST_FORK_OPTION_MAP.keySet()) == TEST_FORK_OPTION_MAP
-    }
-
-    @Unroll
-    def "option map with nullable #option"() {
-        expect:
-        !compileOptions.optionMap().keySet().contains(option)
-
-        when:
-        compileOptions."$property" = "${property}Value"
-
-        then:
-        compileOptions.optionMap()[option] == "${property}Value"
-
-        where:
-        property             | option
-        "encoding"           | "encoding"
-        "extensionDirs"      | "extdirs"
-    }
-
-    @Unroll
-    def "option map with true/false #property"() {
-        when:
-        compileOptions."$property" = true
-        Map optionMap = compileOptions.optionMap()
-
-        then:
-        optionMap[option] == !(option == "nowarn")
-
-        when:
-        compileOptions."$property" = false
-        optionMap = compileOptions.optionMap()
-
-        then:
-        optionMap[option] == (option == "nowarn")
-
-        where:
-        property      | option
-        "failOnError" | "failOnError"
-        "verbose"     | "verbose"
-        "listFiles"   | "listFiles"
-        "deprecation" | "deprecation"
-        "warnings"    | "nowarn"
-        "debug"       | "debug"
-
-    }
-
-    @Unroll
-    def "with exclude #option from option map"() {
-        compileOptions.compilerArgs = ["-value=something"]
-
-        expect:
-        !compileOptions.optionMap().containsKey(option)
-
-        where:
-        option << ['debugOptions', 'forkOptions', 'compilerArgs']
     }
 
     def "fork"() {

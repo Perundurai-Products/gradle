@@ -17,13 +17,18 @@
 package org.gradle.test.fixtures.maven
 
 import groovy.xml.MarkupBuilder
+import org.gradle.api.attributes.Category
+import org.gradle.api.attributes.LibraryElements
 import org.gradle.api.attributes.Usage
-import org.gradle.internal.hash.HashUtil
+import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.parser.MetaDataParser
+import org.gradle.internal.hash.HashCode
+import org.gradle.internal.hash.Hashing
 import org.gradle.test.fixtures.AbstractModule
 import org.gradle.test.fixtures.GradleModuleMetadata
 import org.gradle.test.fixtures.Module
 import org.gradle.test.fixtures.ModuleArtifact
 import org.gradle.test.fixtures.file.TestFile
+import org.gradle.test.fixtures.gradle.ArtifactSelectorSpec
 import org.gradle.test.fixtures.gradle.DependencyConstraintSpec
 import org.gradle.test.fixtures.gradle.DependencySpec
 import org.gradle.test.fixtures.gradle.FileSpec
@@ -31,9 +36,10 @@ import org.gradle.test.fixtures.gradle.GradleFileModuleAdapter
 import org.gradle.test.fixtures.gradle.VariantMetadataSpec
 
 import java.text.SimpleDateFormat
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 abstract class AbstractMavenModule extends AbstractModule implements MavenModule {
-    protected static final String MAVEN_METADATA_FILE = "maven-metadata.xml"
     private final TestFile rootDir
     final TestFile moduleDir
     final String groupId
@@ -44,9 +50,15 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
     String packaging
     int publishCount = 1
     private boolean hasPom = true
-    private final List<VariantMetadataSpec> variants = [new VariantMetadataSpec("api", [(Usage.USAGE_ATTRIBUTE.name): Usage.JAVA_API]), new VariantMetadataSpec("runtime", [(Usage.USAGE_ATTRIBUTE.name): Usage.JAVA_RUNTIME])]
+    private boolean gradleMetadataRedirect = false
+    private final List<VariantMetadataSpec> variants = [new VariantMetadataSpec("api", [(Usage.USAGE_ATTRIBUTE.name): Usage.JAVA_API, (LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE.name): LibraryElements.JAR, (Category.CATEGORY_ATTRIBUTE.name): Category.LIBRARY]),
+                                                        new VariantMetadataSpec("runtime", [(Usage.USAGE_ATTRIBUTE.name): Usage.JAVA_RUNTIME, (LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE.name): LibraryElements.JAR, (Category.CATEGORY_ATTRIBUTE.name): Category.LIBRARY])]
     private final List dependencies = []
+    private Map<String, ?> mainArtifact = [:]
     private final List artifacts = []
+    private boolean extraChecksums = true
+
+    final Set<String> missingExtraChecksums = []
     final updateFormat = new SimpleDateFormat("yyyyMMddHHmmss")
     final timestampFormat = new SimpleDateFormat("yyyyMMdd.HHmmss")
 
@@ -127,7 +139,9 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
         this.dependencies << [groupId: target.group, artifactId: target.module, version: target.version,
                               type: attributes.type, scope: attributes.scope, classifier: attributes.classifier,
                               optional: attributes.optional, exclusions: attributes.exclusions, rejects: attributes.rejects,
-                              prefers: attributes.prefers, strictly: attributes.strictly, reason: attributes.reason
+                              prefers: attributes.prefers, strictly: attributes.strictly,
+                              endorseStrictVersions: attributes.endorseStrictVersions, reason: attributes.reason,
+                              requireCapability: attributes.requireCapability
         ]
         return this
     }
@@ -169,7 +183,7 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
     }
 
     @Override
-    MavenModule variant(String variant, Map<String, String> attributes, @DelegatesTo(value= VariantMetadataSpec, strategy=Closure.DELEGATE_FIRST) Closure<?> variantConfiguration) {
+    MavenModule variant(String variant, Map<String, String> attributes, @DelegatesTo(value = VariantMetadataSpec, strategy = Closure.DELEGATE_FIRST) Closure<?> variantConfiguration) {
         def v = createVariant(variant, attributes)
         variantConfiguration.delegate = v
         variantConfiguration.resolveStrategy = Closure.DELEGATE_FIRST
@@ -177,11 +191,22 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
         return this
     }
 
+    @Override
+    MavenModule adhocVariants() {
+        variants.clear()
+        this
+    }
+
     private VariantMetadataSpec createVariant(String variant, Map<String, String> attributes) {
         def variantMetadata = new VariantMetadataSpec(variant, attributes)
         variants.removeAll { it.name == variant }
         variants.add(variantMetadata)
-        return variantMetadata;
+        return variantMetadata
+    }
+
+    MavenModule mainArtifact(Map<String, ?> options) {
+        mainArtifact = options
+        return this
     }
 
     /**
@@ -191,6 +216,13 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
     MavenModule artifact(Map<String, ?> options) {
         artifacts << options
         return this
+    }
+
+    /**
+     * Same as {@link #artifact(Map)} since all additional artifacts are undeclared in maven.
+     */
+    MavenModule undeclaredArtifact(Map<String, ?> options) {
+        return artifact(options)
     }
 
     String getPackaging() {
@@ -219,6 +251,8 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
         assert parsedPom.groupId == groupId
         assert parsedPom.artifactId == artifactId
         assert parsedPom.version == version
+        def checkExtraChecksums = extraChecksums
+        Set<String> missingExtra = missingExtraChecksums
         if (getModuleMetadata().file.exists()) {
             def metadata = parsedModuleMetadata
             if (metadata.component) {
@@ -234,11 +268,11 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
                 def ref = variant.availableAt
                 if (ref != null) {
                     // Verify the modules are connected together correctly
-                    def otherMetadataArtifact = getArtifact(ref.url)
+                    def otherMetadataArtifact = getArtifact(this.correctURLForSnapshot(ref.url))
                     assert otherMetadataArtifact.file.file
                     def otherMetadata = new GradleModuleMetadata(otherMetadataArtifact.file)
                     def owner = otherMetadata.owner
-                    assert otherMetadataArtifact.file.parentFile.file(owner.url) == getModuleMetadata().file
+                    assert otherMetadataArtifact.file.parentFile.file(this.correctURLForSnapshot(owner.url)) == getModuleMetadata().file
                     assert owner.group == groupId
                     assert owner.module == artifactId
                     assert owner.version == version
@@ -249,8 +283,12 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
                     def artifact = getArtifact(file.url)
                     assert artifact.file.file
                     assert artifact.file.length() == file.size
-                    assert HashUtil.createHash(artifact.file, "sha1") == file.sha1
-                    assert HashUtil.createHash(artifact.file, "md5") == file.md5
+                    assert Hashing.sha1().hashFile(artifact.file) == file.sha1
+                    if (checkExtraChecksums && (!artifact.file.name in missingExtra)) {
+                        assert Hashing.sha256().hashFile(artifact.file) == file.sha256
+                        assert Hashing.sha512().hashFile(artifact.file) == file.sha512
+                    }
+                    assert Hashing.md5(). hashFile(artifact.file) == file.md5
                 }
             }
         }
@@ -288,13 +326,16 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
     /**
      * Asserts that exactly the given artifacts have been deployed, along with their checksum files
      */
-    void assertArtifactsPublished(String... names) {
-        Set allFileNames = []
+    void assertArtifactsPublished(String[] names) {
+        TreeSet allFileNames = []
         for (name in names) {
-            allFileNames.addAll([name, "${name}.sha1", "${name}.md5"])
+            allFileNames.addAll([name, "${name}.sha1", "${name}.md5"]*.toString())
+            if (extraChecksums && !(name in missingExtraChecksums)) {
+                allFileNames.addAll(["${name}.sha256", "${name}.sha512"]*.toString())
+            }
         }
-
-        assert moduleDir.list() as Set == allFileNames
+        def actualModuleDirFiles = moduleDir.list() as TreeSet
+        assert actualModuleDirFiles == allFileNames
         for (name in names) {
             assertChecksumsPublishedFor(moduleDir.file(name))
         }
@@ -310,10 +351,26 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
     void assertChecksumsPublishedFor(TestFile testFile) {
         def sha1File = sha1File(testFile)
         sha1File.assertIsFile()
-        assert new BigInteger(sha1File.text, 16) == getHash(testFile, "SHA1")
+        assert HashCode.fromString(sha1File.text) == Hashing.sha1().hashFile(testFile)
+        if (extraChecksums && !(testFile.name in missingExtraChecksums)) {
+            def sha256File = sha256File(testFile)
+            sha256File.assertIsFile()
+            assert HashCode.fromString(sha256File.text) == Hashing.sha256().hashFile(testFile)
+            def sha512File = sha512File(testFile)
+            sha512File.assertIsFile()
+            assert HashCode.fromString(sha512File.text) == Hashing.sha512().hashFile(testFile)
+        }
         def md5File = md5File(testFile)
         md5File.assertIsFile()
-        assert new BigInteger(md5File.text, 16) == getHash(testFile, "MD5")
+        assert HashCode.fromString(md5File.text) == Hashing.md5().hashFile(testFile)
+    }
+
+    String correctURLForSnapshot(String url) {
+        if (url.contains('-SNAPSHOT')) {
+            return url.replaceFirst('SNAPSHOT\\.', uniqueSnapshotVersion + '.')
+        } else {
+            return url
+        }
     }
 
     @Override
@@ -328,12 +385,12 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
 
     @Override
     DefaultRootMavenMetaData getRootMetaData() {
-        new DefaultRootMavenMetaData("$moduleRootPath/${MAVEN_METADATA_FILE}", rootMetaDataFile)
+        new DefaultRootMavenMetaData("$moduleRootPath/${metadataFileName}", rootMetaDataFile)
     }
 
     @Override
     DefaultSnapshotMavenMetaData getSnapshotMetaData() {
-        new DefaultSnapshotMavenMetaData("$path/${MAVEN_METADATA_FILE}", snapshotMetaDataFile)
+        new DefaultSnapshotMavenMetaData("$path/${metadataFileName}", snapshotMetaDataFile)
     }
 
     @Override
@@ -362,15 +419,19 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
 
     @Override
     TestFile getMetaDataFile() {
-        moduleDir.file(MAVEN_METADATA_FILE)
+        moduleDir.file(metadataFileName)
     }
 
     TestFile getRootMetaDataFile() {
-        moduleDir.parentFile.file(MAVEN_METADATA_FILE)
+        moduleDir.parentFile.file(metadataFileName)
     }
 
     TestFile getSnapshotMetaDataFile() {
-        moduleDir.file(MAVEN_METADATA_FILE)
+        moduleDir.file(metadataFileName)
+    }
+
+    protected String getMetadataFileName() {
+        "maven-metadata.xml"
     }
 
     TestFile artifactFile(Map<String, ?> options) {
@@ -391,6 +452,11 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
             TestFile getFile() {
                 return file
             }
+
+            @Override
+            String getName() {
+                return file.name
+            }
         }
     }
 
@@ -398,12 +464,13 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
     ModuleArtifact getArtifact(Map<String, ?> options) {
         def artifact = toArtifact(options)
         def suffix = (artifact.classifier ? "-${artifact.classifier}" : "") + (artifact.type ? ".${artifact.type}" : "")
+        def artifactName = artifact.name ? artifact.name : artifactId
         return new ModuleArtifact() {
             String getFileName() {
                 if (version.endsWith("-SNAPSHOT") && !metaDataFile.exists() && uniqueSnapshots) {
-                    return "${artifactId}-${version}${suffix}"
+                    return "${artifactName}-${version}${suffix}"
                 } else {
-                    return "$artifactId-${publishArtifactVersion}${suffix}"
+                    return "$artifactName-${publishArtifactVersion}${suffix}"
                 }
             }
 
@@ -416,6 +483,11 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
             TestFile getFile() {
                 return moduleDir.file(fileName)
             }
+
+            @Override
+            String getName() {
+                return "${artifactName}-${version}${suffix}"
+            }
         }
     }
 
@@ -427,7 +499,7 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
 
     protected Map<String, Object> toArtifact(Map<String, ?> options) {
         options = new HashMap<String, Object>(options)
-        def artifact = [type: options.containsKey('type') ? options.remove('type') : type, classifier: options.remove('classifier') ?: null]
+        def artifact = [type: options.containsKey('type') ? options.remove('type') : type, classifier: options.remove('classifier') ?: null, name: options.containsKey('name') ? options.remove('name') : null, content: options.containsKey('content') ? options.remove('content') : null]
         assert options.isEmpty(): "Unknown options : ${options.keySet()}"
         return artifact
     }
@@ -436,11 +508,17 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
         return new Date(updateFormat.parse("20100101120000").time + publishCount * 1000)
     }
 
+    String getFormattedPublishTimestamp() {
+        publishTimestamp.toLocalDateTime()
+            .atZone(ZoneId.of("GMT"))
+            .format(DateTimeFormatter.ofPattern("yyyy.MM.dd HH:mm:ss z").withLocale(Locale.ENGLISH))
+    }
+
     private void publishModuleMetadata() {
         def defaultArtifacts = getArtifact([:]).collect {
-            new FileSpec(it.file.name, it.file.name)
+            new FileSpec(it.name)
         }
-        GradleFileModuleAdapter adapter = new GradleFileModuleAdapter(groupId, artifactId, version,
+        GradleFileModuleAdapter adapter = new GradleFileModuleAdapter(groupId, artifactId, version, publishArtifactVersion,
             variants.collect { v ->
                 def artifacts = v.artifacts
                 if (!artifacts && v.useDefaultArtifacts) {
@@ -450,19 +528,23 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
                     v.name,
                     v.attributes,
                     v.dependencies + dependencies.findAll { !it.optional }.collect { d ->
-                        new DependencySpec(d.groupId, d.artifactId, d.version, d.prefers, d.strictly, d.rejects, d.exclusions, d.reason, d.attributes)
+                        new DependencySpec(d.groupId, d.artifactId, d.version, d.prefers, d.strictly, d.rejects, d.exclusions, d.endorseStrictVersions, d.reason, d.attributes,
+                            d.classifier ? new ArtifactSelectorSpec(d.artifactId, 'jar', 'jar', d.classifier) : null, d.requireCapability)
                     },
                     v.dependencyConstraints + dependencies.findAll { it.optional }.collect { d ->
                         new DependencyConstraintSpec(d.groupId, d.artifactId, d.version, d.prefers, d.strictly, d.rejects, d.reason, d.attributes)
                     },
                     artifacts,
-                    v.capabilities
+                    v.capabilities,
+                    v.availableAt,
                 )
             },
             attributes + ['org.gradle.status': version.endsWith('-SNAPSHOT') ? 'integration' : 'release']
         )
-
-        adapter.publishTo(moduleDir)
+        def moduleFile = moduleDir.file("$artifactId-${publishArtifactVersion}.module")
+        publish(moduleFile) {
+            adapter.publishTo(it, publishCount)
+        }
     }
 
     @Override
@@ -477,17 +559,20 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
                 writer << getMetaDataFileContent()
             }
         }
-
+        boolean writeRedirect = gradleMetadataRedirect
         publish(pomFileForPublish) { Writer writer ->
-            def pomPackaging = packaging ?: type;
+            def pomPackaging = packaging ?: type
             new MarkupBuilder(writer).project {
                 mkp.comment(artifactContent)
+                if (writeRedirect) {
+                    mkp.comment(MetaDataParser.GRADLE_6_METADATA_MARKER)
+                }
                 modelVersion("4.0.0")
                 groupId(groupId)
                 artifactId(artifactId)
                 version(version)
                 packaging(pomPackaging)
-                description("Published on ${publishTimestamp}")
+                description("Published on ${formattedPublishTimestamp}")
                 if (parentPom) {
                     parent {
                         groupId(parentPom.groupId)
@@ -564,14 +649,16 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
                                 }
                             }
                         }
-                        def compileDependencies = variants.find{ it.name == 'api' }?.dependencies
-                        def runtimeDependencies = variants.find{ it.name == 'runtime' }?.dependencies
+                        def compileDependencies = variants.find { it.name == 'api' }?.dependencies
+                        def runtimeDependencies = variants.find { it.name == 'runtime' }?.dependencies
                         if (compileDependencies) {
                             compileDependencies.each { dep ->
                                 dependency {
                                     groupId(dep.group)
                                     artifactId(dep.module)
-                                    if (dep.version) { version(dep.version) }
+                                    if (dep.version) {
+                                        version(dep.version)
+                                    }
                                     scope('compile')
                                 }
                             }
@@ -581,7 +668,9 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
                                 dependency {
                                     groupId(dep.group)
                                     artifactId(dep.module)
-                                    if (dep.version) { version(dep.version) }
+                                    if (dep.version) {
+                                        version(dep.version)
+                                    }
                                     scope('runtime')
                                 }
                             }
@@ -595,7 +684,7 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
 
     private void updateRootMavenMetaData(TestFile rootMavenMetaData) {
         def allVersions = rootMavenMetaData.exists() ? new XmlParser().parseText(rootMavenMetaData.text).versioning.versions.version*.value().flatten() : []
-        allVersions << version;
+        allVersions << version
         publish(rootMavenMetaData) { Writer writer ->
             def builder = new MarkupBuilder(writer)
             builder.metadata {
@@ -634,13 +723,13 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
             publishArtifact(artifact)
         }
         if (type != 'pom') {
-            publishArtifact([:])
+            publishArtifact(mainArtifact)
         }
 
         variants.each {
-            it.artifacts.each {
+            it.artifacts.findAll { it.name }.each {
                 def variantArtifact = moduleDir.file(it.name)
-                publish (variantArtifact) { Writer writer ->
+                publish(variantArtifact) { Writer writer ->
                     writer << "${it.name} : Variant artifact $it.name"
                 }
             }
@@ -652,9 +741,9 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
     File publishArtifact(Map<String, ?> artifact) {
         def artifactFile = artifactFile(artifact)
 
-        publish(artifactFile) { Writer writer ->
+        publish(artifactFile, { Writer writer ->
             writer << "${artifactFile.name} : $artifactContent"
-        }
+        }, (byte[]) artifact.content)
         return artifactFile
     }
 
@@ -667,11 +756,31 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
 
     @Override
     MavenModule withModuleMetadata() {
+        gradleMetadataRedirect = true
         super.withModuleMetadata()
+        this
     }
 
     @Override
-    void withVariant(String name, @DelegatesTo(value = VariantMetadataSpec, strategy = Closure.DELEGATE_FIRST) Closure<?> action) {
+    MavenModule withoutGradleMetadataRedirection() {
+        gradleMetadataRedirect = false
+        return this
+    }
+
+    @Override
+    MavenModule withoutExtraChecksums() {
+        extraChecksums = false
+        return this
+    }
+
+    @Override
+    MavenModule withExtraChecksums() {
+        extraChecksums = true
+        return this
+    }
+
+    @Override
+    MavenModule withVariant(String name, @DelegatesTo(value = VariantMetadataSpec, strategy = Closure.DELEGATE_FIRST) Closure<?> action) {
         def variant = variants.find { it.name == name }
         if (variant == null) {
             variant = createVariant(name, [:])
@@ -679,5 +788,18 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
         action.resolveStrategy = Closure.DELEGATE_FIRST
         action.delegate = variant
         action()
+        return this
+    }
+
+    @Override
+    MavenModule withoutDefaultVariants() {
+        variants.clear()
+        this
+    }
+
+    @Override
+    MavenModule withSignature(@DelegatesTo(value = File, strategy = Closure.DELEGATE_FIRST) Closure<?> signer) {
+        super.withSignature(signer)
+        this
     }
 }

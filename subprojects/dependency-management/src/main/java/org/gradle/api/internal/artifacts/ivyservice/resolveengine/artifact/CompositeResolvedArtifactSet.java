@@ -16,9 +16,8 @@
 
 package org.gradle.api.internal.artifacts.ivyservice.resolveengine.artifact;
 
+import org.gradle.api.Action;
 import org.gradle.api.internal.tasks.TaskDependencyResolveContext;
-import org.gradle.internal.operations.BuildOperationQueue;
-import org.gradle.internal.operations.RunnableBuildOperation;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -32,7 +31,7 @@ public class CompositeResolvedArtifactSet implements ResolvedArtifactSet {
     }
 
     public static ResolvedArtifactSet of(Collection<? extends ResolvedArtifactSet> sets) {
-        List<ResolvedArtifactSet> filtered = new ArrayList<ResolvedArtifactSet>(sets.size());
+        List<ResolvedArtifactSet> filtered = new ArrayList<>(sets.size());
         for (ResolvedArtifactSet set : sets) {
             if (set != ResolvedArtifactSet.EMPTY) {
                 filtered.add(set);
@@ -48,18 +47,23 @@ public class CompositeResolvedArtifactSet implements ResolvedArtifactSet {
     }
 
     @Override
-    public Completion startVisit(BuildOperationQueue<RunnableBuildOperation> actions, AsyncArtifactListener listener) {
-        List<Completion> results = new ArrayList<Completion>(sets.size());
+    public void visit(Visitor visitor) {
         for (ResolvedArtifactSet set : sets) {
-            results.add(set.startVisit(actions, listener));
+            set.visit(visitor);
         }
-        return new CompositeResult(results);
     }
 
     @Override
-    public void visitLocalArtifacts(LocalArtifactVisitor listener) {
+    public void visitTransformSources(TransformSourceVisitor visitor) {
         for (ResolvedArtifactSet set : sets) {
-            set.visitLocalArtifacts(listener);
+            set.visitTransformSources(visitor);
+        }
+    }
+
+    @Override
+    public void visitExternalArtifacts(Action<ResolvableArtifact> visitor) {
+        for (ResolvedArtifactSet set : sets) {
+            set.visitExternalArtifacts(visitor);
         }
     }
 
@@ -67,21 +71,6 @@ public class CompositeResolvedArtifactSet implements ResolvedArtifactSet {
     public void visitDependencies(TaskDependencyResolveContext context) {
         for (ResolvedArtifactSet set : sets) {
             set.visitDependencies(context);
-        }
-    }
-
-    private static class CompositeResult implements Completion {
-        private final List<Completion> results;
-
-        CompositeResult(List<Completion> results) {
-            this.results = results;
-        }
-
-        @Override
-        public void visit(ArtifactVisitor visitor) {
-            for (Completion result : results) {
-                result.visit(visitor);
-            }
         }
     }
 }

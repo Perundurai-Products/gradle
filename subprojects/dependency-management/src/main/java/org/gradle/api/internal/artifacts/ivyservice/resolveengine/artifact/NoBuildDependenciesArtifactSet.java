@@ -16,12 +16,11 @@
 
 package org.gradle.api.internal.artifacts.ivyservice.resolveengine.artifact;
 
+import org.gradle.api.Action;
 import org.gradle.api.artifacts.component.ComponentIdentifier;
 import org.gradle.api.internal.artifacts.transform.VariantSelector;
 import org.gradle.api.internal.tasks.TaskDependencyResolveContext;
 import org.gradle.api.specs.Spec;
-import org.gradle.internal.operations.BuildOperationQueue;
-import org.gradle.internal.operations.RunnableBuildOperation;
 
 public class NoBuildDependenciesArtifactSet implements ArtifactSet {
     private final ArtifactSet set;
@@ -47,13 +46,18 @@ public class NoBuildDependenciesArtifactSet implements ArtifactSet {
         }
 
         @Override
-        public Completion startVisit(BuildOperationQueue<RunnableBuildOperation> actions, AsyncArtifactListener listener) {
-            return selectedArtifacts.startVisit(actions, listener);
+        public void visit(Visitor visitor) {
+            selectedArtifacts.visit(visitor);
         }
 
         @Override
-        public void visitLocalArtifacts(LocalArtifactVisitor listener) {
-            selectedArtifacts.visitLocalArtifacts(listener);
+        public void visitTransformSources(TransformSourceVisitor visitor) {
+            selectedArtifacts.visitTransformSources(visitor);
+        }
+
+        @Override
+        public void visitExternalArtifacts(Action<ResolvableArtifact> visitor) {
+            selectedArtifacts.visitExternalArtifacts(visitor);
         }
 
         @Override

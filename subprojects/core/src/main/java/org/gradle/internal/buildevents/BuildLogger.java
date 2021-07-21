@@ -15,7 +15,6 @@
  */
 package org.gradle.internal.buildevents;
 
-import org.gradle.BuildListener;
 import org.gradle.BuildResult;
 import org.gradle.StartParameter;
 import org.gradle.api.execution.TaskExecutionGraph;
@@ -25,8 +24,10 @@ import org.gradle.api.internal.SettingsInternal;
 import org.gradle.api.internal.project.ProjectInternal;
 import org.gradle.api.invocation.Gradle;
 import org.gradle.api.logging.Logger;
+import org.gradle.execution.WorkValidationWarningReporter;
+import org.gradle.execution.taskgraph.TaskExecutionGraphInternal;
 import org.gradle.initialization.BuildRequestMetaData;
-import org.gradle.internal.InternalListener;
+import org.gradle.internal.InternalBuildListener;
 import org.gradle.internal.logging.format.TersePrettyDurationFormatter;
 import org.gradle.internal.logging.text.StyledTextOutputFactory;
 import org.gradle.internal.time.Clock;
@@ -34,20 +35,30 @@ import org.gradle.internal.time.Clock;
 /**
  * A {@link org.gradle.BuildListener} which logs the build progress.
  */
-public class BuildLogger implements BuildListener, TaskExecutionGraphListener, InternalListener {
+public class BuildLogger implements InternalBuildListener, TaskExecutionGraphListener {
     private final Logger logger;
     private final BuildExceptionReporter exceptionReporter;
     private final BuildResultLogger resultLogger;
     private String action;
 
-    public BuildLogger(Logger logger, StyledTextOutputFactory textOutputFactory, StartParameter startParameter, BuildRequestMetaData requestMetaData, BuildStartedTime buildStartedTime, Clock clock) {
+    public BuildLogger(
+        Logger logger,
+        StyledTextOutputFactory textOutputFactory,
+        StartParameter startParameter,
+        BuildRequestMetaData requestMetaData,
+        BuildStartedTime buildStartedTime,
+        Clock clock,
+        WorkValidationWarningReporter workValidationWarningReporter
+    ) {
         this.logger = logger;
         exceptionReporter = new BuildExceptionReporter(textOutputFactory, startParameter, requestMetaData.getClient());
-        resultLogger = new BuildResultLogger(textOutputFactory, buildStartedTime, clock, new TersePrettyDurationFormatter());
+        resultLogger = new BuildResultLogger(textOutputFactory, buildStartedTime, clock, new TersePrettyDurationFormatter(), workValidationWarningReporter);
     }
 
-    public void buildStarted(Gradle gradle) {
-        StartParameter startParameter = gradle.getStartParameter();
+    @SuppressWarnings("deprecation") // StartParameter.getSettingsFile() and StartParameter.getBuildFile()
+    @Override
+    public void beforeSettings(Settings settings) {
+        StartParameter startParameter = settings.getStartParameter();
         logger.info("Starting Build");
         if (logger.isDebugEnabled()) {
             logger.debug("Gradle user home: {}", startParameter.getGradleUserHomeDir());
@@ -57,6 +68,7 @@ public class BuildLogger implements BuildListener, TaskExecutionGraphListener, I
         }
     }
 
+    @Override
     public void settingsEvaluated(Settings settings) {
         SettingsInternal settingsInternal = (SettingsInternal) settings;
         if (logger.isInfoEnabled()) {
@@ -65,6 +77,7 @@ public class BuildLogger implements BuildListener, TaskExecutionGraphListener, I
         }
     }
 
+    @Override
     public void projectsLoaded(Gradle gradle) {
         if (logger.isInfoEnabled()) {
             ProjectInternal projectInternal = (ProjectInternal) gradle.getRootProject();
@@ -74,16 +87,20 @@ public class BuildLogger implements BuildListener, TaskExecutionGraphListener, I
         }
     }
 
+    @Override
     public void projectsEvaluated(Gradle gradle) {
         logger.info("All projects evaluated.");
     }
 
+    @Override
     public void graphPopulated(TaskExecutionGraph graph) {
         if (logger.isInfoEnabled()) {
             logger.info("Tasks to be executed: {}", graph.getAllTasks());
+            logger.info("Tasks that were excluded: {}", ((TaskExecutionGraphInternal)graph).getFilteredTasks());
         }
     }
 
+    @Override
     public void buildFinished(BuildResult result) {
         this.action = result.getAction();
     }

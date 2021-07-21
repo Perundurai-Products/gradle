@@ -24,12 +24,14 @@ import org.gradle.api.artifacts.ConfigurationContainer;
 import org.gradle.api.artifacts.PublishArtifact;
 import org.gradle.api.artifacts.dsl.ArtifactHandler;
 import org.gradle.internal.Actions;
+import org.gradle.internal.deprecation.DeprecatableConfiguration;
+import org.gradle.internal.deprecation.DeprecationLogger;
 import org.gradle.internal.metaobject.DynamicInvokeResult;
 import org.gradle.internal.metaobject.MethodAccess;
 import org.gradle.internal.metaobject.MethodMixIn;
 import org.gradle.internal.typeconversion.NotationParser;
-import org.gradle.util.ConfigureUtil;
-import org.gradle.util.GUtil;
+import org.gradle.util.internal.ConfigureUtil;
+import org.gradle.util.internal.GUtil;
 
 import java.util.Arrays;
 import java.util.List;
@@ -46,16 +48,28 @@ public class DefaultArtifactHandler implements ArtifactHandler, MethodMixIn {
         dynamicMethods = new DynamicMethods();
     }
 
+    @SuppressWarnings("rawtypes")
     private PublishArtifact pushArtifact(org.gradle.api.artifacts.Configuration configuration, Object notation, Closure configureClosure) {
         Action<Object> configureAction = ConfigureUtil.configureUsing(configureClosure);
         return pushArtifact(configuration, notation, configureAction);
     }
 
     private PublishArtifact pushArtifact(Configuration configuration, Object notation, Action<? super ConfigurablePublishArtifact> configureAction) {
+        warnIfConfigurationIsDeprecated((DeprecatableConfiguration) configuration);
         ConfigurablePublishArtifact publishArtifact = publishArtifactFactory.parseNotation(notation);
         configuration.getArtifacts().add(publishArtifact);
         configureAction.execute(publishArtifact);
         return publishArtifact;
+    }
+
+    private void warnIfConfigurationIsDeprecated(DeprecatableConfiguration configuration) {
+        if (configuration.isFullyDeprecated()) {
+            DeprecationLogger.deprecateConfiguration(configuration.getName()).forArtifactDeclaration()
+                .replaceWith(configuration.getDeclarationAlternatives())
+                .willBecomeAnErrorInGradle8()
+                .withUpgradeGuideSection(5, "dependencies_should_no_longer_be_declared_using_the_compile_and_runtime_configurations")
+                .nagUser();
+        }
     }
 
     @Override
@@ -69,6 +83,7 @@ public class DefaultArtifactHandler implements ArtifactHandler, MethodMixIn {
     }
 
     @Override
+    @SuppressWarnings("rawtypes")
     public PublishArtifact add(String configurationName, Object artifactNotation, Closure configureClosure) {
         return pushArtifact(configurationContainer.getByName(configurationName), artifactNotation, configureClosure);
     }

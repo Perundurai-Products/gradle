@@ -18,7 +18,8 @@ package org.gradle.api.internal.artifacts.ivyservice.ivyresolve.strategy
 import org.gradle.api.artifacts.ComponentMetadata
 import org.gradle.api.artifacts.ModuleVersionIdentifier
 
-public class VersionRangeSelectorTest extends AbstractStringVersionSelectorTest {
+class VersionRangeSelectorTest extends AbstractStringVersionSelectorTest {
+
     def "all handled selectors are dynamic"() {
         expect:
         isDynamic("[1.0,2.0]")
@@ -31,6 +32,13 @@ public class VersionRangeSelectorTest extends AbstractStringVersionSelectorTest 
         !requiresMetadata("[1.0,2.0]")
         !requiresMetadata("[1.0,)")
         !requiresMetadata("[1.0]")
+    }
+
+    def "excluded upper bound corner cases"() {
+        expect:
+        !accept("[1.0,2.0)", "2.0-final")
+        !accept("[1.0,2.0)", "2.0-dev")
+        !accept("[1.0,2.0)", "2.0.0-dev")
     }
 
     def "accepts candidate versions that fall into the selector's range"() {
@@ -76,7 +84,6 @@ public class VersionRangeSelectorTest extends AbstractStringVersionSelectorTest 
 
         accept("[1.0-dev-1,2.0[", "1.0")
         accept("[1.0,2.0-rc-2[", "2.0-rc-1")
-        accept("[1.0,2.0[", "2.0-final")
 
         accept("]1.0-dev-1,2.0]", "1.0")
         accept("]1.0-rc-2,2.0]", "1.0-rc-3")
@@ -94,6 +101,7 @@ public class VersionRangeSelectorTest extends AbstractStringVersionSelectorTest 
         !accept("[1.0,2.0[", "0.99")
         !accept("[1.0,2.0[", "2.0")
         !accept("[1.0,2.0[", "42")
+        !accept("[1.0,2.0[", "2.0-final")
 
         !accept("]1.0,2.0]", "1.0")
         !accept("]1.0,2.0]", "2.0.1")

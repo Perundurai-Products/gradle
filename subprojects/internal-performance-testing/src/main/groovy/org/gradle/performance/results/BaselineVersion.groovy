@@ -23,7 +23,7 @@ import org.gradle.performance.measure.Duration
 import static PrettyCalculator.toMillis
 
 /**
- * Allows comparing one Gradle version's results against another, using the Mann–Whitney U test with a minimum confidence of 99%.
+ * Allows comparing one Gradle version's results against another, using the Mann–Whitney U test with a minimum confidence of 999%.
  *
  * We prefer the Mann-Whitney U test over Student's T test, because performance data often has a non-normal distribution.
  * Many scenarios have 2 maxima, one for a typical build and another for builds with a major GC pause.
@@ -32,7 +32,7 @@ import static PrettyCalculator.toMillis
  */
 @CompileStatic
 class BaselineVersion implements VersionResults {
-    private static final double MINIMUM_CONFIDENCE = 0.99
+    private static final double MINIMUM_CONFIDENCE = 0.999
 
     final String version
     final MeasuredOperationList results = new MeasuredOperationList()
@@ -69,20 +69,20 @@ class BaselineVersion implements VersionResults {
         }
     }
 
-    boolean significantlyFasterThan(MeasuredOperationList other) {
+    boolean significantlyFasterThan(MeasuredOperationList other, double minConfidence = MINIMUM_CONFIDENCE) {
         def myTime = results.totalTime
         def otherTime = other.totalTime
-        myTime && myTime.median < otherTime.median && differenceIsSignificant(myTime, otherTime)
+        myTime && myTime.median < otherTime.median && differenceIsSignificant(myTime, otherTime, minConfidence)
     }
 
-    boolean significantlySlowerThan(MeasuredOperationList other) {
+    boolean significantlySlowerThan(MeasuredOperationList other, double minConfidence = MINIMUM_CONFIDENCE) {
         def myTime = results.totalTime
         def otherTime = other.totalTime
-        myTime && myTime.median > otherTime.median && differenceIsSignificant(myTime, otherTime)
+        myTime && myTime.median > otherTime.median && differenceIsSignificant(myTime, otherTime, minConfidence)
     }
 
-    private static boolean differenceIsSignificant(DataSeries<Duration> myTime, DataSeries<Duration> otherTime) {
-        DataSeries.confidenceInDifference(myTime, otherTime) > MINIMUM_CONFIDENCE
+    private static boolean differenceIsSignificant(DataSeries<Duration> myTime, DataSeries<Duration> otherTime, double minConfidence) {
+        DataSeries.confidenceInDifference(myTime, otherTime) > minConfidence
     }
 
 }

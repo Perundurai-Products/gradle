@@ -16,6 +16,8 @@
 
 package org.gradle.api.internal.tasks.compile.incremental.processing;
 
+import org.gradle.api.internal.tasks.compile.incremental.compilerapi.deps.GeneratedResource;
+
 import java.io.Serializable;
 import java.util.Set;
 
@@ -55,12 +57,20 @@ public class AnnotationProcessorResult implements Serializable {
         processingResult.addGeneratedType(name, originatingElements);
     }
 
+    public void addGeneratedResource(GeneratedResource resource, Set<String> originatingElements) {
+        processingResult.addGeneratedResource(resource, originatingElements);
+    }
+
     public Set<String> getAggregatedTypes() {
         return processingResult.getAggregatedTypes();
     }
 
     public Set<String> getGeneratedAggregatingTypes() {
         return processingResult.getGeneratedAggregatingTypes();
+    }
+
+    public Set<GeneratedResource> getGeneratedAggregatingResources() {
+        return processingResult.getGeneratedAggregatingResources();
     }
 
     public void setFullRebuildCause(String fullRebuildCause) {

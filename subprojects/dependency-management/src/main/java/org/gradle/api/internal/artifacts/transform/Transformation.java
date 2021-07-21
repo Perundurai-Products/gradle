@@ -18,10 +18,9 @@ package org.gradle.api.internal.artifacts.transform;
 
 import org.gradle.api.Action;
 import org.gradle.api.Describable;
-import org.gradle.internal.Try;
 
 /**
- * The internal API equivalent of {@link org.gradle.api.artifacts.transform.ArtifactTransform}, which is also aware of our cache infrastructure.
+ * The internal API equivalent of {@link org.gradle.api.artifacts.transform.TransformAction}, which is also aware of our cache infrastructure.
  *
  * This can encapsulate a single transformation step using a single transformer or a chain of transformation steps.
  */
@@ -32,12 +31,7 @@ public interface Transformation extends Describable {
     int stepsCount();
 
     /**
-     * Transforms the given input subject. May call the underlying transformer(s) or retrieve a cached value.
-     */
-    Try<TransformationSubject> transform(TransformationSubject subjectToTransform, ExecutionGraphDependenciesResolver dependenciesResolver);
-
-    /**
-     * Whether the transformation requires dependencies of the transformed artifact to be injected.
+     * Whether the transformation requires upstream dependencies of the transformed artifact to be injected.
      */
     boolean requiresDependencies();
 

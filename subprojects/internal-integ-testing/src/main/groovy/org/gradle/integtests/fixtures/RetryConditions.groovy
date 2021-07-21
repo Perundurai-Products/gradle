@@ -17,8 +17,11 @@
 package org.gradle.integtests.fixtures
 
 import org.gradle.api.JavaVersion
+import org.gradle.integtests.fixtures.daemon.DaemonLogsAnalyzer
 import org.gradle.util.GradleVersion
 import org.gradle.util.TestPrecondition
+
+import javax.annotation.Nullable
 
 class RetryConditions {
 
@@ -66,7 +69,7 @@ class RetryConditions {
         return shouldRetry(specification, failure, daemonsFixture)
     }
 
-    private static boolean shouldRetry(Object specification, Throwable failure, daemonsFixture) {
+    private static boolean shouldRetry(Object specification, Throwable failure, @Nullable DaemonLogsAnalyzer daemonsFixture) {
         String releasedGradleVersion = specification.hasProperty("releasedGradleVersion") ? specification.releasedGradleVersion : null
         def caughtGradleConnectionException = specification.hasProperty("caughtGradleConnectionException") ? specification.caughtGradleConnectionException : null
 
@@ -129,6 +132,19 @@ class RetryConditions {
             return cleanProjectDir(specification)
         }
 
+        // known problem with Gradle versions < 3.5
+        // See https://github.com/gradle/gradle-private/issues/744
+        if (targetDistVersion < GradleVersion.version('3.5') && daemonsFixture != null && getRootCauseMessage(failure) == 'Build cancelled.') {
+            for (daemon in daemonsFixture.daemons) {
+                if (daemon.logContains('Could not receive message from client.')
+                    && daemon.logContains('java.lang.NullPointerException')
+                    && daemon.logContains('org.gradle.launcher.daemon.server.exec.LogToClient')) {
+                    println "Retrying test because the dispatcher was not ready for receiving a log event. Check log of daemon with PID ${daemon.context.pid}."
+                    return cleanProjectDir(specification)
+                }
+            }
+        }
+
         // sometime sockets are unexpectedly disappearing on daemon side (running on windows): https://github.com/gradle/gradle/issues/1111
         didSocketDisappearOnWindows(failure, specification, daemonsFixture, targetDistVersion >= GradleVersion.version('3.0'))
     }
@@ -162,9 +178,9 @@ class RetryConditions {
     }
 
     static daemonStoppedWithSocketExceptionOnWindows(daemon) {
-        runsOnWindowsAndJava7or8() && (daemon.log.contains("java.net.SocketException: Socket operation on nonsocket:")
-            || daemon.log.contains("java.io.IOException: An operation was attempted on something that is not a socket")
-            || daemon.log.contains("java.io.IOException: An existing connection was forcibly closed by the remote host"))
+        runsOnWindowsAndJava7or8() && (daemon.logContains("java.net.SocketException: Socket operation on nonsocket:")
+            || daemon.logContains("java.io.IOException: An operation was attempted on something that is not a socket")
+            || daemon.logContains("java.io.IOException: An existing connection was forcibly closed by the remote host"))
     }
 
     static String getRootCauseMessage(Throwable throwable) {

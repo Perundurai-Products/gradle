@@ -16,6 +16,7 @@
 
 package org.gradle.cache.internal
 
+import org.gradle.api.internal.file.TestFiles
 import org.gradle.cache.CleanupProgressMonitor
 import org.gradle.test.fixtures.file.TestFile
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
@@ -33,13 +34,14 @@ import static org.gradle.cache.internal.VersionSpecificCacheCleanupFixture.Marke
 
 class VersionSpecificCacheCleanupActionTest extends Specification implements GradleUserHomeCleanupFixture {
 
-    @Rule TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider()
+    @Rule TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider(getClass())
 
     def userHomeDir = temporaryFolder.createDir("user-home")
     def currentCacheDir = createVersionSpecificCacheDir(currentVersion, NOT_USED_WITHIN_30_DAYS)
     def progressMonitor = Mock(CleanupProgressMonitor)
+    def deleter = TestFiles.deleter()
 
-    @Subject def cleanupAction = new VersionSpecificCacheCleanupAction(cachesDir, 30, 7)
+    @Subject def cleanupAction = new VersionSpecificCacheCleanupAction(cachesDir, 30, 7, deleter)
 
     def "cleans up unused version-specific cache directories"() {
         given:
@@ -47,7 +49,7 @@ class VersionSpecificCacheCleanupActionTest extends Specification implements Gra
         def oldestCacheDir = createVersionSpecificCacheDir(GradleVersion.version("1.2.3"), NOT_USED_WITHIN_30_DAYS)
         def oldButRecentlyUsedCacheDir = createVersionSpecificCacheDir(GradleVersion.version("1.4.5"), USED_TODAY)
         def oldCacheDir = createVersionSpecificCacheDir(GradleVersion.version("2.3.4"), NOT_USED_WITHIN_30_DAYS)
-        def newerCacheDir = createVersionSpecificCacheDir(currentVersion.getNextMajor(), NOT_USED_WITHIN_30_DAYS)
+        def newerCacheDir = createVersionSpecificCacheDir(currentVersion.getNextMajorVersion(), NOT_USED_WITHIN_30_DAYS)
 
         when:
         def cleanedUp = cleanupAction.execute(progressMonitor)

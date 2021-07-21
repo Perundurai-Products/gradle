@@ -17,6 +17,7 @@
 package org.gradle.launcher.daemon.registry;
 
 import org.gradle.internal.remote.Address;
+import org.gradle.internal.remote.internal.inet.InetEndpoint;
 import org.gradle.internal.remote.internal.inet.MultiChoiceAddress;
 import org.gradle.internal.remote.internal.inet.MultiChoiceAddressSerializer;
 import org.gradle.internal.remote.internal.inet.SocketInetAddress;
@@ -28,7 +29,7 @@ import java.io.ObjectOutputStream;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -43,7 +44,7 @@ public class DaemonRegistryContent implements Serializable {
     private final List<DaemonStopEvent> stopEvents;
 
     public DaemonRegistryContent() {
-        infosMap = new HashMap<Address, DaemonInfo>();
+        infosMap = new LinkedHashMap<Address, DaemonInfo>();
         stopEvents = new ArrayList<DaemonStopEvent>();
     }
 
@@ -69,8 +70,8 @@ public class DaemonRegistryContent implements Serializable {
     /**
      * Removes the status
      */
-    public void removeInfo(Address address) {
-        infosMap.remove(address);
+    public void removeInfo(int port) {
+        infosMap.keySet().removeIf(address -> ((InetEndpoint) address).getPort() == port);
     }
 
     /**
@@ -114,7 +115,7 @@ public class DaemonRegistryContent implements Serializable {
         @Override
         public DaemonRegistryContent read(Decoder decoder) throws Exception {
             if (decoder.readBoolean()) {
-                List<Address> addresses = readAdresses(decoder);
+                List<Address> addresses = readAddresses(decoder);
                 Map<Address, DaemonInfo> infosMap = readInfosMap(decoder, addresses);
                 List<DaemonStopEvent> stopEvents = readStopEvents(decoder);
                 return new DaemonRegistryContent(infosMap, stopEvents);
@@ -125,14 +126,14 @@ public class DaemonRegistryContent implements Serializable {
         private List<DaemonStopEvent> readStopEvents(Decoder decoder) throws Exception {
             int len = decoder.readInt();
             List<DaemonStopEvent> out = new ArrayList<DaemonStopEvent>(len);
-            for (int i=0; i<len; i++) {
+            for (int i = 0; i < len; i++) {
                 out.add(DaemonStopEvent.SERIALIZER.read(decoder));
             }
             return out;
         }
 
         private Map<Address, DaemonInfo> readInfosMap(Decoder decoder, List<Address> addresses) throws Exception {
-            Map<Address, DaemonInfo> infosMap = new HashMap<Address, DaemonInfo>(addresses.size());
+            Map<Address, DaemonInfo> infosMap = new LinkedHashMap<Address, DaemonInfo>(addresses.size());
             DaemonInfo.Serializer daemonInfoSerializer = new DaemonInfo.Serializer(addresses);
             for (Address address : addresses) {
                 infosMap.put(address, daemonInfoSerializer.read(decoder));
@@ -194,10 +195,10 @@ public class DaemonRegistryContent implements Serializable {
             }
         }
 
-        private List<Address> readAdresses(Decoder decoder) throws Exception {
+        private List<Address> readAddresses(Decoder decoder) throws Exception {
             int infosSize = decoder.readInt();
             List<Address> out = new ArrayList<Address>();
-            for (int i=0; i<infosSize; i++) {
+            for (int i = 0; i < infosSize; i++) {
                 byte type = decoder.readByte();
                 switch (type) {
                     case 0:

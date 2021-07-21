@@ -17,13 +17,14 @@
 package org.gradle.initialization.buildsrc
 
 import org.gradle.api.internal.artifacts.configurations.ResolveConfigurationDependenciesBuildOperationType
+import org.gradle.api.internal.tasks.execution.ExecuteTaskBuildOperationType
 import org.gradle.execution.taskgraph.NotifyTaskGraphWhenReadyBuildOperationType
 import org.gradle.initialization.ConfigureBuildBuildOperationType
 import org.gradle.initialization.LoadBuildBuildOperationType
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 import org.gradle.integtests.fixtures.BuildOperationsFixture
-import org.gradle.api.internal.tasks.execution.ExecuteTaskBuildOperationType
 import org.gradle.internal.taskgraph.CalculateTaskGraphBuildOperationType
+import org.gradle.internal.taskgraph.CalculateTreeTaskGraphBuildOperationType
 import org.gradle.launcher.exec.RunBuildBuildOperationType
 import spock.lang.Unroll
 
@@ -61,37 +62,47 @@ class BuildSrcBuildOperationsIntegrationTest extends AbstractIntegrationSpec {
 
         def configureOps = ops.all(ConfigureBuildBuildOperationType)
         configureOps.size() == 2
-        configureOps[0].displayName == "Configure build (:buildSrc)"
-        configureOps[0].details.buildPath == ":buildSrc"
-        configureOps[0].parentId == buildSrcOps[0].id
-        configureOps[1].displayName == "Configure build"
-        configureOps[1].details.buildPath == ":"
-        configureOps[1].parentId == root.id
+        configureOps[0].displayName == "Configure build"
+        configureOps[0].details.buildPath == ":"
+        configureOps[0].parentId == root.id
+        configureOps[1].displayName == "Configure build (:buildSrc)"
+        configureOps[1].details.buildPath == ":buildSrc"
+        configureOps[1].parentId == buildSrcOps[0].id
+
+        def treeTaskGraphOps = ops.all(CalculateTreeTaskGraphBuildOperationType)
+        treeTaskGraphOps.size() == 2
+        treeTaskGraphOps[0].displayName == "Calculate build tree task graph"
+        treeTaskGraphOps[0].parentId == buildSrcOps[0].id
+        treeTaskGraphOps[1].displayName == "Calculate build tree task graph"
+        treeTaskGraphOps[1].parentId == root.id
 
         def taskGraphOps = ops.all(CalculateTaskGraphBuildOperationType)
         taskGraphOps.size() == 2
         taskGraphOps[0].displayName == "Calculate task graph (:buildSrc)"
         taskGraphOps[0].details.buildPath == ':buildSrc'
-        taskGraphOps[0].parentId == buildSrcOps[0].id
+        taskGraphOps[0].parentId == treeTaskGraphOps[0].id
         taskGraphOps[1].displayName == "Calculate task graph"
         taskGraphOps[1].details.buildPath == ':'
-        taskGraphOps[1].parentId == root.id
+        taskGraphOps[1].parentId == treeTaskGraphOps[1].id
+
+        def runMainTasks = ops.first(Pattern.compile("Run main tasks"))
+        runMainTasks.parentId == root.id
 
         def runTasksOps = ops.all(Pattern.compile("Run tasks.*"))
         runTasksOps.size() == 2
         runTasksOps[0].displayName == "Run tasks (:buildSrc)"
         runTasksOps[0].parentId == buildSrcOps[0].id
         runTasksOps[1].displayName == "Run tasks"
-        runTasksOps[1].parentId == root.id
+        runTasksOps[1].parentId == runMainTasks.id
 
         def graphNotifyOps = ops.all(NotifyTaskGraphWhenReadyBuildOperationType)
         graphNotifyOps.size() == 2
         graphNotifyOps[0].displayName == 'Notify task graph whenReady listeners (:buildSrc)'
         graphNotifyOps[0].details.buildPath == ':buildSrc'
-        graphNotifyOps[0].parentId == runTasksOps[0].id
+        graphNotifyOps[0].parentId == treeTaskGraphOps[0].id
         graphNotifyOps[1].displayName == "Notify task graph whenReady listeners"
         graphNotifyOps[1].details.buildPath == ":"
-        graphNotifyOps[1].parentId == runTasksOps[1].id
+        graphNotifyOps[1].parentId == treeTaskGraphOps[1].id
 
         def taskOps = ops.all(ExecuteTaskBuildOperationType)
         taskOps.size() > 1

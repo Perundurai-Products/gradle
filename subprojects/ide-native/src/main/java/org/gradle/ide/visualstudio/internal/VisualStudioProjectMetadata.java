@@ -21,7 +21,7 @@ import org.gradle.api.Transformer;
 import org.gradle.internal.Describables;
 import org.gradle.internal.DisplayName;
 import org.gradle.plugins.ide.internal.IdeProjectMetadata;
-import org.gradle.util.CollectionUtils;
+import org.gradle.util.internal.CollectionUtils;
 
 import java.io.File;
 import java.util.List;
@@ -43,6 +43,7 @@ public class VisualStudioProjectMetadata implements IdeProjectMetadata {
         return project.getName();
     }
 
+    @Override
     public File getFile() {
         return project.getProjectFile().getLocation();
     }
@@ -52,11 +53,11 @@ public class VisualStudioProjectMetadata implements IdeProjectMetadata {
         return project.getBuildDependencies().getDependencies(null);
     }
 
-    public List<String> getConfigurations() {
-        return CollectionUtils.collect(project.getConfigurations(), new Transformer<String, VisualStudioProjectConfiguration>() {
+    public List<VisualStudioProjectConfigurationMetadata> getConfigurations() {
+        return CollectionUtils.collect(project.getConfigurations(), new Transformer<VisualStudioProjectConfigurationMetadata, VisualStudioProjectConfiguration>() {
             @Override
-            public String transform(VisualStudioProjectConfiguration configuration) {
-                return configuration.getName();
+            public VisualStudioProjectConfigurationMetadata transform(VisualStudioProjectConfiguration configuration) {
+                return new VisualStudioProjectConfigurationMetadata(configuration.getName(), configuration.isBuildable());
             }
         });
     }

@@ -16,33 +16,32 @@
 
 package org.gradle.api.plugins;
 
-import org.gradle.api.internal.project.ProjectInternal;
-
-import java.io.File;
+import org.gradle.api.file.DirectoryProperty;
 
 /**
  * <p>A {@link Convention} used for the BasePlugin.</p>
+ *
+ * @deprecated Use {@link BasePluginExtension} instead. This class is scheduled for removal in Gradle 8.0.
  */
+@Deprecated
 public abstract class BasePluginConvention {
     /**
      * Returns the directory to generate TAR and ZIP archives into.
      *
      * @return The directory. Never returns null.
+     *
+     * @since 6.0
      */
-    @Deprecated
-    public abstract File getDistsDir();
+    public abstract DirectoryProperty getDistsDirectory();
 
     /**
      * Returns the directory to generate JAR and WAR archives into.
      *
      * @return The directory. Never returns null.
+     *
+     * @since 6.0
      */
-    @Deprecated
-    public abstract File getLibsDir();
-
-    public abstract ProjectInternal getProject();
-
-    public abstract void setProject(ProjectInternal project);
+    public abstract DirectoryProperty getLibsDirectory();
 
     /**
      * The name for the distributions directory. This in interpreted relative to the project' build directory.

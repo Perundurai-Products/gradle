@@ -16,11 +16,10 @@
 
 package org.gradle.api.file;
 
-import org.gradle.api.Incubating;
 import org.gradle.api.model.ObjectFactory;
-import org.gradle.api.provider.Property;
 import org.gradle.api.provider.Provider;
 
+import javax.annotation.Nullable;
 import java.io.File;
 
 /**
@@ -34,23 +33,30 @@ import java.io.File;
  *
  * @since 4.3
  */
-@Incubating
-public interface RegularFileProperty extends Property<RegularFile> {
+public interface RegularFileProperty extends FileSystemLocationProperty<RegularFile> {
     /**
-     * Views the location of this file as a {@link File}.
+     * {@inheritDoc}
      */
-    Provider<File> getAsFile();
-
-    /**
-     * Sets the location of this file, using a {@link File} instance.
-     */
-    void set(File file);
+    @Override
+    RegularFileProperty value(@Nullable RegularFile value);
 
     /**
      * {@inheritDoc}
      */
     @Override
-    RegularFileProperty value(RegularFile value);
+    RegularFileProperty value(Provider<? extends RegularFile> provider);
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    RegularFileProperty fileValue(@Nullable File file);
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    RegularFileProperty fileProvider(Provider<File> provider);
 
     /**
      * {@inheritDoc}

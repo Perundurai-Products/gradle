@@ -15,9 +15,11 @@
  */
 package org.gradle.integtests.fixtures.executer;
 
-import org.gradle.api.Action;
 import org.gradle.integtests.fixtures.timeout.IntegrationTestTimeoutInterceptor;
 import org.gradle.test.fixtures.file.TestDirectoryProvider;
+
+import java.nio.charset.Charset;
+import java.util.Locale;
 
 import static org.gradle.integtests.fixtures.timeout.IntegrationTestTimeout.DEFAULT_TIMEOUT_SECONDS;
 
@@ -36,7 +38,8 @@ public class GradleContextualExecuter extends AbstractDelegatingGradleExecuter {
         embedded(false),
         forking(true),
         noDaemon(true),
-        parallel(true, true);
+        parallel(true, true),
+        configCache(true);
 
         final public boolean forks;
         final public boolean executeParallel;
@@ -75,6 +78,14 @@ public class GradleContextualExecuter extends AbstractDelegatingGradleExecuter {
         return getSystemPropertyExecuter().executeParallel;
     }
 
+    public static boolean isNotConfigCache() {
+        return !isConfigCache();
+    }
+
+    public static boolean isConfigCache() {
+        return getSystemPropertyExecuter() == Executer.configCache;
+    }
+
     private GradleExecuter gradleExecuter;
 
     public GradleContextualExecuter(GradleDistribution distribution, TestDirectoryProvider testDirectoryProvider, IntegrationTestBuildContext buildContext) {
@@ -82,6 +93,7 @@ public class GradleContextualExecuter extends AbstractDelegatingGradleExecuter {
         this.executerType = getSystemPropertyExecuter();
     }
 
+    @Override
     protected GradleExecuter configureExecuter() {
         if (!getClass().desiredAssertionStatus()) {
             throw new RuntimeException("Assertions must be enabled when running integration tests.");
@@ -96,6 +108,9 @@ public class GradleContextualExecuter extends AbstractDelegatingGradleExecuter {
         try {
             gradleExecuter.assertCanExecute();
         } catch (AssertionError assertionError) {
+            if (gradleExecuter instanceof InProcessGradleExecuter) {
+                throw new RuntimeException("Running tests with a Gradle distribution in embedded mode is no longer supported.", assertionError);
+            }
             gradleExecuter = new NoDaemonGradleExecuter(getDistribution(), getTestDirectoryProvider());
             configureExecuter(gradleExecuter);
         }
@@ -117,6 +132,8 @@ public class GradleContextualExecuter extends AbstractDelegatingGradleExecuter {
                 return new ParallelForkingGradleExecuter(getDistribution(), getTestDirectoryProvider(), gradleVersion, buildContext);
             case forking:
                 return new DaemonGradleExecuter(getDistribution(), getTestDirectoryProvider(), gradleVersion, buildContext);
+            case configCache:
+                return new ConfigurationCacheGradleExecuter(getDistribution(), getTestDirectoryProvider(), gradleVersion, buildContext);
             default:
                 throw new RuntimeException("Not a supported executer type: " + executerType);
         }
@@ -124,16 +141,21 @@ public class GradleContextualExecuter extends AbstractDelegatingGradleExecuter {
 
     @Override
     public void cleanup() {
-        new IntegrationTestTimeoutInterceptor(DEFAULT_TIMEOUT_SECONDS).intercept(new Action<Void>() {
-            @Override
-            public void execute(Void ignored) {
-                if (gradleExecuter != null) {
-                    gradleExecuter.stop();
-                }
-                GradleContextualExecuter.super.cleanup();
+        new IntegrationTestTimeoutInterceptor(DEFAULT_TIMEOUT_SECONDS).intercept(ignored -> {
+            if (gradleExecuter != null) {
+                gradleExecuter.stop();
             }
+            GradleContextualExecuter.super.cleanup();
         });
 
+    }
+
+    @Override
+    public GradleExecuter ignoreCleanupAssertions() {
+        if (gradleExecuter != null) {
+            gradleExecuter.ignoreCleanupAssertions();
+        }
+        return super.ignoreCleanupAssertions();
     }
 
     @Override
@@ -142,5 +164,26 @@ public class GradleContextualExecuter extends AbstractDelegatingGradleExecuter {
             gradleExecuter.reset();
         }
         return super.reset();
+    }
+
+    // The following overrides are here instead of in 'InProcessGradleExecuter' due to the way executors are layered+inherited
+    // This should be improved as part of https://github.com/gradle/gradle-private/issues/1009
+
+    @Override
+    public GradleExecuter withDefaultCharacterEncoding(String defaultCharacterEncoding) {
+        if (executerType == Executer.embedded && !Charset.forName(defaultCharacterEncoding).equals(Charset.defaultCharset())) {
+            // need to fork to apply the new default character encoding
+            requireDaemon().requireIsolatedDaemons();
+        }
+        return super.withDefaultCharacterEncoding(defaultCharacterEncoding);
+    }
+
+    @Override
+    public GradleExecuter withDefaultLocale(Locale defaultLocale) {
+        if (executerType == Executer.embedded && !defaultLocale.equals(Locale.getDefault())) {
+            // need to fork to apply the new default locale
+            requireDaemon().requireIsolatedDaemons();
+        }
+        return super.withDefaultLocale(defaultLocale);
     }
 }

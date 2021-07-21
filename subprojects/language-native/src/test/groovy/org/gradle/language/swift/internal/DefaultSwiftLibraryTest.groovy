@@ -16,8 +16,6 @@
 
 package org.gradle.language.swift.internal
 
-import org.gradle.api.artifacts.Configuration
-import org.gradle.api.internal.file.FileCollectionInternal
 import org.gradle.language.cpp.internal.DefaultUsageContext
 import org.gradle.language.cpp.internal.NativeVariantIdentity
 import org.gradle.language.swift.SwiftPlatform
@@ -34,12 +32,12 @@ import spock.lang.Specification
 
 class DefaultSwiftLibraryTest extends Specification {
     @Rule
-    TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
+    TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider(getClass())
     def project = TestUtil.createRootProject(tmpDir.testDirectory)
     DefaultSwiftLibrary library
 
     def setup() {
-        library = new DefaultSwiftLibrary("main", project.objects, project.fileOperations, project.configurations)
+        library = project.objects.newInstance(DefaultSwiftLibrary, "main")
     }
 
     def "has display name"() {
@@ -105,13 +103,13 @@ class DefaultSwiftLibraryTest extends Specification {
 
         then:
         def ex = thrown(IllegalStateException)
-        ex.message == "No value has been specified for this provider."
+        ex.message == "Cannot query the value of property 'developmentBinary' because it has no value available."
     }
 
     private NativeVariantIdentity getIdentity() {
         return new NativeVariantIdentity("test", null, null, null, true, false, targetMachine(OperatingSystemFamily.WINDOWS, MachineArchitecture.X86_64),
-            new DefaultUsageContext("test", null, AttributeTestUtil.attributesFactory().mutable()),
-            new DefaultUsageContext("test", null, AttributeTestUtil.attributesFactory().mutable())
+            new DefaultUsageContext("test", AttributeTestUtil.attributesFactory().mutable()),
+            new DefaultUsageContext("test", AttributeTestUtil.attributesFactory().mutable())
         )
     }
 
@@ -121,8 +119,5 @@ class DefaultSwiftLibraryTest extends Specification {
             getOperatingSystemFamily() >> objectFactory.named(OperatingSystemFamily.class, os)
             getArchitecture() >> objectFactory.named(MachineArchitecture.class, arch)
         }
-    }
-
-    interface TestConfiguration extends Configuration, FileCollectionInternal {
     }
 }

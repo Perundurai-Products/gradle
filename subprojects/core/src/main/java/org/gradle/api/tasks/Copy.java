@@ -21,8 +21,7 @@ import org.gradle.api.internal.file.copy.CopyAction;
 import org.gradle.api.internal.file.copy.CopySpecInternal;
 import org.gradle.api.internal.file.copy.DestinationRootCopySpec;
 import org.gradle.api.internal.file.copy.FileCopyAction;
-import org.gradle.internal.file.PathToFileResolver;
-import org.gradle.internal.reflect.Instantiator;
+import org.gradle.work.DisableCachingByDefault;
 
 import java.io.File;
 
@@ -67,6 +66,7 @@ import java.io.File;
  * }
  * </pre>
  */
+@DisableCachingByDefault(because = "Not worth caching")
 public class Copy extends AbstractCopyTask {
 
     @Override
@@ -80,10 +80,7 @@ public class Copy extends AbstractCopyTask {
 
     @Override
     protected CopySpecInternal createRootSpec() {
-        Instantiator instantiator = getInstantiator();
-        PathToFileResolver fileResolver = getFileResolver();
-
-        return instantiator.newInstance(DestinationRootCopySpec.class, fileResolver, super.createRootSpec());
+        return getProject().getObjects().newInstance(DestinationRootCopySpec.class, super.createRootSpec());
     }
 
     @Override

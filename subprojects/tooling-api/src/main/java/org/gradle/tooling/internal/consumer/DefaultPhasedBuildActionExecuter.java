@@ -24,7 +24,7 @@ import org.gradle.tooling.internal.consumer.async.AsyncConsumerActionExecutor;
 import org.gradle.tooling.internal.consumer.connection.ConsumerAction;
 import org.gradle.tooling.internal.consumer.connection.ConsumerConnection;
 import org.gradle.tooling.internal.consumer.parameters.ConsumerOperationParameters;
-import org.gradle.util.CollectionUtils;
+import org.gradle.util.internal.CollectionUtils;
 
 import java.util.Arrays;
 
@@ -68,10 +68,12 @@ public class DefaultPhasedBuildActionExecuter extends AbstractLongRunningOperati
     public void run(ResultHandler<? super Void> handler) throws IllegalStateException {
         final ConsumerOperationParameters operationParameters = getConsumerOperationParameters();
         connection.run(new ConsumerAction<Void>() {
+            @Override
             public ConsumerOperationParameters getParameters() {
                 return operationParameters;
             }
 
+            @Override
             public Void run(ConsumerConnection connection) {
                 connection.run(phasedBuildAction, operationParameters);
                 return null;

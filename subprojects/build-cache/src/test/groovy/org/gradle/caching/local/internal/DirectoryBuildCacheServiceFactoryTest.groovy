@@ -17,6 +17,7 @@
 package org.gradle.caching.local.internal
 
 import org.gradle.api.internal.file.FileResolver
+import org.gradle.api.internal.file.TestFiles
 import org.gradle.cache.CacheBuilder
 import org.gradle.cache.CacheRepository
 import org.gradle.cache.CleanupAction
@@ -25,7 +26,7 @@ import org.gradle.cache.internal.CleanupActionFactory
 import org.gradle.cache.internal.VersionStrategy
 import org.gradle.caching.BuildCacheServiceFactory
 import org.gradle.caching.local.DirectoryBuildCache
-import org.gradle.internal.resource.local.FileAccessTimeJournal
+import org.gradle.internal.file.FileAccessTimeJournal
 import org.gradle.internal.resource.local.PathKeyFileStore
 import org.gradle.test.fixtures.file.CleanupTestDirectory
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
@@ -36,18 +37,18 @@ import spock.lang.Specification
 @UsesNativeServices
 @CleanupTestDirectory
 class DirectoryBuildCacheServiceFactoryTest extends Specification {
+    @Rule TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider(getClass())
+
     def cacheRepository = Mock(CacheRepository)
     def cacheScopeMapping = Mock(CacheScopeMapping)
     def resolver = Mock(FileResolver)
     def fileStoreFactory = Mock(DirectoryBuildCacheFileStoreFactory)
     def cleanupActionFactory = Mock(CleanupActionFactory)
     def fileAccessTimeJournal = Mock(FileAccessTimeJournal)
-    def factory = new DirectoryBuildCacheServiceFactory(cacheRepository, cacheScopeMapping, resolver, fileStoreFactory, cleanupActionFactory, fileAccessTimeJournal)
+    def factory = new DirectoryBuildCacheServiceFactory(cacheRepository, cacheScopeMapping, resolver, fileStoreFactory, cleanupActionFactory, fileAccessTimeJournal, TestFiles.tmpDirTemporaryFileProvider(temporaryFolder.root))
     def cacheBuilder = Stub(CacheBuilder)
     def config = Mock(DirectoryBuildCache)
     def buildCacheDescriber = new NoopBuildCacheDescriber()
-
-    @Rule TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider()
 
     def "can create service with default directory"() {
         def cacheDir = temporaryFolder.file("build-cache-1")

@@ -16,11 +16,15 @@
 
 package org.gradle.internal.featurelifecycle;
 
+import com.google.common.annotations.VisibleForTesting;
+import org.gradle.internal.deprecation.DeprecatedFeatureUsage;
+
 import java.util.List;
 
 public class DefaultDeprecatedUsageProgressDetails implements DeprecatedUsageProgressDetails {
 
-    private final DeprecatedFeatureUsage featureUsage;
+    @VisibleForTesting
+    public final DeprecatedFeatureUsage featureUsage;
 
     public DefaultDeprecatedUsageProgressDetails(DeprecatedFeatureUsage featureUsage) {
         this.featureUsage = featureUsage;
@@ -31,10 +35,12 @@ public class DefaultDeprecatedUsageProgressDetails implements DeprecatedUsagePro
         return featureUsage.getSummary();
     }
 
+    @Override
     public String getRemovalDetails() {
         return featureUsage.getRemovalDetails();
     }
 
+    @Override
     public String getAdvice() {
         return featureUsage.getAdvice();
     }
@@ -42,6 +48,11 @@ public class DefaultDeprecatedUsageProgressDetails implements DeprecatedUsagePro
     @Override
     public String getContextualAdvice() {
         return featureUsage.getContextualAdvice();
+    }
+
+    @Override
+    public String getDocumentationUrl() {
+        return featureUsage.getDocumentationUrl();
     }
 
     @Override

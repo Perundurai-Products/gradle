@@ -24,16 +24,17 @@ import org.gradle.api.internal.attributes.ImmutableAttributes;
 import org.gradle.internal.Describables;
 import org.gradle.internal.DisplayName;
 import org.gradle.internal.Factory;
-import org.gradle.internal.component.model.ConfigurationMetadata;
 import org.gradle.internal.component.model.DefaultVariantMetadata;
 import org.gradle.internal.component.model.ExcludeMetadata;
 import org.gradle.internal.component.model.IvyArtifactName;
+import org.gradle.internal.component.model.ModuleConfigurationMetadata;
 import org.gradle.internal.component.model.VariantResolveMetadata;
+import org.gradle.internal.deprecation.DeprecationMessageBuilder;
 
 import java.util.List;
 import java.util.Set;
 
-public abstract class AbstractConfigurationMetadata implements ConfigurationMetadata, VariantResolveMetadata {
+public abstract class AbstractConfigurationMetadata implements ModuleConfigurationMetadata {
     private final ModuleComponentIdentifier componentId;
     private final String name;
     private final ImmutableList<? extends ModuleComponentArtifactMetadata> artifacts;
@@ -43,6 +44,8 @@ public abstract class AbstractConfigurationMetadata implements ConfigurationMeta
     private final ImmutableList<ExcludeMetadata> excludes;
     private final ImmutableAttributes attributes;
     private final ImmutableCapabilities capabilities;
+    private final boolean mavenArtifactDiscovery;
+    private final boolean externalVariant;
 
     // Should be final, and set in constructor
     private ImmutableList<ModuleDependencyMetadata> configDependencies;
@@ -51,7 +54,8 @@ public abstract class AbstractConfigurationMetadata implements ConfigurationMeta
     AbstractConfigurationMetadata(ModuleComponentIdentifier componentId, String name, boolean transitive, boolean visible,
                                   ImmutableList<? extends ModuleComponentArtifactMetadata> artifacts, ImmutableSet<String> hierarchy,
                                   ImmutableList<ExcludeMetadata> excludes, ImmutableAttributes attributes,
-                                  ImmutableList<ModuleDependencyMetadata> configDependencies, ImmutableCapabilities capabilities) {
+                                  ImmutableList<ModuleDependencyMetadata> configDependencies, ImmutableCapabilities capabilities,
+                                  boolean mavenArtifactDiscovery, boolean externalVariant) {
 
         this.componentId = componentId;
         this.name = name;
@@ -63,13 +67,17 @@ public abstract class AbstractConfigurationMetadata implements ConfigurationMeta
         this.attributes = attributes;
         this.configDependencies = configDependencies;
         this.capabilities = capabilities;
+        this.mavenArtifactDiscovery = mavenArtifactDiscovery;
+        this.externalVariant = externalVariant;
     }
 
     AbstractConfigurationMetadata(ModuleComponentIdentifier componentId, String name, boolean transitive, boolean visible,
                                   ImmutableList<? extends ModuleComponentArtifactMetadata> artifacts, ImmutableSet<String> hierarchy,
                                   ImmutableList<ExcludeMetadata> excludes, ImmutableAttributes attributes,
                                   Factory<List<ModuleDependencyMetadata>> configDependenciesFactory,
-                                  ImmutableCapabilities capabilities) {
+                                  ImmutableCapabilities capabilities,
+                                  boolean mavenArtifactDiscovery,
+                                  boolean externalVariant) {
 
         this.componentId = componentId;
         this.name = name;
@@ -81,6 +89,8 @@ public abstract class AbstractConfigurationMetadata implements ConfigurationMeta
         this.attributes = attributes;
         this.configDependenciesFactory = configDependenciesFactory;
         this.capabilities = capabilities;
+        this.mavenArtifactDiscovery = mavenArtifactDiscovery;
+        this.externalVariant = externalVariant;
     }
 
     @Override
@@ -96,6 +106,11 @@ public abstract class AbstractConfigurationMetadata implements ConfigurationMeta
     @Override
     public String getName() {
         return name;
+    }
+
+    @Override
+    public Identifier getIdentifier() {
+        return null;
     }
 
     @Override
@@ -119,8 +134,18 @@ public abstract class AbstractConfigurationMetadata implements ConfigurationMeta
     }
 
     @Override
+    public DeprecationMessageBuilder.WithDocumentation getConsumptionDeprecation() {
+        return null;
+    }
+
+    @Override
     public boolean isCanBeResolved() {
         return false;
+    }
+
+    @Override
+    public boolean isExternalVariant() {
+        return externalVariant;
     }
 
     public void setDependencies(List<ModuleDependencyMetadata> dependencies) {
@@ -141,7 +166,7 @@ public abstract class AbstractConfigurationMetadata implements ConfigurationMeta
 
     @Override
     public Set<? extends VariantResolveMetadata> getVariants() {
-        return ImmutableSet.of(new DefaultVariantMetadata(asDescribable(), getAttributes(), getArtifacts(), getCapabilities()));
+        return ImmutableSet.of(new DefaultVariantMetadata(name, null, asDescribable(), getAttributes(), getArtifacts(), getCapabilities()));
     }
 
     @Override
@@ -164,6 +189,11 @@ public abstract class AbstractConfigurationMetadata implements ConfigurationMeta
         return capabilities;
     }
 
+    @Override
+    public boolean requiresMavenArtifactDiscovery() {
+        return mavenArtifactDiscovery;
+    }
+
     ImmutableList<ModuleDependencyMetadata> getConfigDependencies() {
         if (configDependenciesFactory != null) {
             configDependencies = ImmutableList.copyOf(configDependenciesFactory.create());
@@ -176,5 +206,4 @@ public abstract class AbstractConfigurationMetadata implements ConfigurationMeta
         return componentId;
     }
 
-    protected abstract ConfigurationMetadata withAttributes(ImmutableAttributes attributes);
 }

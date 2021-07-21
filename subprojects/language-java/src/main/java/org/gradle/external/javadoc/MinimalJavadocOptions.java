@@ -83,6 +83,28 @@ public interface MinimalJavadocOptions {
 
     void setClasspath(List<File> classpath);
 
+    /**
+     * The --module-path.
+     *
+     * @since 6.4
+     */
+    @Internal
+    List<File> getModulePath();
+
+    /**
+     * The --module-path.
+     *
+     * @since 6.4
+     */
+    void setModulePath(List<File> modulePath);
+
+    /**
+     * The --module-path.
+     *
+     * @since 6.4
+     */
+    MinimalJavadocOptions modulePath(List<File> classpath);
+
     MinimalJavadocOptions classpath(List<File> classpath);
 
     MinimalJavadocOptions classpath(File... classpath);

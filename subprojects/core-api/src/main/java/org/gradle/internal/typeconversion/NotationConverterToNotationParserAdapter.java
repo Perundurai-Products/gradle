@@ -25,8 +25,9 @@ public class NotationConverterToNotationParserAdapter<N, T> implements NotationP
         this.converter = converter;
     }
 
+    @Override
     public T parseNotation(N notation) throws TypeConversionException {
-        ResultImpl<T> result = new ResultImpl<T>();
+        ResultImpl<T> result = new ResultImpl<>();
         converter.convert(notation, result);
         if (!result.hasResult) {
             throw new UnsupportedNotationException(notation);
@@ -43,10 +44,12 @@ public class NotationConverterToNotationParserAdapter<N, T> implements NotationP
         private boolean hasResult;
         private T result;
 
+        @Override
         public boolean hasResult() {
             return hasResult;
         }
 
+        @Override
         public void converted(T result) {
             hasResult = true;
             this.result = result;

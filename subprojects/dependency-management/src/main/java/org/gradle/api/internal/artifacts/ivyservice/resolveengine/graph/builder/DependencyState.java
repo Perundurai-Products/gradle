@@ -15,32 +15,42 @@
  */
 package org.gradle.api.internal.artifacts.ivyservice.resolveengine.graph.builder;
 
+import org.gradle.api.artifacts.DependencyArtifactSelector;
 import org.gradle.api.artifacts.ModuleIdentifier;
 import org.gradle.api.artifacts.component.ComponentSelector;
+import org.gradle.api.artifacts.component.ModuleComponentSelector;
 import org.gradle.api.internal.artifacts.ComponentSelectorConverter;
 import org.gradle.api.internal.artifacts.ivyservice.resolveengine.result.ComponentSelectionDescriptorInternal;
 import org.gradle.internal.Describables;
+import org.gradle.internal.component.model.DefaultIvyArtifactName;
 import org.gradle.internal.component.model.DependencyMetadata;
 import org.gradle.internal.component.model.ForcingDependencyMetadata;
+import org.gradle.internal.component.model.IvyArtifactName;
 import org.gradle.internal.component.model.LocalOriginDependencyMetadata;
 import org.gradle.internal.resolve.ModuleVersionResolveException;
 
+import java.util.Collections;
 import java.util.List;
-import java.util.Set;
+import java.util.stream.Collectors;
 
-import static org.gradle.api.internal.artifacts.ivyservice.resolveengine.result.ComponentSelectionReasons.*;
+import static org.gradle.api.internal.artifacts.ivyservice.resolveengine.result.ComponentSelectionReasons.BY_ANCESTOR;
+import static org.gradle.api.internal.artifacts.ivyservice.resolveengine.result.ComponentSelectionReasons.CONSTRAINT;
+import static org.gradle.api.internal.artifacts.ivyservice.resolveengine.result.ComponentSelectionReasons.FORCED;
+import static org.gradle.api.internal.artifacts.ivyservice.resolveengine.result.ComponentSelectionReasons.REQUESTED;
 
 class DependencyState {
     private final ComponentSelector requested;
     private final DependencyMetadata dependency;
     private final List<ComponentSelectionDescriptorInternal> ruleDescriptors;
     private final ComponentSelectorConverter componentSelectorConverter;
+    private final int hashCode;
 
     private ModuleIdentifier moduleIdentifier;
     public ModuleVersionResolveException failure;
+    private boolean reasonsAlreadyAdded;
 
     DependencyState(DependencyMetadata dependency, ComponentSelectorConverter componentSelectorConverter) {
-        this(dependency, dependency.getSelector(), null, componentSelectorConverter);
+        this(dependency, dependency.getSelector(), Collections.emptyList(), componentSelectorConverter);
     }
 
     private DependencyState(DependencyMetadata dependency, ComponentSelector requested, List<ComponentSelectionDescriptorInternal> ruleDescriptors, ComponentSelectorConverter componentSelectorConverter) {
@@ -48,6 +58,13 @@ class DependencyState {
         this.requested = requested;
         this.ruleDescriptors = ruleDescriptors;
         this.componentSelectorConverter = componentSelectorConverter;
+        this.hashCode = computeHashCode();
+    }
+
+    private int computeHashCode() {
+        int hashCode = dependency.hashCode();
+        hashCode = 31 * hashCode + requested.hashCode();
+        return hashCode;
     }
 
     public ComponentSelector getRequested() {
@@ -70,15 +87,38 @@ class DependencyState {
         return new DependencyState(targeted, requested, ruleDescriptors, componentSelectorConverter);
     }
 
-    /**
-     * Descriptor for any rules that modify this DependencyState from the original.
-     */
-    public List<ComponentSelectionDescriptorInternal> getRuleDescriptors() {
-        return ruleDescriptors;
+
+    public DependencyState withTargetAndArtifacts(ComponentSelector target, List<DependencyArtifactSelector> targetSelectors, List<ComponentSelectionDescriptorInternal> ruleDescriptors) {
+        DependencyMetadata targeted = dependency.withTargetAndArtifacts(target, toIvyArtifacts(target, targetSelectors));
+        return new DependencyState(targeted, requested, ruleDescriptors, componentSelectorConverter);
     }
 
+    private List<IvyArtifactName> toIvyArtifacts(ComponentSelector target, List<DependencyArtifactSelector> targetSelectors) {
+        return targetSelectors.stream()
+            .map(avs -> createArtifact(target, avs))
+            .collect(Collectors.toList());
+    }
+
+    private DefaultIvyArtifactName createArtifact(ComponentSelector target, DependencyArtifactSelector avs) {
+        String extension = avs.getExtension() != null ? avs.getExtension() : avs.getType();
+        return new DefaultIvyArtifactName(
+            nameOf(target),
+            avs.getType(),
+            extension,
+            avs.getClassifier()
+        );
+    }
+
+    private static String nameOf(ComponentSelector target) {
+        if (target instanceof ModuleComponentSelector) {
+            return ((ModuleComponentSelector) target).getModule();
+        }
+        throw new IllegalStateException("Substitution with artifacts for something else than a module is not supported");
+    }
+
+
     public boolean isForced() {
-        if (ruleDescriptors != null) {
+        if (!ruleDescriptors.isEmpty()) {
             for (ComponentSelectionDescriptorInternal ruleDescriptor : ruleDescriptors) {
                 if (ruleDescriptor.isEquivalentToForce()) {
                     return true;
@@ -96,19 +136,62 @@ class DependencyState {
         return dependency instanceof LocalOriginDependencyMetadata && ((LocalOriginDependencyMetadata) dependency).isFromLock();
     }
 
-    public void addSelectionReasons(Set<ComponentSelectionDescriptorInternal> reasons) {
+    void addSelectionReasons(List<ComponentSelectionDescriptorInternal> reasons) {
+        if (reasonsAlreadyAdded) {
+            return;
+        }
+        reasonsAlreadyAdded = true;
+        addMainReason(reasons);
+
+        if (!ruleDescriptors.isEmpty()) {
+            addRuleDescriptors(reasons);
+        }
+        if (isDependencyForced()) {
+            maybeAddReason(reasons, FORCED);
+        }
+    }
+
+    private void addRuleDescriptors(List<ComponentSelectionDescriptorInternal> reasons) {
+        for (ComponentSelectionDescriptorInternal descriptor : ruleDescriptors) {
+            maybeAddReason(reasons, descriptor);
+        }
+    }
+
+    private void addMainReason(List<ComponentSelectionDescriptorInternal> reasons) {
+        ComponentSelectionDescriptorInternal dependencyDescriptor;
+        if (reasons.contains(BY_ANCESTOR)) {
+            dependencyDescriptor = BY_ANCESTOR;
+        } else {
+            dependencyDescriptor = dependency.isConstraint() ? CONSTRAINT : REQUESTED;
+        }
         String reason = dependency.getReason();
-        ComponentSelectionDescriptorInternal dependencyDescriptor = dependency.isConstraint() ? CONSTRAINT : REQUESTED;
         if (reason != null) {
             dependencyDescriptor = dependencyDescriptor.withDescription(Describables.of(reason));
         }
-        reasons.add(dependencyDescriptor);
+        maybeAddReason(reasons, dependencyDescriptor);
+    }
 
-        if (ruleDescriptors != null) {
-            reasons.addAll(ruleDescriptors);
+    private static void maybeAddReason(List<ComponentSelectionDescriptorInternal> reasons, ComponentSelectionDescriptorInternal reason) {
+        if (reasons.isEmpty()) {
+            reasons.add(reason);
+        } else if (isNewReason(reasons, reason)) {
+            reasons.add(reason);
         }
-        if (isDependencyForced()) {
-            reasons.add(FORCED);
-        }
+    }
+
+    private static boolean isNewReason(List<ComponentSelectionDescriptorInternal> reasons, ComponentSelectionDescriptorInternal reason) {
+        return (reasons.size() == 1 && !reason.equals(reasons.get(0)))
+            || !reasons.contains(reason);
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        return this == o;
+        // This is a performance optimization, dependency states are deduplicated
+    }
+
+    @Override
+    public int hashCode() {
+        return hashCode;
     }
 }

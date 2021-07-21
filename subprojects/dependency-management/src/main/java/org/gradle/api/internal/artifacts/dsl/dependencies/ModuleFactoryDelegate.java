@@ -22,7 +22,7 @@ import org.codehaus.groovy.runtime.InvokerHelper;
 import org.gradle.api.artifacts.ClientModule;
 import org.gradle.api.artifacts.Dependency;
 import org.gradle.api.artifacts.ModuleDependency;
-import org.gradle.util.ConfigureUtil;
+import org.gradle.util.internal.ConfigureUtil;
 
 public class ModuleFactoryDelegate {
     private final ClientModule clientModule;
@@ -33,6 +33,7 @@ public class ModuleFactoryDelegate {
         this.dependencyFactory = dependencyFactory;
     }
 
+    @SuppressWarnings("rawtypes")
     public void prepareDelegation(Closure configureClosure) {
         ClientModuleConfigureDelegate delegate = new ClientModuleConfigureDelegate(clientModule, this);
         configureClosure.setDelegate(delegate);
@@ -43,6 +44,7 @@ public class ModuleFactoryDelegate {
         dependency(dependencyNotation, null);
     }
 
+    @SuppressWarnings("rawtypes")
     public void dependency(Object dependencyNotation, Closure configureClosure) {
         Dependency dependency = dependencyFactory.createDependency(dependencyNotation);
         clientModule.addDependency((ModuleDependency) dependency);
@@ -55,6 +57,7 @@ public class ModuleFactoryDelegate {
         }
     }
 
+    @SuppressWarnings("rawtypes")
     public void module(Object dependencyNotation, Closure configureClosure) {
         clientModule.addDependency(dependencyFactory.createModule(dependencyNotation, configureClosure));
     }

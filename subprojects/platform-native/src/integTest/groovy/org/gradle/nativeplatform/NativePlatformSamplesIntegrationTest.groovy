@@ -16,6 +16,7 @@
 package org.gradle.nativeplatform
 
 import org.gradle.integtests.fixtures.Sample
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.internal.os.OperatingSystem
 import org.gradle.nativeplatform.fixtures.AbstractInstalledToolChainIntegrationSpec
 import org.gradle.nativeplatform.fixtures.RequiresInstalledToolChain
@@ -25,6 +26,9 @@ import org.gradle.util.TestPrecondition
 import org.junit.Rule
 
 import static org.gradle.nativeplatform.fixtures.ToolChainRequirement.GCC_COMPATIBLE
+import static org.gradle.nativeplatform.fixtures.ToolChainRequirement.SUPPORTS_32
+import static org.gradle.nativeplatform.fixtures.ToolChainRequirement.SUPPORTS_32_AND_64
+import static org.junit.Assume.assumeTrue
 
 @Requires(TestPrecondition.CAN_INSTALL_EXECUTABLE)
 class NativePlatformSamplesIntegrationTest extends AbstractInstalledToolChainIntegrationSpec {
@@ -40,9 +44,10 @@ class NativePlatformSamplesIntegrationTest extends AbstractInstalledToolChainInt
     @Rule public final Sample customCheck = sample(testDirectoryProvider, "custom-check")
 
     private static Sample sample(TestDirectoryProvider testDirectoryProvider, String name) {
-        return new Sample(testDirectoryProvider, "native-binaries/${name}", name)
+        return new Sample(testDirectoryProvider, "native-binaries/${name}/groovy", name)
     }
 
+    @ToBeFixedForConfigurationCache
     def "exe"() {
         given:
         // Need to PATH to be set to find the 'strip' executable
@@ -65,6 +70,7 @@ class NativePlatformSamplesIntegrationTest extends AbstractInstalledToolChainInt
         toolChain.resetEnvironment()
     }
 
+    @ToBeFixedForConfigurationCache
     def "lib"() {
         given:
         sample cppLib
@@ -89,6 +95,7 @@ class NativePlatformSamplesIntegrationTest extends AbstractInstalledToolChainInt
         staticLibrary(cppLib.dir.file("build/libs/main/static/main")).assertExists()
     }
 
+    @ToBeFixedForConfigurationCache
     def flavors() {
         given:
         sample flavors
@@ -123,6 +130,8 @@ class NativePlatformSamplesIntegrationTest extends AbstractInstalledToolChainInt
         installation(flavors.dir.file("build/install/main/french")).exec().out == "Bonjour monde!\n"
     }
 
+    @RequiresInstalledToolChain(SUPPORTS_32_AND_64)
+    @ToBeFixedForConfigurationCache
     def variants() {
         given:
         sample variants
@@ -154,6 +163,7 @@ class NativePlatformSamplesIntegrationTest extends AbstractInstalledToolChainInt
         releaseIA64.assertDoesNotExist()
     }
 
+    @ToBeFixedForConfigurationCache
     def "tool chains"() {
         given:
         sample toolChains
@@ -165,6 +175,7 @@ class NativePlatformSamplesIntegrationTest extends AbstractInstalledToolChainInt
         executable(toolChains.dir.file("build/exe/main/main")).exec().out == "Hello from ${toolChain.typeDisplayName}!\n"
     }
 
+    @ToBeFixedForConfigurationCache
     def multiProject() {
         given:
         sample multiProject
@@ -173,7 +184,7 @@ class NativePlatformSamplesIntegrationTest extends AbstractInstalledToolChainInt
         run "installMainExecutable"
 
         then:
-        ":exe:mainExecutable" in executedTasks
+        executed(":exe:mainExecutable")
 
         and:
         sharedLibrary(multiProject.dir.file("lib/build/libs/main/shared/main")).assertExists()
@@ -182,7 +193,10 @@ class NativePlatformSamplesIntegrationTest extends AbstractInstalledToolChainInt
     }
 
     @RequiresInstalledToolChain(GCC_COMPATIBLE)
+    @ToBeFixedForConfigurationCache
     def "target platforms"() {
+        assumeTrue(toolchainUnderTest.meets(SUPPORTS_32))
+
         given:
         sample targetPlatforms
 
@@ -215,6 +229,7 @@ model {
         executable(targetPlatforms.dir.file("build/exe/main/sparc/main")).exec().out == "Hello from ${toolChain.typeDisplayName}!\n"
     }
 
+    @ToBeFixedForConfigurationCache
     def prebuilt() {
         given:
         inDirectory(prebuilt.dir.file("3rd-party-lib/util"))
@@ -238,6 +253,11 @@ Util build type: RELEASE
 """
     }
 
+    @ToBeFixedForConfigurationCache
+    @RequiresInstalledToolChain(GCC_COMPATIBLE) // latest clang seems to have issues:
+    // /usr/bin/ld: /home/tcagent1/agent/work/e67123fb5b9af0ac/subprojects/platform-native/build/tmp/test files/NativePlatf.Test/89jnk/sourceset-variant/build/objs/main/mainExecutablePlatformLinux/3aor34f2b62iejk2eq3fn5ikr/platform-linux.o:(.data+0x0): multiple definition of `platform_name';
+    // /home/tcagent1/agent/work/e67123fb5b9af0ac/subprojects/platform-native/build/tmp/test files/NativePlatf.Test/89jnk/sourceset-variant/build/objs/main/mainC/dey3oyi6y0a9luwot945rff8j/main.o:(.bss+0x0): first defined here
+    //clang: error: linker command failed with exit code 1 (use -v to see invocation)
     def sourcesetvariant() {
         given:
         sample sourcesetVariant

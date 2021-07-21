@@ -21,12 +21,12 @@ import net.rubygrapefruit.platform.WindowsRegistry
 import org.gradle.internal.logging.text.DiagnosticsVisitor
 import org.gradle.internal.os.OperatingSystem
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
-import org.gradle.util.VersionNumber
+import org.gradle.util.internal.VersionNumber
 import org.junit.Rule
 import spock.lang.Specification
 
 class LegacyWindowsSdkLocatorTest extends Specification {
-    @Rule TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
+    @Rule TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider(getClass())
     final WindowsRegistry windowsRegistry = Stub(WindowsRegistry)
     final OperatingSystem operatingSystem = Stub(OperatingSystem) {
         isWindows() >> true

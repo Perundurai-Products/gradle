@@ -26,10 +26,10 @@ import org.gradle.caching.BuildCacheException;
 import org.gradle.caching.BuildCacheKey;
 import org.gradle.caching.BuildCacheService;
 import org.gradle.internal.UncheckedException;
-import org.gradle.internal.resource.local.FileAccessTracker;
+import org.gradle.internal.file.FileAccessTracker;
 import org.gradle.internal.resource.local.LocallyAvailableResource;
 import org.gradle.internal.resource.local.PathKeyFileStore;
-import org.gradle.util.GFileUtils;
+import org.gradle.util.internal.GFileUtils;
 
 import javax.annotation.Nonnull;
 import java.io.File;

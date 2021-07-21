@@ -16,30 +16,18 @@
 
 package org.gradle.internal.hash
 
-import com.google.common.io.Files
-import org.gradle.api.UncheckedIOException
-import org.gradle.api.file.FileTreeElement
-import org.gradle.internal.file.FileMetadataSnapshot
-
 class TestFileHasher implements FileHasher {
     @Override
     HashCode hash(File file) {
-        HashingOutputStream hashingStream = Hashing.primitiveStreamHasher();
         try {
-            Files.copy(file, hashingStream);
+            return Hashing.hashFile(file)
         } catch (IOException e) {
-            throw new UncheckedIOException(e);
+            throw new UncheckedIOException(e)
         }
-        return hashingStream.hash();
     }
 
     @Override
-    HashCode hash(FileTreeElement fileDetails) {
-        return hash(fileDetails.file)
-    }
-
-    @Override
-    HashCode hash(File file, FileMetadataSnapshot fileDetails) {
+    HashCode hash(File file, long length, long lastModified) {
         return hash(file)
     }
 }

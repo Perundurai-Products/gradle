@@ -20,7 +20,6 @@ import com.google.common.base.Objects;
 import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableList;
 import org.gradle.api.artifacts.ModuleVersionIdentifier;
-import org.gradle.api.artifacts.component.ComponentIdentifier;
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier;
 import org.gradle.api.internal.attributes.AttributeContainerInternal;
 import org.gradle.api.internal.attributes.AttributesSchemaInternal;
@@ -29,32 +28,27 @@ import org.gradle.api.internal.attributes.ImmutableAttributesFactory;
 import org.gradle.api.internal.project.ProjectInternal;
 import org.gradle.internal.component.model.ConfigurationMetadata;
 import org.gradle.internal.component.model.DefaultIvyArtifactName;
+import org.gradle.internal.component.model.ImmutableModuleSources;
 import org.gradle.internal.component.model.IvyArtifactName;
-import org.gradle.internal.component.model.ModuleSource;
-import org.gradle.internal.hash.HashValue;
+import org.gradle.internal.component.model.ModuleSources;
 
 import javax.annotation.Nullable;
 import java.util.List;
 
 abstract class AbstractModuleComponentResolveMetadata implements ModuleComponentResolveMetadata {
-
-    private static final PreferJavaRuntimeVariant SCHEMA_DEFAULT_JAVA_VARIANTS = PreferJavaRuntimeVariant.schema();
-    private static ImmutableAttributes extractAttributes(AbstractMutableModuleComponentResolveMetadata metadata) {
-        return ((AttributeContainerInternal) metadata.getAttributes()).asImmutable();
-    }
-
     private final ImmutableAttributesFactory attributesFactory;
     private final ModuleVersionIdentifier moduleVersionIdentifier;
     private final ModuleComponentIdentifier componentIdentifier;
     private final boolean changing;
     private final boolean missing;
     private final List<String> statusScheme;
-    @Nullable
-    private final ModuleSource moduleSource;
+    private final ImmutableModuleSources moduleSources;
     private final ImmutableList<? extends ComponentVariant> variants;
-    private final HashValue originalContentHash;
     private final ImmutableAttributes attributes;
-    private final ImmutableList<? extends ComponentIdentifier> platformOwners;
+    private final ImmutableList<? extends VirtualComponentIdentifier> platformOwners;
+    private final AttributesSchemaInternal schema;
+    private final VariantDerivationStrategy variantDerivationStrategy;
+    private final boolean externalVariant;
 
     public AbstractModuleComponentResolveMetadata(AbstractMutableModuleComponentResolveMetadata metadata) {
         this.componentIdentifier = metadata.getId();
@@ -62,12 +56,14 @@ abstract class AbstractModuleComponentResolveMetadata implements ModuleComponent
         changing = metadata.isChanging();
         missing = metadata.isMissing();
         statusScheme = metadata.getStatusScheme();
-        moduleSource = metadata.getSource();
+        moduleSources = ImmutableModuleSources.of(metadata.getSources());
         attributesFactory = metadata.getAttributesFactory();
-        originalContentHash = metadata.getContentHash();
+        schema = metadata.getAttributesSchema();
         attributes = extractAttributes(metadata);
         variants = metadata.getVariants();
-        platformOwners = metadata.getPlatformOwners() == null ? ImmutableList.<ComponentIdentifier>of() : ImmutableList.copyOf(metadata.getPlatformOwners());
+        platformOwners = metadata.getPlatformOwners() == null ? ImmutableList.of() : ImmutableList.copyOf(metadata.getPlatformOwners());
+        variantDerivationStrategy = metadata.getVariantDerivationStrategy();
+        externalVariant = metadata.isExternalVariant();
     }
 
     public AbstractModuleComponentResolveMetadata(AbstractModuleComponentResolveMetadata metadata, ImmutableList<? extends ComponentVariant> variants) {
@@ -76,12 +72,14 @@ abstract class AbstractModuleComponentResolveMetadata implements ModuleComponent
         changing = metadata.isChanging();
         missing = metadata.isMissing();
         statusScheme = metadata.getStatusScheme();
-        moduleSource = metadata.getSource();
+        moduleSources = ImmutableModuleSources.of(metadata.getSources());
         attributesFactory = metadata.getAttributesFactory();
-        originalContentHash = metadata.getOriginalContentHash();
+        schema = metadata.getAttributesSchema();
         attributes = metadata.getAttributes();
         this.variants = variants;
         this.platformOwners = metadata.getPlatformOwners();
+        this.variantDerivationStrategy = metadata.getVariantDerivationStrategy();
+        this.externalVariant = metadata.isExternalVariant();
     }
 
     public AbstractModuleComponentResolveMetadata(AbstractModuleComponentResolveMetadata metadata) {
@@ -90,26 +88,34 @@ abstract class AbstractModuleComponentResolveMetadata implements ModuleComponent
         changing = metadata.changing;
         missing = metadata.missing;
         statusScheme = metadata.statusScheme;
-        moduleSource = metadata.moduleSource;
+        moduleSources = metadata.moduleSources;
         attributesFactory = metadata.attributesFactory;
-        originalContentHash = metadata.originalContentHash;
+        schema = metadata.schema;
         attributes = metadata.attributes;
         variants = metadata.variants;
         platformOwners = metadata.platformOwners;
+        variantDerivationStrategy = metadata.getVariantDerivationStrategy();
+        externalVariant = metadata.isExternalVariant();
     }
 
-    public AbstractModuleComponentResolveMetadata(AbstractModuleComponentResolveMetadata metadata, ModuleSource source) {
+    public AbstractModuleComponentResolveMetadata(AbstractModuleComponentResolveMetadata metadata, ModuleSources sources, VariantDerivationStrategy derivationStrategy) {
         this.componentIdentifier = metadata.componentIdentifier;
         this.moduleVersionIdentifier = metadata.moduleVersionIdentifier;
         changing = metadata.changing;
         missing = metadata.missing;
         statusScheme = metadata.statusScheme;
         attributesFactory = metadata.attributesFactory;
-        originalContentHash = metadata.originalContentHash;
+        schema = metadata.schema;
         attributes = metadata.attributes;
         variants = metadata.variants;
         platformOwners = metadata.platformOwners;
-        moduleSource = source;
+        moduleSources = ImmutableModuleSources.of(sources);
+        variantDerivationStrategy = derivationStrategy;
+        externalVariant = metadata.externalVariant;
+    }
+
+    private static ImmutableAttributes extractAttributes(AbstractMutableModuleComponentResolveMetadata metadata) {
+        return ((AttributeContainerInternal) metadata.getAttributes()).asImmutable();
     }
 
     @Override
@@ -143,8 +149,8 @@ abstract class AbstractModuleComponentResolveMetadata implements ModuleComponent
     }
 
     @Override
-    public ModuleSource getSource() {
-        return moduleSource;
+    public ModuleSources getSources() {
+        return moduleSources;
     }
 
     @Override
@@ -155,17 +161,12 @@ abstract class AbstractModuleComponentResolveMetadata implements ModuleComponent
     @Nullable
     @Override
     public AttributesSchemaInternal getAttributesSchema() {
-        return SCHEMA_DEFAULT_JAVA_VARIANTS;
+        return schema;
     }
 
     @Override
     public ImmutableAttributes getAttributes() {
         return attributes;
-    }
-
-    @Override
-    public HashValue getOriginalContentHash() {
-        return originalContentHash;
     }
 
     @Override
@@ -193,8 +194,18 @@ abstract class AbstractModuleComponentResolveMetadata implements ModuleComponent
     }
 
     @Override
-    public ImmutableList<? extends ComponentIdentifier> getPlatformOwners() {
+    public ImmutableList<? extends VirtualComponentIdentifier> getPlatformOwners() {
         return platformOwners;
+    }
+
+    @Override
+    public VariantDerivationStrategy getVariantDerivationStrategy() {
+        return variantDerivationStrategy;
+    }
+
+    @Override
+    public boolean isExternalVariant() {
+        return externalVariant;
     }
 
     @Override
@@ -209,13 +220,13 @@ abstract class AbstractModuleComponentResolveMetadata implements ModuleComponent
         AbstractModuleComponentResolveMetadata that = (AbstractModuleComponentResolveMetadata) o;
         return changing == that.changing
             && missing == that.missing
+            && externalVariant == that.externalVariant
             && Objects.equal(moduleVersionIdentifier, that.moduleVersionIdentifier)
             && Objects.equal(componentIdentifier, that.componentIdentifier)
             && Objects.equal(statusScheme, that.statusScheme)
-            && Objects.equal(moduleSource, that.moduleSource)
+            && Objects.equal(moduleSources, that.moduleSources)
             && Objects.equal(attributes, that.attributes)
-            && Objects.equal(variants, that.variants)
-            && Objects.equal(originalContentHash, that.originalContentHash);
+            && Objects.equal(variants, that.variants);
     }
 
     @Override
@@ -225,10 +236,10 @@ abstract class AbstractModuleComponentResolveMetadata implements ModuleComponent
             componentIdentifier,
             changing,
             missing,
+            externalVariant,
             statusScheme,
-            moduleSource,
+            moduleSources,
             attributes,
-            variants,
-            originalContentHash);
+            variants);
     }
 }

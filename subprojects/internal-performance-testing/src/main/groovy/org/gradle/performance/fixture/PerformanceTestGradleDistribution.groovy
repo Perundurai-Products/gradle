@@ -23,7 +23,7 @@ import org.gradle.integtests.fixtures.executer.IntegrationTestBuildContext
 import org.gradle.integtests.fixtures.executer.NoDaemonGradleExecuter
 import org.gradle.test.fixtures.file.TestDirectoryProvider
 import org.gradle.test.fixtures.file.TestFile
-import org.gradle.util.GFileUtils
+import org.gradle.util.internal.GFileUtils
 
 /**
  * Gradle's performance slightly depends on the length of the Gradle home path. This
@@ -45,7 +45,7 @@ class PerformanceTestGradleDistribution implements GradleDistribution {
 
     TestFile getGradleHomeDir() {
         if (!gradleHome) {
-            gradleHome = new TestFile(testDir, "gradle-home")
+            gradleHome = new TestFile(testDir.parentFile, testDir.name + "-gradle-home")
             GFileUtils.copyDirectory(delegate.gradleHomeDir, gradleHome)
             gradleHome.file("bin/gradle").setExecutable(true, true)
         }

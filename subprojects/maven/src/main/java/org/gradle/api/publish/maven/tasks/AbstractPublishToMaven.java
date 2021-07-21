@@ -19,33 +19,35 @@ package org.gradle.api.publish.maven.tasks;
 import org.gradle.api.DefaultTask;
 import org.gradle.api.InvalidUserDataException;
 import org.gradle.api.file.FileCollection;
-import org.gradle.api.internal.artifacts.mvnsettings.LocalMavenRepositoryLocator;
 import org.gradle.api.publish.maven.MavenPublication;
 import org.gradle.api.publish.maven.internal.publication.MavenPublicationInternal;
+import org.gradle.api.publish.maven.internal.publisher.MavenDuplicatePublicationTracker;
+import org.gradle.api.publish.maven.internal.publisher.MavenPublishers;
 import org.gradle.api.tasks.Internal;
 import org.gradle.api.tasks.PathSensitivity;
-import org.gradle.internal.Factory;
-import org.gradle.internal.logging.LoggingManagerInternal;
+import org.gradle.internal.serialization.Transient;
+import org.gradle.work.DisableCachingByDefault;
 
 import javax.inject.Inject;
 import java.util.concurrent.Callable;
+
+import static org.gradle.internal.serialization.Transient.varOf;
 
 /**
  * Base class for tasks that publish a {@link org.gradle.api.publish.maven.MavenPublication}.
  *
  * @since 2.4
  */
+@DisableCachingByDefault(because = "Abstract super-class, not to be instantiated directly")
 public abstract class AbstractPublishToMaven extends DefaultTask {
 
-    private MavenPublicationInternal publication;
+    private final Transient.Var<MavenPublicationInternal> publication = varOf();
 
     public AbstractPublishToMaven() {
         // Allow the publication to participate in incremental build
-        getInputs().files(new Callable<FileCollection>() {
-            public FileCollection call() throws Exception {
-                MavenPublicationInternal publicationInternal = getPublicationInternal();
-                return publicationInternal == null ? null : publicationInternal.getPublishableArtifacts().getFiles();
-            }
+        getInputs().files((Callable<FileCollection>) () -> {
+            MavenPublicationInternal publicationInternal = getPublicationInternal();
+            return publicationInternal == null ? null : publicationInternal.getPublishableArtifacts().getFiles();
         })
             .withPropertyName("publication.publishableFiles")
             .withPathSensitivity(PathSensitivity.NAME_ONLY);
@@ -57,7 +59,6 @@ public abstract class AbstractPublishToMaven extends DefaultTask {
         // Dependencies: Can't think of a case here
     }
 
-
     /**
      * The publication to be published.
      *
@@ -65,7 +66,7 @@ public abstract class AbstractPublishToMaven extends DefaultTask {
      */
     @Internal
     public MavenPublication getPublication() {
-        return publication;
+        return publication.get();
     }
 
     /**
@@ -74,7 +75,7 @@ public abstract class AbstractPublishToMaven extends DefaultTask {
      * @param publication The publication to be published
      */
     public void setPublication(MavenPublication publication) {
-        this.publication = toPublicationInternal(publication);
+        this.publication.set(toPublicationInternal(publication));
     }
 
     @Internal
@@ -89,23 +90,22 @@ public abstract class AbstractPublishToMaven extends DefaultTask {
             return (MavenPublicationInternal) publication;
         } else {
             throw new InvalidUserDataException(
-                    String.format(
-                            "publication objects must implement the '%s' interface, implementation '%s' does not",
-                            MavenPublicationInternal.class.getName(),
-                            publication.getClass().getName()
-                    )
+                String.format(
+                    "publication objects must implement the '%s' interface, implementation '%s' does not",
+                    MavenPublicationInternal.class.getName(),
+                    publication.getClass().getName()
+                )
             );
         }
     }
 
-    @Deprecated
     @Inject
-    protected Factory<LoggingManagerInternal> getLoggingManagerFactory() {
+    protected MavenPublishers getMavenPublishers() {
         throw new UnsupportedOperationException();
     }
 
     @Inject
-    protected LocalMavenRepositoryLocator getMavenRepositoryLocator() {
+    protected MavenDuplicatePublicationTracker getDuplicatePublicationTracker() {
         throw new UnsupportedOperationException();
     }
 

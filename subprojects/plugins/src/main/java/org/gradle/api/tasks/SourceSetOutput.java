@@ -16,7 +16,6 @@
 
 package org.gradle.api.tasks;
 
-import org.gradle.api.Incubating;
 import org.gradle.api.file.FileCollection;
 
 import javax.annotation.Nullable;
@@ -29,21 +28,23 @@ import java.util.Map;
  * Provides output information of the source set. Allows configuring the default output dirs and specify additional output dirs.
  *
  * <pre class='autoTested'>
- * apply plugin: 'java'
+ * plugins {
+ *     id 'java'
+ * }
  *
  * sourceSets {
  *   main {
  *     //if you truly want to override the defaults:
  *     output.resourcesDir = file('out/bin')
  *     // Compiled Java classes should use this directory
- *     java.outputDir = file('out/bin')
+ *     java.destinationDirectory.set(file('out/bin'))
  *   }
  * }
  * </pre>
  *
  * Working with generated resources.
  * <p>
- * In general, we recommend generating resources into folders different than the regular resourcesDir and classesDir.
+ * In general, we recommend generating resources into folders different than the regular resourcesDir and classesDirs.
  * Usually, it makes the build easier to understand and maintain. Also it gives some additional benefits
  * because other Gradle plugins can take advantage of the output dirs 'registered' in the SourceSet.output.
  * For example: Java plugin will use those dirs in calculating class paths and for jarring the content;
@@ -52,7 +53,9 @@ import java.util.Map;
  * An example how to work with generated resources:
  *
  * <pre class='autoTested'>
- * apply plugin: 'java'
+ * plugins {
+ *     id 'java'
+ * }
  *
  * def generatedResources = "$buildDir/generated-resources/main"
  *
@@ -66,6 +69,7 @@ import java.util.Map;
  *
  * //a task that generates the resources:
  * task generateMyResources {
+ *   outputs.dir generatedResources
  *   doLast {
  *     def generated = new File(generatedResources, "myGeneratedResource.properties")
  *     generated.text = "message=Stay happy!"
@@ -90,15 +94,6 @@ public interface SourceSetOutput extends FileCollection {
      * @since 4.0
      */
     FileCollection getClassesDirs();
-
-    /**
-     * Source set uses the legacy layout (single classes directory for the entire source set).
-     * @return true if the source set has a single classes directory
-     * @since 4.0
-     * @deprecated This method always returns false starting from Gradle 5.0.
-     */
-    @Deprecated
-    boolean isLegacyLayout();
 
     /**
      * Returns the output directory for resources
@@ -164,6 +159,5 @@ public interface SourceSetOutput extends FileCollection {
      * @return The generated sources directories. Never returns null.
      * @since 5.2
      */
-    @Incubating
     FileCollection getGeneratedSourcesDirs();
 }

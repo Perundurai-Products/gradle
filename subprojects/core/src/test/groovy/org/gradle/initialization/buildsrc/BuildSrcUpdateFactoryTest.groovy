@@ -17,16 +17,17 @@
 package org.gradle.initialization.buildsrc
 
 import org.gradle.internal.classpath.CachedClasspathTransformer
-import org.gradle.internal.invocation.BuildController
+import org.gradle.internal.buildtree.BuildTreeLifecycleController
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.junit.Rule
 import spock.lang.Specification
 
 class BuildSrcUpdateFactoryTest extends Specification {
 
-    @Rule TestNameTestDirectoryProvider temp = new TestNameTestDirectoryProvider()
+    @Rule
+    TestNameTestDirectoryProvider temp = new TestNameTestDirectoryProvider(getClass())
 
-    def launcher = Stub(BuildController)
+    def launcher = Stub(BuildTreeLifecycleController)
     def listener = Stub(BuildSrcBuildListenerFactory.Listener)
     def listenerFactory = Mock(BuildSrcBuildListenerFactory)
     def cachedClasspathTransformer = Mock(CachedClasspathTransformer)
@@ -40,7 +41,7 @@ class BuildSrcUpdateFactoryTest extends Specification {
 
         then:
         1 * listenerFactory.create() >> listener
-        1 * cachedClasspathTransformer.transform(_) >> { arguments ->
+        1 * cachedClasspathTransformer.transform(_, _) >> { arguments ->
             arguments[0]
         }
 

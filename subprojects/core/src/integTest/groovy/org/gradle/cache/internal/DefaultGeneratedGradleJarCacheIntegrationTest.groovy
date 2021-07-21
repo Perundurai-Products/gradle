@@ -26,7 +26,7 @@ import org.gradle.test.fixtures.ConcurrentTestUtil
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.gradle.testfixtures.internal.NativeServicesTestFixture
 import org.gradle.util.GradleVersion
-import org.gradle.util.RedirectStdOutAndErr
+import org.gradle.util.internal.RedirectStdOutAndErr
 import org.junit.Rule
 import spock.lang.Specification
 
@@ -40,7 +40,7 @@ class DefaultGeneratedGradleJarCacheIntegrationTest extends Specification {
     private final static long JAR_GENERATION_TIME_MS = 2000L
 
     @Rule
-    TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
+    TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider(getClass())
 
     @Rule
     RedirectStdOutAndErr stdout = new RedirectStdOutAndErr()

@@ -16,9 +16,7 @@
 
 package org.gradle.language.cpp.internal
 
-import org.gradle.api.artifacts.Configuration
-import org.gradle.api.internal.CollectionCallbackActionDecorator
-import org.gradle.api.internal.file.FileCollectionInternal
+
 import org.gradle.language.cpp.CppPlatform
 import org.gradle.nativeplatform.MachineArchitecture
 import org.gradle.nativeplatform.OperatingSystemFamily
@@ -32,12 +30,12 @@ import spock.lang.Specification
 
 class DefaultCppLibraryTest extends Specification {
     @Rule
-    TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
+    TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider(getClass())
     def project = TestUtil.createRootProject(tmpDir.testDirectory)
     DefaultCppLibrary library
 
     def setup() {
-        library = new DefaultCppLibrary("main", project.objects, project.fileOperations, project.configurations, CollectionCallbackActionDecorator.NOOP)
+        library = project.objects.newInstance(DefaultCppLibrary, "main")
     }
 
     def "has display name"() {
@@ -175,8 +173,8 @@ class DefaultCppLibraryTest extends Specification {
     def "uses component name to determine header directories"() {
         def h1 = tmpDir.createFile("src/a/public")
         def h2 = tmpDir.createFile("src/b/public")
-        def c1 = new DefaultCppLibrary("a", project.objects, project.fileOperations, project.configurations, CollectionCallbackActionDecorator.NOOP)
-        def c2 = new DefaultCppLibrary("b", project.objects, project.fileOperations, project.configurations, CollectionCallbackActionDecorator.NOOP)
+        def c1 = project.objects.newInstance(DefaultCppLibrary, "a")
+        def c2 = project.objects.newInstance(DefaultCppLibrary, "b")
 
         expect:
         c1.publicHeaderDirs.files == [h1] as Set
@@ -184,6 +182,7 @@ class DefaultCppLibraryTest extends Specification {
     }
 
     private NativeVariantIdentity getIdentity() {
+        // TODO Check that TargetMachine from NativeVariantIdentity is the same as the one from CppPlatform
         return Stub(NativeVariantIdentity) {
             getName() >> "debug"
             getTargetMachine() >> targetMachine(OperatingSystemFamily.WINDOWS, MachineArchitecture.X86_64)
@@ -198,8 +197,5 @@ class DefaultCppLibraryTest extends Specification {
             getOperatingSystemFamily() >> objectFactory.named(OperatingSystemFamily.class, os)
             getArchitecture() >> objectFactory.named(MachineArchitecture.class, arch)
         }
-    }
-
-    interface TestConfiguration extends Configuration, FileCollectionInternal {
     }
 }

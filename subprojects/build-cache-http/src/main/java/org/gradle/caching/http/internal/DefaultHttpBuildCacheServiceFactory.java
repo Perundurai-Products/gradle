@@ -18,15 +18,20 @@ package org.gradle.caching.http.internal;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.gradle.api.GradleException;
+import org.gradle.api.InvalidUserCodeException;
 import org.gradle.authentication.Authentication;
 import org.gradle.caching.BuildCacheService;
 import org.gradle.caching.BuildCacheServiceFactory;
 import org.gradle.caching.http.HttpBuildCache;
 import org.gradle.caching.http.HttpBuildCacheCredentials;
 import org.gradle.internal.authentication.DefaultBasicAuthentication;
+import org.gradle.internal.deprecation.Documentation;
 import org.gradle.internal.resource.transport.http.DefaultHttpSettings;
 import org.gradle.internal.resource.transport.http.HttpClientHelper;
+import org.gradle.internal.resource.transport.http.HttpSettings;
 import org.gradle.internal.resource.transport.http.SslContextFactory;
+import org.gradle.internal.verifier.HttpRedirectVerifier;
+import org.gradle.internal.verifier.HttpRedirectVerifierFactory;
 
 import javax.inject.Inject;
 import java.net.URI;
@@ -39,11 +44,17 @@ import java.util.Collections;
  */
 public class DefaultHttpBuildCacheServiceFactory implements BuildCacheServiceFactory<HttpBuildCache> {
 
+    private static final int MAX_REDIRECTS = Integer.getInteger("org.gradle.cache.http.max-redirects", 10);
+
     private final SslContextFactory sslContextFactory;
+    private final HttpBuildCacheRequestCustomizer requestCustomizer;
+    private final HttpClientHelper.Factory httpClientHelperFactory;
 
     @Inject
-    public DefaultHttpBuildCacheServiceFactory(SslContextFactory sslContextFactory) {
+    public DefaultHttpBuildCacheServiceFactory(SslContextFactory sslContextFactory, HttpBuildCacheRequestCustomizer requestCustomizer, HttpClientHelper.Factory httpClientHelperFactory) {
         this.sslContextFactory = sslContextFactory;
+        this.requestCustomizer = requestCustomizer;
+        this.httpClientHelperFactory = httpClientHelperFactory;
     }
 
     @Override
@@ -63,27 +74,55 @@ public class DefaultHttpBuildCacheServiceFactory implements BuildCacheServiceFac
         if (credentialsPresent(credentials)) {
             DefaultBasicAuthentication basicAuthentication = new DefaultBasicAuthentication("basic");
             basicAuthentication.setCredentials(credentials);
+            basicAuthentication.addHost(url.getHost(), url.getPort());
             authentications = Collections.<Authentication>singleton(basicAuthentication);
         }
 
         boolean authenticated = !authentications.isEmpty();
         boolean allowUntrustedServer = configuration.isAllowUntrustedServer();
+        boolean allowInsecureProtocol = configuration.isAllowInsecureProtocol();
+        boolean useExpectContinue = configuration.isUseExpectContinue();
+
+        HttpRedirectVerifier redirectVerifier =
+            createRedirectVerifier(noUserInfoUrl, allowInsecureProtocol);
+
         DefaultHttpSettings.Builder builder = DefaultHttpSettings.builder()
             .withAuthenticationSettings(authentications)
-            .followRedirects(false);
+            .maxRedirects(MAX_REDIRECTS)
+            .withRedirectMethodHandlingStrategy(HttpSettings.RedirectMethodHandlingStrategy.ALLOW_FOLLOW_FOR_MUTATIONS)
+            .withRedirectVerifier(redirectVerifier);
         if (allowUntrustedServer) {
             builder.allowUntrustedConnections();
         } else {
             builder.withSslContextFactory(sslContextFactory);
         }
-        HttpClientHelper httpClientHelper = new HttpClientHelper(builder.build());
+        HttpClientHelper httpClientHelper = httpClientHelperFactory.create(builder.build());
 
         describer.type("HTTP")
             .config("url", noUserInfoUrl.toASCIIString())
             .config("authenticated", Boolean.toString(authenticated))
-            .config("allowUntrustedServer", Boolean.toString(allowUntrustedServer));
+            .config("allowUntrustedServer", Boolean.toString(allowUntrustedServer))
+            .config("allowInsecureProtocol", Boolean.toString(allowInsecureProtocol))
+            .config("useExpectContinue", Boolean.toString(useExpectContinue));
 
-        return new HttpBuildCacheService(httpClientHelper, noUserInfoUrl);
+        return new HttpBuildCacheService(httpClientHelper, noUserInfoUrl, requestCustomizer, useExpectContinue);
+    }
+
+    private HttpRedirectVerifier createRedirectVerifier(URI url, boolean allowInsecureProtocol) {
+        return HttpRedirectVerifierFactory
+            .create(
+                url,
+                allowInsecureProtocol,
+                () -> {
+                    String message =
+                        "Using insecure protocols with remote build cache, without explicit opt-in, is unsupported. " +
+                            "Switch remote build cache to a secure protocol (like HTTPS) or allow insecure protocols. " +
+                            Documentation.dslReference(HttpBuildCache.class, "allowInsecureProtocol").consultDocumentationMessage();
+                    throw new InvalidUserCodeException(message);
+                },
+                redirect -> {
+                    throw new IllegalStateException("Redirects are unsupported by the the build cache.");
+                });
     }
 
     @VisibleForTesting

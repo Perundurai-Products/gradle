@@ -21,7 +21,7 @@ import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 abstract class BaseGradleImplDepsIntegrationTest extends AbstractIntegrationSpec {
 
     def setup() {
-        executer.requireGradleDistribution()
+        executer.requireOwnGradleUserHomeDir()
     }
 
     static String applyJavaPlugin() {
@@ -43,7 +43,7 @@ abstract class BaseGradleImplDepsIntegrationTest extends AbstractIntegrationSpec
     static String gradleApiDependency() {
         """
             dependencies {
-                compile gradleApi()
+                implementation gradleApi()
             }
         """
     }
@@ -51,7 +51,7 @@ abstract class BaseGradleImplDepsIntegrationTest extends AbstractIntegrationSpec
     static String testKitDependency() {
         """
             dependencies {
-                testCompile gradleTestKit()
+                testImplementation gradleTestKit()
             }
         """
     }
@@ -59,7 +59,7 @@ abstract class BaseGradleImplDepsIntegrationTest extends AbstractIntegrationSpec
     static String junitDependency() {
         """
             dependencies {
-                testCompile 'junit:junit:4.12'
+                testImplementation 'junit:junit:4.13.1'
             }
         """
     }
@@ -67,8 +67,8 @@ abstract class BaseGradleImplDepsIntegrationTest extends AbstractIntegrationSpec
     static String spockDependency() {
         """
             dependencies {
-                testCompile('org.spockframework:spock-core:1.2-groovy-2.5') {
-                    exclude module: 'groovy-all'
+                testImplementation('org.spockframework:spock-core:2.0-groovy-3.0') {
+                    exclude group: 'org.codehaus.groovy'
                 }
             }
         """
@@ -91,7 +91,7 @@ abstract class BaseGradleImplDepsIntegrationTest extends AbstractIntegrationSpec
     static String testablePluginProject(String appliedLanguagePlugin = applyGroovyPlugin()) {
         StringBuilder buildFile = new StringBuilder()
         buildFile <<= appliedLanguagePlugin
-        buildFile <<= jcenterRepository()
+        buildFile <<= mavenCentralRepository()
         buildFile <<= gradleApiDependency()
         buildFile <<= testKitDependency()
         buildFile <<= junitDependency()

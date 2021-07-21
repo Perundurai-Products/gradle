@@ -324,7 +324,7 @@ class SFTPServer extends ServerWithExpectations implements RepositoryServer {
         @Override
         protected void sendHandle(Buffer buffer, int id, String handle) throws IOException {
             super.sendHandle(buffer, id, handle)
-            handleCreatedByRequest[id] = handle
+            SFTPServer.this.handleCreatedByRequest[id] = handle
         }
 
         private String commandMessage(Buffer buffer, int type) {
@@ -382,7 +382,7 @@ class SFTPServer extends ServerWithExpectations implements RepositoryServer {
         boolean matches(Buffer buffer, int type, int id) {
             if (!run && type == expectedType) {
                 int originalBufferPosition = buffer.rpos()
-                run = bufferMatches(buffer, id)
+                atomicRun.set(bufferMatches(buffer, id))
                 buffer.rpos(originalBufferPosition)
                 return run
             } else {
@@ -418,7 +418,7 @@ class SFTPServer extends ServerWithExpectations implements RepositoryServer {
         protected boolean bufferMatches(Buffer buffer, int id) {
             def matched = buffer.getString() == path
             if (matched) {
-                openingRequestIdForPath[path] = id
+                SFTPServer.this.openingRequestIdForPath[path] = id
             }
             return matched
         }
@@ -432,8 +432,8 @@ class SFTPServer extends ServerWithExpectations implements RepositoryServer {
 
         protected boolean bufferMatches(Buffer buffer, int id) {
             def handle = buffer.getString()
-            def openingRequestId = openingRequestIdForPath[path]
-            return openingRequestId && handle == handleCreatedByRequest[openingRequestId]
+            def openingRequestId = SFTPServer.this.openingRequestIdForPath[path]
+            return openingRequestId && handle == SFTPServer.this.handleCreatedByRequest[openingRequestId]
         }
     }
 
@@ -490,8 +490,8 @@ class SFTPServer extends ServerWithExpectations implements RepositoryServer {
             if (type == expectedType) {
                 int originalBufferPosition = buffer.rpos()
                 def handle = buffer.getString()
-                def openingRequestId = openingRequestIdForPath[path]
-                def matched = openingRequestId && handle == handleCreatedByRequest[openingRequestId]
+                def openingRequestId = SFTPServer.this.openingRequestIdForPath[path]
+                def matched = openingRequestId && handle == SFTPServer.this.handleCreatedByRequest[openingRequestId]
                 buffer.rpos(originalBufferPosition)
                 return matched
             } else {

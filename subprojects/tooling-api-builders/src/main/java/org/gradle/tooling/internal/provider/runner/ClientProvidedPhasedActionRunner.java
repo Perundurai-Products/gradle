@@ -16,115 +16,77 @@
 
 package org.gradle.tooling.internal.provider.runner;
 
-import org.gradle.BuildResult;
-import org.gradle.api.internal.GradleInternal;
-import org.gradle.api.invocation.Gradle;
 import org.gradle.initialization.BuildEventConsumer;
-import org.gradle.internal.InternalBuildAdapter;
+import org.gradle.internal.buildtree.BuildActionRunner;
+import org.gradle.internal.buildtree.BuildTreeLifecycleController;
 import org.gradle.internal.invocation.BuildAction;
-import org.gradle.internal.invocation.BuildActionRunner;
-import org.gradle.internal.invocation.BuildController;
-import org.gradle.tooling.internal.protocol.InternalBuildActionFailureException;
-import org.gradle.tooling.internal.protocol.InternalBuildActionVersion2;
 import org.gradle.tooling.internal.protocol.InternalPhasedAction;
 import org.gradle.tooling.internal.protocol.PhasedActionResult;
-import org.gradle.tooling.internal.provider.ClientProvidedPhasedAction;
 import org.gradle.tooling.internal.provider.PhasedBuildActionResult;
+import org.gradle.tooling.internal.provider.action.ClientProvidedPhasedAction;
 import org.gradle.tooling.internal.provider.serialization.PayloadSerializer;
 import org.gradle.tooling.internal.provider.serialization.SerializedPayload;
 
 import javax.annotation.Nullable;
 
-public class ClientProvidedPhasedActionRunner implements BuildActionRunner {
+public class ClientProvidedPhasedActionRunner extends AbstractClientProvidedBuildActionRunner implements BuildActionRunner {
+    private final PayloadSerializer payloadSerializer;
+    private final BuildEventConsumer buildEventConsumer;
+
+    public ClientProvidedPhasedActionRunner(BuildControllerFactory buildControllerFactory,
+                                            PayloadSerializer payloadSerializer,
+                                            BuildEventConsumer buildEventConsumer) {
+        super(buildControllerFactory, payloadSerializer);
+        this.payloadSerializer = payloadSerializer;
+        this.buildEventConsumer = buildEventConsumer;
+    }
+
     @Override
-    public Result run(BuildAction action, final BuildController buildController) {
+    public Result run(BuildAction action, BuildTreeLifecycleController buildController) {
         if (!(action instanceof ClientProvidedPhasedAction)) {
             return Result.nothing();
         }
 
-        GradleInternal gradle = buildController.getGradle();
-
-        gradle.getStartParameter().setConfigureOnDemand(false);
-
         ClientProvidedPhasedAction clientProvidedPhasedAction = (ClientProvidedPhasedAction) action;
-        PayloadSerializer payloadSerializer = getPayloadSerializer(gradle);
-
         InternalPhasedAction phasedAction = (InternalPhasedAction) payloadSerializer.deserialize(clientProvidedPhasedAction.getPhasedAction());
-        ActionRunningListener listener = new ActionRunningListener(phasedAction, gradle);
 
-        Throwable buildFailure = null;
-        RuntimeException clientFailure = null;
-        try {
-            gradle.addBuildListener(listener);
-            if (clientProvidedPhasedAction.isRunTasks()) {
-                buildController.run();
-            } else {
-                buildController.configure();
-            }
-        } catch (RuntimeException e) {
-            buildFailure = e;
-            clientFailure = e;
-        }
-        if (listener.actionFailure != null) {
-            clientFailure = new InternalBuildActionFailureException(listener.actionFailure);
-        }
-
-        if (buildFailure != null) {
-            return Result.failed(buildFailure, clientFailure);
-        }
-        return Result.of(null);
+        return runClientAction(new ClientActionImpl(phasedAction, action), buildController);
     }
 
-    private PayloadSerializer getPayloadSerializer(GradleInternal gradle) {
-        return gradle.getServices().get(PayloadSerializer.class);
-    }
-
-    private BuildEventConsumer getBuildEventConsumer(GradleInternal gradle) {
-        return gradle.getServices().get(BuildEventConsumer.class);
-    }
-
-    private class ActionRunningListener extends InternalBuildAdapter {
+    private class ClientActionImpl implements ClientAction {
         private final InternalPhasedAction phasedAction;
-        private final GradleInternal gradle;
-        Throwable actionFailure;
+        private final BuildAction action;
 
-        ActionRunningListener(InternalPhasedAction phasedAction, GradleInternal gradle) {
+        public ClientActionImpl(InternalPhasedAction phasedAction, BuildAction action) {
             this.phasedAction = phasedAction;
-            this.gradle = gradle;
+            this.action = action;
         }
 
         @Override
-        public void projectsEvaluated(Gradle gradle) {
-            run(phasedAction.getProjectsLoadedAction(), PhasedActionResult.Phase.PROJECTS_LOADED);
+        public Object getProjectsEvaluatedAction() {
+            return phasedAction.getProjectsLoadedAction();
         }
 
         @Override
-        public void buildFinished(BuildResult result) {
-            if (result.getFailure() == null) {
-                run(phasedAction.getBuildFinishedAction(), PhasedActionResult.Phase.BUILD_FINISHED);
-            }
+        public Object getBuildFinishedAction() {
+            return phasedAction.getBuildFinishedAction();
         }
 
-        private void run(@Nullable InternalBuildActionVersion2<?> action, PhasedActionResult.Phase phase) {
-            if (action != null) {
-                SerializedPayload result = runAction(action, gradle);
-                PhasedBuildActionResult res = new PhasedBuildActionResult(result, phase);
-                getBuildEventConsumer(gradle).dispatch(res);
-            }
+        @Override
+        public void collectActionResult(SerializedPayload serializedResult, PhasedActionResult.Phase phase) {
+            PhasedBuildActionResult res = new PhasedBuildActionResult(serializedResult, phase);
+            buildEventConsumer.dispatch(res);
         }
 
-        private <T> SerializedPayload runAction(InternalBuildActionVersion2<T> action, GradleInternal gradle) {
-            DefaultBuildController internalBuildController = new DefaultBuildController(gradle);
-            T model;
-            try {
-                model = action.execute(internalBuildController);
-            } catch (RuntimeException e) {
-                actionFailure = e;
-                throw e;
-            }
+        @Nullable
+        @Override
+        public SerializedPayload getResult() {
+            return null;
+        }
 
-            PayloadSerializer payloadSerializer = getPayloadSerializer(gradle);
-            return payloadSerializer.serialize(model);
+        @Override
+        public boolean isRunTasks() {
+            return action.isRunTasks();
         }
     }
 }

@@ -19,8 +19,11 @@ package org.gradle.initialization
 import org.gradle.StartParameter
 import org.gradle.internal.SystemProperties
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
+import org.gradle.util.Requires
 import org.gradle.util.SetSystemProperties
+import org.gradle.util.TestPrecondition
 import org.junit.Rule
+import spock.lang.Issue
 import spock.lang.Specification
 
 import static org.gradle.internal.FileUtils.canonicalize
@@ -28,12 +31,13 @@ import static org.gradle.internal.FileUtils.canonicalize
 class BuildLayoutParametersTest extends Specification {
 
     @Rule SetSystemProperties props = new SetSystemProperties()
-    @Rule TestNameTestDirectoryProvider temp = new TestNameTestDirectoryProvider()
+    @Rule TestNameTestDirectoryProvider temp = new TestNameTestDirectoryProvider(getClass())
 
+    @Requires(TestPrecondition.NOT_EC2_AGENT)
+    @Issue('https://github.com/gradle/gradle-private/issues/2876')
     def "has reasonable defaults"() {
         expect:
         def params = new BuildLayoutParameters()
-        params.searchUpwards
         params.gradleUserHomeDir == canonicalize(BuildLayoutParameters.DEFAULT_GRADLE_USER_HOME)
         params.currentDir == canonicalize(SystemProperties.instance.getCurrentDir())
         params.projectDir == null

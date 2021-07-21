@@ -16,12 +16,14 @@
 
 package org.gradle.internal.logging.text;
 
-import org.apache.commons.lang.StringUtils;
-import org.gradle.util.TextUtil;
+import org.gradle.api.internal.GeneratedSubclasses;
+import org.gradle.util.internal.TextUtil;
 
 import javax.annotation.Nullable;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Method;
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
 
 /**
  * Constructs a tree of diagnostic messages.
@@ -30,6 +32,7 @@ public class TreeFormatter implements DiagnosticsVisitor {
     private final StringBuilder buffer = new StringBuilder();
     private final AbstractStyledTextOutput original;
     private Node current;
+    private Prefixer prefixer = new DefaultPrefixer();
 
     public TreeFormatter() {
         this.original = new AbstractStyledTextOutput() {
@@ -49,6 +52,7 @@ public class TreeFormatter implements DiagnosticsVisitor {
     /**
      * Starts a new node with the given text.
      */
+    @Override
     public TreeFormatter node(String text) {
         if (current.state == State.TraverseChildren) {
             // First child node
@@ -70,61 +74,105 @@ public class TreeFormatter implements DiagnosticsVisitor {
         return this;
     }
 
+    public void blankLine() {
+        node("");
+    }
+
     /**
      * Starts a new node with the given type name.
      */
-    public void node(Class<?> type) {
+    public TreeFormatter node(Class<?> type) {
         // Implementation is currently dumb, can be made smarter
-        node(StringUtils.capitalize(type.toString()));
+        if (type.isInterface()) {
+            node("Interface ");
+        } else {
+            node("Class ");
+        }
+        appendType(type);
+        return this;
     }
 
     /**
      * Appends text to the current node.
      */
-    public void append(CharSequence text) {
+    public TreeFormatter append(CharSequence text) {
         if (current.state == State.CollectValue) {
             current.value.append(text);
             if (current.valueWritten) {
                 original.append(text);
             }
         } else {
-            throw new IllegalStateException("Cannot append text to node.");
+            throw new IllegalStateException("Cannot append text as there is no current node.");
         }
+        return this;
     }
 
     /**
      * Appends a type name to the current node.
      */
-    public void appendType(Class<?> type) {
+    public TreeFormatter appendType(Type type) {
         // Implementation is currently dumb, can be made smarter
-        append(type.toString());
+        if (type instanceof Class) {
+            Class<?> classType = GeneratedSubclasses.unpack((Class<?>) type);
+            appendOuter(classType);
+            append(classType.getSimpleName());
+        } else if (type instanceof ParameterizedType) {
+            ParameterizedType parameterizedType = (ParameterizedType) type;
+            appendType(parameterizedType.getRawType());
+            append("<");
+            Type[] typeArguments = parameterizedType.getActualTypeArguments();
+            for (int i = 0; i < typeArguments.length; i++) {
+                Type typeArgument = typeArguments[i];
+                if (i > 0) {
+                    append(", ");
+                }
+                appendType(typeArgument);
+            }
+            append(">");
+        } else {
+            append(type.toString());
+        }
+        return this;
+    }
+
+    private void appendOuter(Class<?> type) {
+        Class<?> outer = type.getEnclosingClass();
+        if (outer != null) {
+            appendOuter(outer);
+            append(outer.getSimpleName());
+            append(".");
+        }
     }
 
     /**
      * Appends an annotation name to the current node.
      */
-    public void appendAnnotation(Class<? extends Annotation> type) {
+    public TreeFormatter appendAnnotation(Class<? extends Annotation> type) {
         append("@" + type.getSimpleName());
+        return this;
     }
 
     /**
      * Appends a method name to the current node.
      */
-    public void appendMethod(Method method) {
+    public TreeFormatter appendMethod(Method method) {
         // Implementation is currently dumb, can be made smarter
         append(method.getDeclaringClass().getSimpleName());
         append(".");
         append(method.getName());
         append("()");
+        return this;
     }
 
     /**
      * Appends some user provided value to the current node.
      */
-    public void appendValue(@Nullable Object value) {
+    public TreeFormatter appendValue(@Nullable Object value) {
         // Implementation is currently dumb, can be made smarter
         if (value == null) {
             append("null");
+        } else if (value.getClass().isArray()) {
+            appendValues((Object[]) value);
         } else if (value instanceof String) {
             append("'");
             append(value.toString());
@@ -132,24 +180,33 @@ public class TreeFormatter implements DiagnosticsVisitor {
         } else {
             append(value.toString());
         }
+        return this;
     }
 
     /**
      * Appends some user provided values to the current node.
      */
-    public void appendValues(Object[] values) {
+    public <T> TreeFormatter appendValues(T[] values) {
         // Implementation is currently dumb, can be made smarter
         append("[");
         for (int i = 0; i < values.length; i++) {
-            Object value = values[i];
+            T value = values[i];
             if (i > 0) {
                 append(", ");
             }
             appendValue(value);
         }
         append("]");
+        return this;
     }
 
+    public TreeFormatter startNumberedChildren() {
+        startChildren();
+        prefixer = new NumberedPrefixer();
+        return this;
+    }
+
+    @Override
     public TreeFormatter startChildren() {
         if (current.state == State.CollectValue) {
             current.state = State.TraverseChildren;
@@ -159,6 +216,7 @@ public class TreeFormatter implements DiagnosticsVisitor {
         return this;
     }
 
+    @Override
     public TreeFormatter endChildren() {
         if (current.parent == null) {
             throw new IllegalStateException("Not visiting any node.");
@@ -175,6 +233,7 @@ public class TreeFormatter implements DiagnosticsVisitor {
         }
         current.state = State.Done;
         current = current.parent;
+        prefixer = new DefaultPrefixer();
         return this;
     }
 
@@ -186,7 +245,7 @@ public class TreeFormatter implements DiagnosticsVisitor {
         StyledTextOutput output = new LinePrefixingStyledTextOutput(original, node.prefix, false);
         if (!node.valueWritten) {
             output.append(node.parent.prefix);
-            output.append("  - ");
+            output.append(prefixer.nextPrefix());
             output.append(node.value);
         }
 
@@ -272,8 +331,8 @@ public class TreeFormatter implements DiagnosticsVisitor {
                 return Separator.NewLine;
             }
             if (firstChild.nextSibling == null
-                    && firstChild.firstChild == null
-                    && value.length() + firstChild.value.length() < 60) {
+                && firstChild.firstChild == null
+                && value.length() + firstChild.value.length() < 60) {
                 // A single leaf node as child and total text is not too long, collapse
                 if (trailing == ':') {
                     return Separator.Empty;
@@ -289,6 +348,26 @@ public class TreeFormatter implements DiagnosticsVisitor {
 
         boolean isTopLevelNode() {
             return parent.parent == null;
+        }
+    }
+
+    private interface Prefixer {
+        String nextPrefix();
+    }
+
+    private static class DefaultPrefixer implements Prefixer {
+        @Override
+        public String nextPrefix() {
+            return "  - ";
+        }
+    }
+
+    private static class NumberedPrefixer implements Prefixer {
+        private int cur = 0;
+
+        @Override
+        public String nextPrefix() {
+            return "  " + (++cur) + ". ";
         }
     }
 }

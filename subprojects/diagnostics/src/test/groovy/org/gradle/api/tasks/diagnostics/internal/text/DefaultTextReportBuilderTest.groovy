@@ -20,7 +20,7 @@ import org.gradle.api.internal.file.FileResolver
 import org.gradle.internal.SystemProperties
 import org.gradle.internal.logging.text.TestStyledTextOutput
 import org.gradle.reporting.ReportRenderer
-import org.gradle.util.TextUtil
+import org.gradle.util.internal.TextUtil
 import spock.lang.Specification
 
 class DefaultTextReportBuilderTest extends Specification {
@@ -262,7 +262,7 @@ Things:
 
     def "formats item with file value"() {
         def file = new File("thing")
-        fileResolver.resolveAsRelativePath(file) >> "path/thing"
+        fileResolver.resolveForDisplay(file) >> "path/thing"
 
         when:
         builder.item(file)
@@ -283,7 +283,7 @@ Things:
 
     def "formats item with title and file value"() {
         def file = new File("thing")
-        fileResolver.resolveAsRelativePath(file) >> "path/thing"
+        fileResolver.resolveForDisplay(file) >> "path/thing"
 
         when:
         builder.item("the title", file)

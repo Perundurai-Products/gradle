@@ -20,34 +20,41 @@ import org.apache.commons.io.FilenameUtils
 import org.apache.tools.zip.ZipEntry
 import org.apache.tools.zip.ZipOutputStream
 import org.gradle.internal.IoActions
-import org.gradle.internal.hash.HashUtil
+import org.gradle.internal.hash.HashFunction
+import org.gradle.internal.hash.Hashing
 import org.gradle.test.fixtures.file.TestFile
+import org.gradle.util.internal.TextUtil
 
 abstract class AbstractModule implements Module {
     /**
      Last modified date for writeZipped to be able to create zipFiles with identical hashes
      */
-    private static Date lmd = new Date();
+    private static Date lmd = new Date(0)
 
     private boolean hasModuleMetadata
+    private Closure<?> onEveryFile
 
     Map<String, String> attributes = [:]
 
     /**
      * @param cl A closure that is passed a writer to use to generate the content.
      */
-    protected void publish(TestFile file, Closure cl) {
+    protected void publish(TestFile file, @DelegatesTo(value=Writer, strategy=Closure.DELEGATE_FIRST) Closure cl, byte[] content = null) {
         file.parentFile.mkdirs()
-        def hashBefore = file.exists() ? getHash(file, "sha1") : null
+        def hashBefore = file.exists() ? Hashing.sha1().hashFile(file) : null
         def tmpFile = file.parentFile.file("${file.name}.tmp")
 
-        if(isJarFile(file)) {
+        if (content) {
+            tmpFile.bytes = content
+        } else if (isJarFile(file)) {
             writeZipped(tmpFile, cl)
         } else {
             writeContents(tmpFile, cl)
+            // normalize line endings
+            tmpFile.setText(TextUtil.normaliseLineSeparators(tmpFile.getText("utf-8")), "utf-8")
         }
 
-        def hashAfter = getHash(tmpFile, "sha1")
+        def hashAfter = Hashing.sha1().hashFile(tmpFile)
         if (hashAfter == hashBefore) {
             // Already published
             return
@@ -79,41 +86,63 @@ abstract class AbstractModule implements Module {
         }
     }
 
-    private boolean isJarFile(TestFile testFile) {
+    protected boolean isJarFile(TestFile testFile) {
         return FilenameUtils.getExtension(testFile.getName()) == 'jar'
     }
 
     protected abstract onPublish(TestFile file)
 
+    protected void postPublish(TestFile file) {
+        if (onEveryFile) {
+            Closure cl = onEveryFile.clone()
+            cl.delegate = file
+            cl.resolveStrategy = Closure.DELEGATE_FIRST
+            cl(file)
+        }
+    }
+
     TestFile getSha1File(TestFile file) {
-        getHashFile(file, "sha1")
+        getHashFile(file, Hashing.sha1())
     }
 
     TestFile sha1File(TestFile file) {
-        hashFile(file, "sha1", 40)
+        hashFile(file, Hashing.sha1())
+    }
+
+    TestFile getSha256File(TestFile file) {
+        getHashFile(file, Hashing.sha256())
+    }
+
+    TestFile sha256File(TestFile file) {
+        hashFile(file, Hashing.sha256())
+    }
+
+    TestFile getSha512File(TestFile file) {
+        getHashFile(file, Hashing.sha512())
+    }
+
+    TestFile sha512File(TestFile file) {
+        hashFile(file, Hashing.sha512())
     }
 
     TestFile getMd5File(TestFile file) {
-        getHashFile(file, "md5")
+        getHashFile(file, Hashing.md5())
     }
 
     TestFile md5File(TestFile file) {
-        hashFile(file, "md5", 32)
+        hashFile(file, Hashing.md5())
     }
 
-    private TestFile hashFile(TestFile file, String algorithm, int len) {
-        def hashFile = getHashFile(file, algorithm)
-        def hash = getHash(file, algorithm)
-        hashFile.text = String.format("%0${len}x", hash)
+    private TestFile hashFile(TestFile file, HashFunction hashFunction) {
+        def hashFile = getHashFile(file, hashFunction)
+        def hash = hashFunction.hashFile(file)
+        hashFile.text = hash.toZeroPaddedString(hashFunction.hexDigits)
         return hashFile
     }
 
-    private TestFile getHashFile(TestFile file, String algorithm) {
+    private TestFile getHashFile(TestFile file, HashFunction hashFunction) {
+        def algorithm = hashFunction.algorithm.toLowerCase(Locale.ROOT).replaceAll('-', '')
         file.parentFile.file("${file.name}.${algorithm}")
-    }
-
-    protected BigInteger getHash(TestFile file, String algorithm) {
-        HashUtil.createHash(file, algorithm.toUpperCase()).asBigInteger()
     }
 
     Module withModuleMetadata() {
@@ -123,5 +152,11 @@ abstract class AbstractModule implements Module {
 
     boolean isHasModuleMetadata() {
         hasModuleMetadata
+    }
+
+    @Override
+    Module withSignature(@DelegatesTo(value = File, strategy = Closure.DELEGATE_FIRST) Closure<?> signer) {
+        onEveryFile = signer
+        this
     }
 }

@@ -19,16 +19,25 @@ package org.gradle.plugins.ide.eclipse.model;
 import com.google.common.base.Preconditions;
 import groovy.lang.Closure;
 import org.gradle.api.Action;
+import org.gradle.api.Incubating;
+import org.gradle.api.Task;
 import org.gradle.api.artifacts.Configuration;
+import org.gradle.api.internal.file.FileTreeInternal;
 import org.gradle.api.internal.project.ProjectInternal;
 import org.gradle.api.internal.project.ProjectStateRegistry;
+import org.gradle.api.internal.tasks.compile.CompilationSourceDirs;
+import org.gradle.api.plugins.JavaPlugin;
+import org.gradle.api.provider.Property;
 import org.gradle.api.tasks.SourceSet;
+import org.gradle.api.tasks.compile.JavaCompile;
+import org.gradle.internal.jvm.JavaModuleDetector;
 import org.gradle.internal.xml.XmlTransformer;
 import org.gradle.plugins.ide.api.XmlFileContentMerger;
 import org.gradle.plugins.ide.eclipse.model.internal.ClasspathFactory;
 import org.gradle.plugins.ide.eclipse.model.internal.FileReferenceFactory;
 import org.gradle.plugins.ide.internal.IdeArtifactRegistry;
-import org.gradle.util.ConfigureUtil;
+import org.gradle.plugins.ide.internal.resolver.DefaultGradleApiSourcesResolver;
+import org.gradle.util.internal.ConfigureUtil;
 
 import javax.inject.Inject;
 import java.io.File;
@@ -50,8 +59,10 @@ import java.util.Set;
  * if the defaults don't match your needs.
  *
  * <pre class='autoTested'>
- * apply plugin: 'java'
- * apply plugin: 'eclipse'
+ * plugins {
+ *     id 'java'
+ *     id 'eclipse'
+ * }
  *
  * configurations {
  *   provided
@@ -78,6 +89,9 @@ import java.util.Set;
  *     //default settings for downloading sources and Javadoc:
  *     downloadSources = true
  *     downloadJavadoc = false
+ *
+ *     //if you want to expose test classes to dependent projects
+ *     containsTestFixtures = true
  *   }
  * }
  * </pre>
@@ -91,8 +105,10 @@ import java.util.Set;
  * Examples of advanced configuration:
  *
  * <pre class='autoTested'>
- * apply plugin: 'java'
- * apply plugin: 'eclipse'
+ * plugins {
+ *     id 'java'
+ *     id 'eclipse'
+ * }
  *
  * eclipse {
  *   classpath {
@@ -144,9 +160,12 @@ public class EclipseClasspath {
 
     private final org.gradle.api.Project project;
 
+    private final Property<Boolean> containsTestFixtures;
+
     @Inject
     public EclipseClasspath(org.gradle.api.Project project) {
         this.project = project;
+        this.containsTestFixtures = project.getObjects().property(Boolean.class).convention(false);
     }
 
     /**
@@ -322,10 +341,22 @@ public class EclipseClasspath {
         ProjectInternal projectInternal = (ProjectInternal) this.project;
         IdeArtifactRegistry ideArtifactRegistry = projectInternal.getServices().get(IdeArtifactRegistry.class);
         ProjectStateRegistry projectRegistry = projectInternal.getServices().get(ProjectStateRegistry.class);
-        ClasspathFactory classpathFactory = new ClasspathFactory(this, ideArtifactRegistry, projectRegistry);
+        boolean inferModulePath = false;
+        Task javaCompileTask = project.getTasks().findByName(JavaPlugin.COMPILE_JAVA_TASK_NAME);
+        if (javaCompileTask instanceof JavaCompile) {
+            JavaCompile javaCompile = (JavaCompile) javaCompileTask;
+            inferModulePath = javaCompile.getModularity().getInferModulePath().get();
+            if (inferModulePath) {
+                List<File> sourceRoots = CompilationSourceDirs.inferSourceRoots((FileTreeInternal) javaCompile.getSource());
+                inferModulePath = JavaModuleDetector.isModuleSource(true, sourceRoots);
+            }
+        }
+        ClasspathFactory classpathFactory = new ClasspathFactory(this, ideArtifactRegistry, projectRegistry, new DefaultGradleApiSourcesResolver(project), inferModulePath);
         return classpathFactory.createEntries();
     }
 
+
+    @SuppressWarnings("unchecked")
     public void mergeXmlClasspath(Classpath xmlClasspath) {
         file.getBeforeMerged().execute(xmlClasspath);
         List<ClasspathEntry> entries = resolveDependencies();
@@ -339,5 +370,16 @@ public class EclipseClasspath {
             referenceFactory.addPathVariable(entry.getKey(), entry.getValue());
         }
         return referenceFactory;
+    }
+
+    /**
+     * Returns {@code true} if the classpath contains test fixture classes that should be visible
+     * through incoming project dependencies.
+     *
+     * @since 6.8
+     */
+    @Incubating
+    public Property<Boolean> getContainsTestFixtures() {
+        return containsTestFixtures;
     }
 }

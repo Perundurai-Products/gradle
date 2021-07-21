@@ -16,21 +16,17 @@
 
 package org.gradle.api.internal.provider;
 
-import org.gradle.api.provider.Property;
+import org.gradle.internal.state.ModelObject;
+import org.gradle.internal.state.OwnerAware;
 
-public interface PropertyInternal<T> extends ProviderInternal<T> {
+public interface PropertyInternal<T> extends ProviderInternal<T>, HasConfigurableValueInternal, OwnerAware {
     /**
      * Sets the property's value from some arbitrary object. Used from the Groovy DSL.
      */
     void setFromAnyValue(Object object);
 
     /**
-     * Same semantics as {@link Property#finalizeValue()}. Finalizes the value of this property eagerly.
+     * Associates this property with the task that produces its value.
      */
-    void finalizeValue();
-
-    /**
-     * Same semantics as {@link Property#finalizeValue()}, but finalizes the value of this property lazily and ignores changes to this property instead of failing. Generates a deprecation warning on changes.
-     */
-    void finalizeValueOnReadAndWarnAboutChanges();
+    void attachProducer(ModelObject owner);
 }

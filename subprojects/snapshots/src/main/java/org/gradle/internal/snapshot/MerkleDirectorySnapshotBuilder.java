@@ -16,6 +16,7 @@
 
 package org.gradle.internal.snapshot;
 
+import org.gradle.internal.file.FileMetadata.AccessType;
 import org.gradle.internal.hash.HashCode;
 import org.gradle.internal.hash.Hasher;
 import org.gradle.internal.hash.Hashing;
@@ -23,16 +24,15 @@ import org.gradle.internal.hash.Hashing;
 import javax.annotation.Nullable;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Deque;
 import java.util.List;
 
-public class MerkleDirectorySnapshotBuilder implements FileSystemSnapshotVisitor {
+import static org.gradle.internal.snapshot.MerkleDirectorySnapshotBuilder.EmptyDirectoryHandlingStrategy.EXCLUDE_EMPTY_DIRS;
+
+public class MerkleDirectorySnapshotBuilder {
     private static final HashCode DIR_SIGNATURE = Hashing.signature("DIR");
 
-    private final RelativePathSegmentsTracker relativePathSegmentsTracker = new RelativePathSegmentsTracker();
-    private final Deque<List<FileSystemLocationSnapshot>> levelHolder = new ArrayDeque<List<FileSystemLocationSnapshot>>();
-    private final Deque<String> directoryAbsolutePaths = new ArrayDeque<String>();
+    private final Deque<Directory> directoryStack = new ArrayDeque<>();
     private final boolean sortingRequired;
     private FileSystemLocationSnapshot result;
 
@@ -48,72 +48,85 @@ public class MerkleDirectorySnapshotBuilder implements FileSystemSnapshotVisitor
         this.sortingRequired = sortingRequired;
     }
 
-    public boolean preVisitDirectory(String absolutePath, String name) {
-        relativePathSegmentsTracker.enter(name);
-        levelHolder.addLast(new ArrayList<FileSystemLocationSnapshot>());
-        directoryAbsolutePaths.addLast(absolutePath);
-        return true;
+    public void enterDirectory(DirectorySnapshot directorySnapshot, EmptyDirectoryHandlingStrategy emptyDirectoryHandlingStrategy) {
+        enterDirectory(directorySnapshot.getAccessType(), directorySnapshot.getAbsolutePath(), directorySnapshot.getName(), emptyDirectoryHandlingStrategy);
     }
 
-    @Override
-    public boolean preVisitDirectory(DirectorySnapshot directorySnapshot) {
-        return preVisitDirectory(directorySnapshot.getAbsolutePath(), directorySnapshot.getName());
+    public void enterDirectory(AccessType accessType, String absolutePath, String name, EmptyDirectoryHandlingStrategy emptyDirectoryHandlingStrategy) {
+        directoryStack.addLast(new Directory(accessType, absolutePath, name, emptyDirectoryHandlingStrategy));
     }
 
-    @Override
-    public void visit(FileSystemLocationSnapshot fileSnapshot) {
-        if (relativePathSegmentsTracker.isRoot()) {
-            result = fileSnapshot;
-        } else {
-            levelHolder.peekLast().add(fileSnapshot);
-        }
+    public void visitLeafElement(FileSystemLeafSnapshot snapshot) {
+        collectEntry(snapshot);
     }
 
-    @Override
-    public void postVisitDirectory(DirectorySnapshot directorySnapshot) {
-        postVisitDirectory(true);
+    public void visitDirectory(DirectorySnapshot directorySnapshot) {
+        collectEntry(directorySnapshot);
     }
 
-    public void postVisitDirectory() {
-        postVisitDirectory(true);
-    }
-
-    public boolean postVisitDirectory(boolean includeEmpty) {
-        String name = relativePathSegmentsTracker.leave();
-        List<FileSystemLocationSnapshot> children = levelHolder.removeLast();
-        String absolutePath = directoryAbsolutePaths.removeLast();
-        if (children.isEmpty() && !includeEmpty) {
+    public boolean leaveDirectory() {
+        FileSystemLocationSnapshot snapshot = directoryStack.removeLast().fold();
+        if (snapshot == null) {
             return false;
         }
-        if (sortingRequired) {
-            Collections.sort(children, FileSystemLocationSnapshot.BY_NAME);
-        }
-        Hasher hasher = Hashing.newHasher();
-        hasher.putHash(DIR_SIGNATURE);
-        for (FileSystemLocationSnapshot child : children) {
-            hasher.putString(child.getName());
-            hasher.putHash(child.getHash());
-        }
-        DirectorySnapshot directorySnapshot = new DirectorySnapshot(absolutePath, name, children, hasher.hash());
-        List<FileSystemLocationSnapshot> siblings = levelHolder.peekLast();
-        if (siblings != null) {
-            siblings.add(directorySnapshot);
-        } else {
-            result = directorySnapshot;
-        }
+        collectEntry(snapshot);
         return true;
     }
 
-    public boolean isRoot() {
-        return relativePathSegmentsTracker.isRoot();
-    }
-
-    public Iterable<String> getRelativePath() {
-        return relativePathSegmentsTracker.getRelativePath();
+    private void collectEntry(FileSystemLocationSnapshot snapshot) {
+        Directory directory = directoryStack.peekLast();
+        if (directory != null) {
+            directory.collectEntry(snapshot);
+        } else {
+            assert result == null;
+            result = snapshot;
+        }
     }
 
     @Nullable
     public FileSystemLocationSnapshot getResult() {
         return result;
+    }
+
+    public enum EmptyDirectoryHandlingStrategy {
+        INCLUDE_EMPTY_DIRS,
+        EXCLUDE_EMPTY_DIRS
+    }
+
+    private class Directory {
+        private final AccessType accessType;
+        private final String absolutePath;
+        private final String name;
+        private final List<FileSystemLocationSnapshot> children;
+        private final EmptyDirectoryHandlingStrategy emptyDirectoryHandlingStrategy;
+
+        public Directory(AccessType accessType, String absolutePath, String name, EmptyDirectoryHandlingStrategy emptyDirectoryHandlingStrategy) {
+            this.accessType = accessType;
+            this.absolutePath = absolutePath;
+            this.name = name;
+            this.children = new ArrayList<>();
+            this.emptyDirectoryHandlingStrategy = emptyDirectoryHandlingStrategy;
+        }
+
+        public void collectEntry(FileSystemLocationSnapshot snapshot) {
+            children.add(snapshot);
+        }
+
+        @Nullable
+        public DirectorySnapshot fold() {
+            if (emptyDirectoryHandlingStrategy == EXCLUDE_EMPTY_DIRS && children.isEmpty()) {
+                return null;
+            }
+            if (sortingRequired) {
+                children.sort(FileSystemLocationSnapshot.BY_NAME);
+            }
+            Hasher hasher = Hashing.newHasher();
+            hasher.putHash(DIR_SIGNATURE);
+            for (FileSystemLocationSnapshot child : children) {
+                hasher.putString(child.getName());
+                hasher.putHash(child.getHash());
+            }
+            return new DirectorySnapshot(absolutePath, name, accessType, hasher.hash(), children);
+        }
     }
 }

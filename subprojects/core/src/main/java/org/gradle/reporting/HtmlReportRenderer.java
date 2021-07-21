@@ -20,7 +20,7 @@ import org.gradle.api.UncheckedIOException;
 import org.gradle.internal.html.SimpleHtmlWriter;
 import org.gradle.internal.ErroringAction;
 import org.gradle.internal.IoActions;
-import org.gradle.util.GFileUtils;
+import org.gradle.util.internal.GFileUtils;
 
 import java.io.File;
 import java.io.IOException;
@@ -109,10 +109,12 @@ public class HtmlReportRenderer {
             return resource;
         }
 
+        @Override
         public void requireResource(URL source) {
             addResource(source);
         }
 
+        @Override
         public <T> void renderHtmlPage(final String name, final T model, final ReportRenderer<T, HtmlPageBuilder<SimpleHtmlWriter>> renderer) {
             File outputFile = new File(outputDirectory, name);
             IoActions.writeTextFile(outputFile, "utf-8", new ErroringAction<Writer>() {
@@ -126,6 +128,7 @@ public class HtmlReportRenderer {
             });
         }
 
+        @Override
         public <T> void renderRawHtmlPage(final String name, final T model, final ReportRenderer<T, HtmlPageBuilder<Writer>> renderer) {
             File outputFile = new File(outputDirectory, name);
             IoActions.writeTextFile(outputFile, "utf-8", new ErroringAction<Writer>() {
@@ -159,15 +162,18 @@ public class HtmlReportRenderer {
                 this.output = output;
             }
 
+            @Override
             public String requireResource(URL source) {
                 Resource resource = addResource(source);
                 return prefix + resource.path;
             }
 
+            @Override
             public String formatDate(Date date) {
                 return DateFormat.getDateTimeInstance().format(date);
             }
 
+            @Override
             public D getOutput() {
                 return output;
             }

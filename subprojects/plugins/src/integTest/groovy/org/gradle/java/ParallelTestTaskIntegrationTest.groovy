@@ -21,7 +21,7 @@ import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 import org.gradle.integtests.fixtures.AvailableJavaHomes
 import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
 import org.gradle.internal.jvm.JavaInfo
-import org.gradle.util.TextUtil
+import org.gradle.util.internal.TextUtil
 import org.junit.Assume
 import spock.lang.IgnoreIf
 
@@ -30,7 +30,7 @@ import java.util.concurrent.CountDownLatch
 @IgnoreIf({ !GradleContextualExecuter.isParallel() })
 class ParallelTestTaskIntegrationTest extends AbstractIntegrationSpec {
     String getVersion() {
-        return "1.6"
+        return "1.7"
     }
 
     JavaVersion getJavaVersion() {
@@ -57,7 +57,7 @@ subprojects {
     targetCompatibility = ${version}
 
     ${mavenCentralRepository()}
-    dependencies { testCompile 'junit:junit:4.12' }
+    dependencies { testImplementation 'junit:junit:4.13' }
 
     test {
         doFirst {

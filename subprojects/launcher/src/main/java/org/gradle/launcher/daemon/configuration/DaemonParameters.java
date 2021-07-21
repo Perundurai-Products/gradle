@@ -17,12 +17,12 @@ package org.gradle.launcher.daemon.configuration;
 
 import com.google.common.collect.ImmutableList;
 import org.gradle.api.JavaVersion;
-import org.gradle.api.internal.file.IdentityFileResolver;
-import org.gradle.initialization.BuildLayoutParameters;
-import org.gradle.internal.jvm.GroovyJpmsWorkarounds;
+import org.gradle.api.internal.file.FileCollectionFactory;
 import org.gradle.internal.jvm.JavaInfo;
+import org.gradle.internal.jvm.JpmsConfiguration;
 import org.gradle.internal.jvm.Jvm;
-import org.gradle.util.GUtil;
+import org.gradle.launcher.configuration.BuildLayoutResult;
+import org.gradle.util.internal.GUtil;
 
 import javax.annotation.Nullable;
 import java.io.File;
@@ -35,8 +35,8 @@ public class DaemonParameters {
     static final int DEFAULT_IDLE_TIMEOUT = 3 * 60 * 60 * 1000;
     public static final int DEFAULT_PERIODIC_CHECK_INTERVAL_MILLIS = 10 * 1000;
 
-    public static final List<String> DEFAULT_JVM_ARGS = ImmutableList.of("-Xmx512m", "-XX:MaxPermSize=256m", "-XX:+HeapDumpOnOutOfMemoryError");
-    public static final List<String> DEFAULT_JVM_8_ARGS = ImmutableList.of("-Xmx512m", "-XX:MaxMetaspaceSize=256m", "-XX:+HeapDumpOnOutOfMemoryError");
+    public static final List<String> DEFAULT_JVM_ARGS = ImmutableList.of("-Xmx512m", "-Xms256m", "-XX:MaxPermSize=256m", "-XX:+HeapDumpOnOutOfMemoryError");
+    public static final List<String> DEFAULT_JVM_8_ARGS = ImmutableList.of("-Xmx512m", "-Xms256m", "-XX:MaxMetaspaceSize=256m", "-XX:+HeapDumpOnOutOfMemoryError");
     public static final List<String> ALLOW_ENVIRONMENT_VARIABLE_OVERWRITE = ImmutableList.of("--add-opens", "java.base/java.util=ALL-UNNAMED");
 
     private final File gradleUserHomeDir;
@@ -45,7 +45,7 @@ public class DaemonParameters {
     private int idleTimeout = DEFAULT_IDLE_TIMEOUT;
 
     private int periodicCheckInterval = DEFAULT_PERIODIC_CHECK_INTERVAL_MILLIS;
-    private final DaemonJvmOptions jvmOptions = new DaemonJvmOptions(new IdentityFileResolver());
+    private final DaemonJvmOptions jvmOptions;
     private Map<String, String> envVariables;
     private boolean enabled = true;
     private boolean hasJvmArgs;
@@ -56,11 +56,12 @@ public class DaemonParameters {
     private Priority priority = Priority.NORMAL;
     private JavaInfo jvm = Jvm.current();
 
-    public DaemonParameters(BuildLayoutParameters layout) {
-        this(layout, Collections.<String, String>emptyMap());
+    public DaemonParameters(BuildLayoutResult layout, FileCollectionFactory fileCollectionFactory) {
+        this(layout, fileCollectionFactory, Collections.<String, String>emptyMap());
     }
 
-    public DaemonParameters(BuildLayoutParameters layout, Map<String, String> extraSystemProperties) {
+    public DaemonParameters(BuildLayoutResult layout, FileCollectionFactory fileCollectionFactory, Map<String, String> extraSystemProperties) {
+        jvmOptions = new DaemonJvmOptions(fileCollectionFactory);
         if (!extraSystemProperties.isEmpty()) {
             List<String> immutableBefore = jvmOptions.getAllImmutableJvmArgs();
             jvmOptions.systemProperties(extraSystemProperties);
@@ -69,7 +70,7 @@ public class DaemonParameters {
         }
         baseDir = new File(layout.getGradleUserHomeDir(), "daemon");
         gradleUserHomeDir = layout.getGradleUserHomeDir();
-        envVariables = new HashMap<String, String>(System.getenv());
+        envVariables = new HashMap<>(System.getenv());
     }
 
     public boolean isEnabled() {
@@ -125,7 +126,7 @@ public class DaemonParameters {
     public void applyDefaultsFor(JavaVersion javaVersion) {
         if (javaVersion.compareTo(JavaVersion.VERSION_1_9) >= 0) {
             jvmOptions.jvmArgs(ALLOW_ENVIRONMENT_VARIABLE_OVERWRITE);
-            jvmOptions.jvmArgs(GroovyJpmsWorkarounds.SUPPRESS_COMMON_GROOVY_WARNINGS);
+            jvmOptions.jvmArgs(JpmsConfiguration.GRADLE_DAEMON_JPMS_ARGS);
         }
         if (hasJvmArgs) {
             return;

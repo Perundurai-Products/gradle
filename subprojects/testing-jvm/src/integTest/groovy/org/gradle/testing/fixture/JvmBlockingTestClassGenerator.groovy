@@ -43,10 +43,10 @@ class JvmBlockingTestClassGenerator {
         return """
             apply plugin: 'java'
 
-            ${RepoScriptBlockUtil.jcenterRepository()}
+            ${RepoScriptBlockUtil.mavenCentralRepository()}
 
             dependencies {
-                testCompile '$testDependency'
+                testImplementation '$testDependency'
             }
 
             tasks.withType(Test) {

@@ -18,16 +18,16 @@ package org.gradle.api.tasks.util;
 
 import com.google.common.collect.Sets;
 import groovy.lang.Closure;
-import org.gradle.api.Action;
 import org.gradle.api.file.FileTreeElement;
 import org.gradle.api.specs.Spec;
 import org.gradle.api.specs.Specs;
 import org.gradle.api.tasks.AntBuilderAware;
+import org.gradle.api.tasks.util.internal.IntersectionPatternSet;
 import org.gradle.api.tasks.util.internal.PatternSetAntBuilderDelegate;
 import org.gradle.api.tasks.util.internal.PatternSpecFactory;
 import org.gradle.internal.typeconversion.NotationParser;
 import org.gradle.internal.typeconversion.NotationParserBuilder;
-import org.gradle.util.CollectionUtils;
+import org.gradle.util.internal.CollectionUtils;
 
 import javax.annotation.Nullable;
 import java.util.Collections;
@@ -114,7 +114,7 @@ public class PatternSet implements AntBuilderAware, PatternFilterable {
         caseSensitive = from.caseSensitive;
 
         if (from instanceof IntersectionPatternSet) {
-            PatternSet other = ((IntersectionPatternSet) from).other;
+            PatternSet other = ((IntersectionPatternSet) from).getOther();
             PatternSet otherCopy = new PatternSet(other).copyFrom(other);
             PatternSet intersectCopy = new IntersectionPatternSet(otherCopy);
             copyIncludesAndExcludes(intersectCopy, from);
@@ -161,58 +161,6 @@ public class PatternSet implements AntBuilderAware, PatternFilterable {
             && (excludeSpecs == null || excludeSpecs.isEmpty());
     }
 
-    private static class IntersectionPatternSet extends PatternSet {
-
-        private final PatternSet other;
-
-        public IntersectionPatternSet(PatternSet other) {
-            super(other);
-            this.other = other;
-        }
-
-        public Spec<FileTreeElement> getAsSpec() {
-            return Specs.intersect(super.getAsSpec(), other.getAsSpec());
-        }
-
-        public Object addToAntBuilder(Object node, String childNodeName) {
-            return PatternSetAntBuilderDelegate.and(node, new Action<Object>() {
-                public void execute(Object andNode) {
-                    IntersectionPatternSet.super.addToAntBuilder(andNode, null);
-                    other.addToAntBuilder(andNode, null);
-                }
-            });
-        }
-
-        @Override
-        public boolean isEmpty() {
-            return other.isEmpty() && super.isEmpty();
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-            if (!super.equals(o)) {
-                return false;
-            }
-
-            IntersectionPatternSet that = (IntersectionPatternSet) o;
-
-            return other != null ? other.equals(that.other) : that.other == null;
-        }
-
-        @Override
-        public int hashCode() {
-            int result = super.hashCode();
-            result = 31 * result + (other != null ? other.hashCode() : 0);
-            return result;
-        }
-    }
-
     public Spec<FileTreeElement> getAsSpec() {
         return patternSpecFactory.createSpec(this);
     }
@@ -225,6 +173,7 @@ public class PatternSet implements AntBuilderAware, PatternFilterable {
         return patternSpecFactory.createExcludeSpec(this);
     }
 
+    @Override
     public Set<String> getIncludes() {
         if (includes == null) {
             includes = Sets.newLinkedHashSet();
@@ -239,16 +188,19 @@ public class PatternSet implements AntBuilderAware, PatternFilterable {
         return includeSpecs;
     }
 
+    @Override
     public PatternSet setIncludes(Iterable<String> includes) {
         this.includes = null;
         return include(includes);
     }
 
+    @Override
     public PatternSet include(String... includes) {
         Collections.addAll(getIncludes(), includes);
         return this;
     }
 
+    @Override
     public PatternSet include(Iterable includes) {
         for (Object include : includes) {
             getIncludes().add(PARSER.parseNotation(include));
@@ -256,11 +208,13 @@ public class PatternSet implements AntBuilderAware, PatternFilterable {
         return this;
     }
 
+    @Override
     public PatternSet include(Spec<FileTreeElement> spec) {
         getIncludeSpecs().add(spec);
         return this;
     }
 
+    @Override
     public Set<String> getExcludes() {
         if (excludes == null) {
             excludes = Sets.newLinkedHashSet();
@@ -275,6 +229,7 @@ public class PatternSet implements AntBuilderAware, PatternFilterable {
         return excludeSpecs;
     }
 
+    @Override
     public PatternSet setExcludes(Iterable<String> excludes) {
         this.excludes = null;
         return exclude(excludes);
@@ -297,16 +252,19 @@ public class PatternSet implements AntBuilderAware, PatternFilterable {
         return this;
     }
 
+    @Override
     public PatternSet include(Closure closure) {
         include(Specs.<FileTreeElement>convertClosureToSpec(closure));
         return this;
     }
 
+    @Override
     public PatternSet exclude(String... excludes) {
         Collections.addAll(getExcludes(), excludes);
         return this;
     }
 
+    @Override
     public PatternSet exclude(Iterable excludes) {
         for (Object exclude : excludes) {
             getExcludes().add(PARSER.parseNotation(exclude));
@@ -314,6 +272,7 @@ public class PatternSet implements AntBuilderAware, PatternFilterable {
         return this;
     }
 
+    @Override
     public PatternSet exclude(Spec<FileTreeElement> spec) {
         getExcludeSpecs().add(spec);
         return this;
@@ -324,11 +283,13 @@ public class PatternSet implements AntBuilderAware, PatternFilterable {
         return this;
     }
 
+    @Override
     public PatternSet exclude(Closure closure) {
         exclude(Specs.<FileTreeElement>convertClosureToSpec(closure));
         return this;
     }
 
+    @Override
     public Object addToAntBuilder(Object node, String childNodeName) {
 
         if (!nullToEmpty(includeSpecs).isEmpty() || !nullToEmpty(excludeSpecs).isEmpty()) {

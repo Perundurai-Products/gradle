@@ -30,9 +30,9 @@ import spock.lang.Specification
 
 class DefaultSwiftApplicationTest extends Specification {
     @Rule
-    TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
+    TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider(getClass())
     def project = TestUtil.createRootProject(tmpDir.testDirectory)
-    def app = new DefaultSwiftApplication("main", project.objects, project.fileOperations)
+    def app = project.objects.newInstance(DefaultSwiftApplication, "main")
 
     def "has display name"() {
         expect:
@@ -73,7 +73,7 @@ class DefaultSwiftApplicationTest extends Specification {
 
         then:
         def ex = thrown(IllegalStateException)
-        ex.message == "No value has been specified for this provider."
+        ex.message == "Cannot query the value of property 'developmentBinary' because it has no value available."
     }
 
     private NativeVariantIdentity getIdentity() {

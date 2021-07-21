@@ -17,28 +17,32 @@
 package org.gradle.performance.regression.corefeature
 
 import org.gradle.performance.AbstractCrossVersionPerformanceTest
+import org.gradle.performance.annotations.RunFor
+import org.gradle.performance.annotations.Scenario
 import spock.lang.Unroll
 
-import static org.gradle.performance.generator.JavaTestProject.LARGE_JAVA_MULTI_PROJECT
-import static org.gradle.performance.generator.JavaTestProject.LARGE_MONOLITHIC_JAVA_PROJECT
+import static org.gradle.performance.annotations.ScenarioType.PER_COMMIT
+import static org.gradle.performance.annotations.ScenarioType.PER_DAY
+import static org.gradle.performance.results.OperatingSystem.LINUX
 
 class RichConsolePerformanceTest extends AbstractCrossVersionPerformanceTest {
-
-    private static final String CLEAN_ASSEMBLE_TASKS = 'clean assemble'
 
     def setup() {
         runner.args << '--console=rich'
     }
 
+    @RunFor([
+        @Scenario(type = PER_COMMIT, operatingSystems = [LINUX], testProjects = ["largeMonolithicJavaProject"], iterationMatcher = "^clean assemble.*"),
+        @Scenario(type = PER_DAY, operatingSystems = [LINUX], testProjects = ["largeJavaMultiProject", "bigNative"], iterationMatcher = "^clean assemble.*"),
+        @Scenario(type = PER_DAY, operatingSystems = [LINUX], testProjects = ["withVerboseJUnit"], iterationMatcher = "^cleanTest.*")
+    ])
     @Unroll
-    def "#tasks on #testProject with rich console"() {
+    def "#tasks with rich console"() {
         given:
-        runner.testProject = testProject
         runner.tasksToRun = tasks.split(' ')
-        runner.gradleOpts = ["-Xms${daemonMemory}", "-Xmx${daemonMemory}"]
         runner.warmUpRuns = 5
         runner.runs = 8
-        runner.targetVersions = ["5.2-20181218000039+0000"]
+        runner.targetVersions = ["7.2-20210713113638+0000"]
 
         when:
         def result = runner.run()
@@ -47,10 +51,6 @@ class RichConsolePerformanceTest extends AbstractCrossVersionPerformanceTest {
         result.assertCurrentVersionHasNotRegressed()
 
         where:
-        testProject                   | tasks                 | daemonMemory
-        LARGE_JAVA_MULTI_PROJECT      | CLEAN_ASSEMBLE_TASKS  | LARGE_JAVA_MULTI_PROJECT.daemonMemory
-        LARGE_MONOLITHIC_JAVA_PROJECT | CLEAN_ASSEMBLE_TASKS  | LARGE_MONOLITHIC_JAVA_PROJECT.daemonMemory
-        'bigNative'                   | CLEAN_ASSEMBLE_TASKS  | '1g'
-        'withVerboseJUnit'            | 'cleanTest test'      | '256m'
+        tasks << ['clean assemble', 'cleanTest test']
     }
 }

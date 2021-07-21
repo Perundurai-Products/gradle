@@ -18,13 +18,13 @@ package org.gradle.initialization;
 
 import org.gradle.StartParameter;
 import org.gradle.api.internal.DynamicObjectAware;
-import org.gradle.internal.extensibility.ExtensibleDynamicObject;
 import org.gradle.api.internal.GradleInternal;
 import org.gradle.api.internal.SettingsInternal;
 import org.gradle.api.internal.initialization.ClassLoaderScope;
 import org.gradle.api.internal.initialization.ScriptHandlerFactory;
 import org.gradle.api.internal.initialization.ScriptHandlerInternal;
 import org.gradle.groovy.scripts.ScriptSource;
+import org.gradle.internal.extensibility.ExtensibleDynamicObject;
 import org.gradle.internal.metaobject.DynamicObject;
 import org.gradle.internal.reflect.Instantiator;
 import org.gradle.internal.service.scopes.ServiceRegistryFactory;
@@ -43,18 +43,25 @@ public class SettingsFactory {
         this.scriptHandlerFactory = scriptHandlerFactory;
     }
 
-    public SettingsInternal createSettings(GradleInternal gradle, File settingsDir, ScriptSource settingsScript,
-                                           Map<String, String> gradleProperties, StartParameter startParameter,
-                                           ClassLoaderScope buildRootClassLoaderScope) {
+    public SettingsInternal createSettings(GradleInternal gradle,
+                                           File settingsDir,
+                                           ScriptSource settingsScript,
+                                           Map<String, String> gradleProperties,
+                                           StartParameter startParameter,
+                                           ClassLoaderScope baseClassLoaderScope) {
 
-        ClassLoaderScope settingsClassLoaderScope = buildRootClassLoaderScope.createChild("settings");
-        ScriptHandlerInternal settingsScriptHandler = scriptHandlerFactory.create(settingsScript, settingsClassLoaderScope);
+        ClassLoaderScope classLoaderScope = baseClassLoaderScope.createChild("settings[" + gradle.getIdentityPath() + "]");
+        ScriptHandlerInternal settingsScriptHandler = scriptHandlerFactory.create(settingsScript, classLoaderScope);
         DefaultSettings settings = instantiator.newInstance(DefaultSettings.class,
-            serviceRegistryFactory, gradle,
-            settingsClassLoaderScope, buildRootClassLoaderScope, settingsScriptHandler,
-            settingsDir, settingsScript, startParameter
+            serviceRegistryFactory,
+            gradle,
+            classLoaderScope,
+            baseClassLoaderScope,
+            settingsScriptHandler,
+            settingsDir,
+            settingsScript,
+            startParameter
         );
-
         DynamicObject dynamicObject = ((DynamicObjectAware) settings).getAsDynamicObject();
         ((ExtensibleDynamicObject) dynamicObject).addProperties(gradleProperties);
         return settings;

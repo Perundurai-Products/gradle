@@ -17,11 +17,9 @@
 package org.gradle.api.reporting.model.internal;
 
 import com.google.common.base.Optional;
-import com.google.common.base.Predicate;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
-import org.gradle.api.reporting.model.ModelReport;
 import org.gradle.api.tasks.diagnostics.internal.text.TextReportBuilder;
 import org.gradle.internal.logging.text.StyledTextOutput;
 import org.gradle.model.internal.core.ModelNode;
@@ -33,6 +31,7 @@ import org.gradle.reporting.ReportRenderer;
 
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.stream.Collectors;
 
 import static org.gradle.internal.logging.text.StyledTextOutput.Style.*;
 
@@ -41,15 +40,18 @@ public class ModelNodeRenderer extends ReportRenderer<ModelNode, TextReportBuild
     private static final int LABEL_LENGTH = 7;
 
     private final boolean showHidden;
-    private final ModelReport.Format format;
+    @SuppressWarnings("deprecation")
+    private final org.gradle.api.reporting.model.ModelReport.Format format;
 
-    public ModelNodeRenderer(boolean showHidden, ModelReport.Format format) {
+    @SuppressWarnings("deprecation")
+    public ModelNodeRenderer(boolean showHidden, org.gradle.api.reporting.model.ModelReport.Format format) {
         this.showHidden = showHidden;
         this.format = format;
     }
 
+    @SuppressWarnings("deprecation")
     private boolean omitDetails() {
-        return ModelReport.Format.SHORT == format;
+        return org.gradle.api.reporting.model.ModelReport.Format.SHORT == format;
     }
 
     @Override
@@ -72,7 +74,7 @@ public class ModelNodeRenderer extends ReportRenderer<ModelNode, TextReportBuild
             return;
         }
 
-        Map<String, ModelNode> links = new TreeMap<String, ModelNode>();
+        Map<String, ModelNode> links = new TreeMap<>();
         for (ModelNode node : model.getLinks(ModelType.untyped())) {
             links.put(node.getPath().getName(), node);
         }
@@ -163,12 +165,7 @@ public class ModelNodeRenderer extends ReportRenderer<ModelNode, TextReportBuild
     }
 
     static Iterable<ModelRuleDescriptor> uniqueExecutedRulesExcludingCreator(final ModelNode model) {
-        Iterable filtered = Iterables.filter(model.getExecutedRules(), new Predicate<ModelRuleDescriptor>() {
-            @Override
-            public boolean apply(ModelRuleDescriptor input) {
-                return !input.equals(model.getDescriptor());
-            }
-        });
+        Iterable<ModelRuleDescriptor> filtered = model.getExecutedRules().stream().filter(input -> !input.equals(model.getDescriptor())).collect(Collectors.toList());
         return ImmutableSet.copyOf(filtered);
     }
 }

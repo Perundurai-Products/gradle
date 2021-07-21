@@ -21,4 +21,6 @@ import java.util.List;
 
 public interface PluginRepositoriesProvider {
     List<ArtifactRepository> getPluginRepositories();
+
+    boolean isExclusiveContentInUse();
 }

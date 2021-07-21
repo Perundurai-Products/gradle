@@ -17,6 +17,8 @@
 
 package org.gradle.api.publish.ivy
 
+import org.gradle.api.publish.ivy.internal.publication.DefaultIvyPublication
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.test.fixtures.ivy.IvyJavaModule
 import spock.lang.Issue
 import spock.lang.Unroll
@@ -29,11 +31,12 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
                api "commons-collections:commons-collections:3.2.2"
                compileOnly "javax.servlet:servlet-api:2.5"
                runtimeOnly "commons-io:commons-io:1.4"
-               testImplementation "junit:junit:4.12"
+               testImplementation "junit:junit:4.13"
            }
 """
     }
 
+    @ToBeFixedForConfigurationCache
     void "can publish jar and descriptor to ivy repository"() {
         requiresExternalDependencies = true
         given:
@@ -46,7 +49,7 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
                 }
             }
 
-            $dependencies            
+            $dependencies
 """)
 
         when:
@@ -57,13 +60,13 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
 
         with(javaLibrary.parsedIvy) {
             configurations.keySet() == ["default", "compile", "runtime"] as Set
-            configurations["default"].extend == ["runtime", "compile"] as Set
+            configurations["default"].extend == ["runtime"] as Set
             configurations["runtime"].extend == null
 
-            expectArtifact("publishTest").hasAttributes("jar", "jar", ["compile"])
+            expectArtifact("publishTest").hasAttributes("jar", "jar", ["compile", "runtime"])
         }
         javaLibrary.assertApiDependencies('commons-collections:commons-collections:3.2.2')
-        javaLibrary.assertRuntimeDependencies('commons-io:commons-io:1.4')
+        javaLibrary.assertRuntimeDependencies('commons-collections:commons-collections:3.2.2', 'commons-io:commons-io:1.4')
 
         and:
         resolveArtifacts(javaLibrary) {
@@ -71,64 +74,19 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
         }
     }
 
-    void "can publish java-library-platform to ivy repository"() {
-        requiresExternalDependencies = true
-
-        given:
-        createBuildScripts("""
-            publishing {
-                publications {
-                    ivy(IvyPublication) {
-                        from components.javaLibraryPlatform
-                    }
-                }
-            }
-
-            $dependencies            
-""")
-
-        when:
-        run "publish"
-
-        then:
-        def backingModule = javaLibrary.backingModule
-
-        backingModule.assertPublished()
-        backingModule.assertArtifactsPublished(backingModule.ivyFile.name, backingModule.moduleMetadataFile.name)
-
-        // No files are published for either variant
-        with(javaLibrary.parsedModuleMetadata) {
-            variants*.name as Set == ['api', 'runtime'] as Set
-            variant('api').files.empty
-            variant('runtime').files.empty
-        }
-
-        with(javaLibrary.parsedIvy) {
-            configurations.keySet() == ["default", "compile", "runtime"] as Set
-            configurations["default"].extend == ["runtime", "compile"] as Set
-            configurations["runtime"].extend == null
-
-            artifacts.empty
-        }
-        javaLibrary.assertApiDependencies('commons-collections:commons-collections:3.2.2')
-        javaLibrary.assertRuntimeDependencies('commons-io:commons-io:1.4')
-
-        and:
-        resolveArtifacts(javaLibrary) {
-            expectFiles "commons-collections-3.2.2.jar", "commons-io-1.4.jar"
-        }
-    }
-
     @Unroll("'#gradleConfiguration' dependencies end up in '#ivyConfiguration' configuration with '#plugin' plugin")
+    @ToBeFixedForConfigurationCache
     void "maps dependencies in the correct Ivy configuration"() {
         given:
         file("settings.gradle") << '''
-            rootProject.name = 'publishTest' 
+            rootProject.name = 'publishTest'
             include "b"
         '''
         buildFile << """
-            apply plugin: "$plugin"
-            apply plugin: "ivy-publish"
+            plugins {
+                id("$plugin")
+                id("ivy-publish")
+            }
 
             group = 'org.gradle.test'
             version = '1.9'
@@ -143,7 +101,7 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
                     }
                 }
             }
-            
+
             dependencies {
                 $gradleConfiguration project(':b')
             }
@@ -151,48 +109,48 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
 
         file('b/build.gradle') << """
             apply plugin: 'java'
-            
+
             group = 'org.gradle.test'
             version = '1.2'
-            
+
         """
 
         when:
         succeeds "publish"
 
         then:
+        outputDoesNotContain(DefaultIvyPublication.PUBLICATION_WARNING_FOOTER)
         javaLibrary.assertPublished()
         if (ivyConfiguration == 'compile') {
             javaLibrary.assertApiDependencies('org.gradle.test:b:1.2')
-        } else {
+        }
+        if (gradleConfiguration != 'compileOnlyApi') {
             javaLibrary.assertRuntimeDependencies('org.gradle.test:b:1.2')
         }
 
         where:
         plugin         | gradleConfiguration | ivyConfiguration
-        'java'         | 'compile'           | 'compile'
-        'java'         | 'runtime'           | 'compile'
         'java'         | 'implementation'    | 'runtime'
         'java'         | 'runtimeOnly'       | 'runtime'
 
         'java-library' | 'api'               | 'compile'
-        'java-library' | 'compile'           | 'compile'
-        'java-library' | 'runtime'           | 'compile'
+        'java-library' | 'compileOnlyApi'    | 'compile'
         'java-library' | 'runtimeOnly'       | 'runtime'
         'java-library' | 'implementation'    | 'runtime'
 
     }
 
+    @ToBeFixedForConfigurationCache
     void "ignores extra artifacts added to configurations"() {
         given:
         createBuildScripts("""
             task extraJar(type: Jar) {
                 from sourceSets.main.allJava
-                baseName "publishTest-extra"
+                archiveBaseName = "publishTest-extra"
             }
 
             artifacts {
-                runtime extraJar
+                implementation extraJar
                 archives extraJar
                 it."default" extraJar
             }
@@ -213,6 +171,7 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
         javaLibrary.assertPublishedAsJavaModule()
     }
 
+    @ToBeFixedForConfigurationCache
     void "can publish additional artifacts for java project"() {
         requiresExternalDependencies = true
         given:
@@ -221,7 +180,7 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
 
             task sourceJar(type: Jar) {
                 from sourceSets.main.allJava
-                baseName "publishTest-source"
+                archiveBaseName = "publishTest-source"
             }
 
             publishing {
@@ -248,6 +207,7 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
         javaLibrary.parsedIvy.expectArtifact("publishTest", "jar", "source").hasAttributes("jar", "sources", ["runtime"], "source")
 
         and:
+        javaLibrary.removeGradleMetadataRedirection()
         resolveArtifacts(javaLibrary) {
             withoutModuleMetadata {
                 expectFiles "commons-collections-3.2.2.jar", "commons-io-1.4.jar", "publishTest-1.9.jar", "publishTest-1.9-source.jar"
@@ -266,6 +226,7 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
     }
 
     @Issue("GRADLE-3514")
+    @ToBeFixedForConfigurationCache
     void "generated ivy descriptor includes dependency exclusions"() {
         requiresExternalDependencies = true
 
@@ -274,16 +235,16 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
             $dependencies
 
             dependencies {
-                compile 'org.springframework:spring-core:2.5.6', {
+                api 'org.springframework:spring-core:2.5.6', {
                     exclude group: 'commons-logging', module: 'commons-logging'
                 }
-                compile "commons-beanutils:commons-beanutils:1.8.3", {
+                api "commons-beanutils:commons-beanutils:1.8.3", {
                     exclude group: 'commons-logging'
                 }
-                compile "commons-dbcp:commons-dbcp:1.4", {
+                api "commons-dbcp:commons-dbcp:1.4", {
                     transitive = false
                 }
-                compile "org.apache.camel:camel-jackson:2.15.3", {
+                api "org.apache.camel:camel-jackson:2.15.3", {
                     exclude module: 'camel-core'
                 }
             }
@@ -301,6 +262,7 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
         run "publish"
 
         then:
+        outputDoesNotContain(DefaultIvyPublication.PUBLICATION_WARNING_FOOTER)
         javaLibrary.assertPublishedAsJavaModule()
 
         def dep = javaLibrary.parsedIvy.expectDependency("org.springframework:spring-core:2.5.6")
@@ -315,7 +277,7 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
         javaLibrary.parsedIvy.dependencies["org.apache.camel:camel-jackson:2.15.3"].exclusions[0].module == 'camel-core'
 
         and:
-        javaLibrary.parsedModuleMetadata.variant('api') {
+        javaLibrary.parsedModuleMetadata.variant('apiElements') {
             dependency('org.springframework:spring-core:2.5.6') {
                 exists()
                 hasExclude('commons-logging', 'commons-logging')
@@ -356,8 +318,8 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
     }
 
     @Issue("https://github.com/gradle/gradle/issues/4356, https://github.com/gradle/gradle/issues/5035")
+    @ToBeFixedForConfigurationCache
     void "generated ivy descriptor includes configuration exclusions"() {
-        requiresExternalDependencies = true
         def exclusion = { name -> "$name-group:$name-module" }
         def exclusions = { conf -> javaLibrary.parsedIvy.exclusions.findAll { it.conf == conf }.collect { it.org + ":" + it.module } }
 
@@ -388,30 +350,29 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
 
         then:
         javaLibrary.assertPublishedAsJavaModule()
-        exclusions('compile') == [exclusion("apiElements"), exclusion("runtime"), exclusion("api")]
-        exclusions('runtime') == [exclusion("runtimeElements"), exclusion("implementation"), exclusion("api"), exclusion("runtimeOnly"), exclusion("runtime")]
+        exclusions('compile') == [exclusion("apiElements"), exclusion("api")]
+        exclusions('runtime') == [exclusion("runtimeElements"), exclusion("implementation"), exclusion("api"), exclusion("runtimeOnly")]
 
         and:
-        javaLibrary.parsedModuleMetadata.variant('api') {
+        javaLibrary.parsedModuleMetadata.variant('apiElements') {
             dependency('commons-collections:commons-collections:3.2.2') {
                 hasExclude('apiElements-group', 'apiElements-module')
-                hasExclude('runtime-group', 'runtime-module')
                 hasExclude('api-group', 'api-module')
                 noMoreExcludes()
             }
         }
-        javaLibrary.parsedModuleMetadata.variant('runtime') {
+        javaLibrary.parsedModuleMetadata.variant('runtimeElements') {
             dependency('commons-io:commons-io:1.4') {
                 hasExclude('runtimeElements-group', 'runtimeElements-module')
                 hasExclude('implementation-group', 'implementation-module')
                 hasExclude('api-group', 'api-module')
                 hasExclude('runtimeOnly-group', 'runtimeOnly-module')
-                hasExclude('runtime-group', 'runtime-module')
                 noMoreExcludes()
             }
         }
     }
 
+    @ToBeFixedForConfigurationCache
     void "defaultDependencies are included in published ivy descriptor"() {
         given:
         settingsFile << "rootProject.name = 'publishTest' "
@@ -436,7 +397,7 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
 
             ${mavenCentralRepository()}
 
-            configurations.compile.defaultDependencies { deps ->
+            configurations.api.defaultDependencies { deps ->
                 deps.add project.dependencies.create("org.test:default-dependency:1.1")
             }
 """
@@ -445,10 +406,12 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
         succeeds "publish"
 
         then:
+        outputDoesNotContain(DefaultIvyPublication.PUBLICATION_WARNING_FOOTER)
         javaLibrary.assertPublishedAsJavaModule()
         javaLibrary.assertApiDependencies("org.test:default-dependency:1.1")
     }
 
+    @ToBeFixedForConfigurationCache
     void "dependency mutations are included in published ivy descriptor"() {
         given:
         settingsFile << "rootProject.name = 'publishTest'"
@@ -489,10 +452,12 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
         succeeds "publish"
 
         then:
+        outputDoesNotContain(DefaultIvyPublication.PUBLICATION_WARNING_FOOTER)
         javaLibrary.assertPublishedAsJavaModule()
         javaLibrary.assertApiDependencies('org.test:dep1:X', 'org.test:dep2:X')
     }
 
+    @ToBeFixedForConfigurationCache
     def "can publish java-library with strict and prefer dependencies"() {
         requiresExternalDependencies = true
 
@@ -521,13 +486,14 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
         run "publish"
 
         then:
+        outputDoesNotContain(DefaultIvyPublication.PUBLICATION_WARNING_FOOTER)
         javaLibrary.assertPublished()
 
         javaLibrary.parsedIvy.configurations.keySet() == ["compile", "runtime", "default"] as Set
         javaLibrary.parsedIvy.assertDependsOn("org.springframework:spring-core:2.5.6@compile", "commons-collections:commons-collections:3.2.2@runtime")
 
         and:
-        javaLibrary.parsedModuleMetadata.variant('api') {
+        javaLibrary.parsedModuleMetadata.variant('apiElements') {
             dependency('org.springframework:spring-core:') {
                 noMoreExcludes()
                 prefers('2.5.6')
@@ -537,7 +503,7 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
             noMoreDependencies()
         }
 
-        javaLibrary.parsedModuleMetadata.variant('runtime') {
+        javaLibrary.parsedModuleMetadata.variant('runtimeElements') {
             dependency('commons-collections:commons-collections:3.2.2') {
                 noMoreExcludes()
                 prefers(null)
@@ -559,6 +525,7 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
         }
     }
 
+    @ToBeFixedForConfigurationCache
     def "can publish java-library with dependency constraints"() {
         requiresExternalDependencies = true
         given:
@@ -570,7 +537,7 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
                 constraints {
                     api "commons-logging:commons-logging:1.1"
                     implementation "commons-logging:commons-logging:1.2"
-                    
+
                     implementation("org.tukaani:xz") {
                         version { strictly "1.6" }
                     }
@@ -579,7 +546,7 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
 
             publishing {
                 publications {
-                    maven(IvyPublication) {
+                    ivy(IvyPublication) {
                         from components.java
                     }
                 }
@@ -590,6 +557,9 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
         run "publish"
 
         then:
+        outputContains(DefaultIvyPublication.PUBLICATION_WARNING_FOOTER)
+        outputContains(DefaultIvyPublication.UNSUPPORTED_FEATURE)
+        outputContains('commons-logging:commons-logging:1.1 declared as a dependency constraint')
         javaLibrary.assertPublished()
 
         javaLibrary.parsedIvy.configurations.keySet() == ["compile", "runtime", "default"] as Set
@@ -597,7 +567,8 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
         // we do not publish constraints to ivy
 
         and:
-        javaLibrary.parsedModuleMetadata.variant('api') {
+        javaLibrary.removeGradleMetadataRedirection()
+        javaLibrary.parsedModuleMetadata.variant('apiElements') {
             dependency('org.springframework:spring-core:1.2.9') {
                 rejects()
                 noMoreExcludes()
@@ -607,7 +578,7 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
             noMoreDependencies()
         }
 
-        javaLibrary.parsedModuleMetadata.variant('runtime') {
+        javaLibrary.parsedModuleMetadata.variant('runtimeElements') {
             dependency('org.springframework:spring-core:1.2.9') {
                 rejects()
                 noMoreExcludes()
@@ -639,12 +610,13 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
         }
     }
 
+    @ToBeFixedForConfigurationCache
     def "can publish java-library with dependencies without version"() {
         requiresExternalDependencies = true
         given:
         createBuildScripts("""
 
-            ${jcenterRepository()}
+            ${mavenCentralRepository()}
 
             dependencies {
                 implementation "commons-collections:commons-collections"
@@ -655,7 +627,7 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
 
             publishing {
                 publications {
-                    maven(IvyPublication) {
+                    ivy(IvyPublication) {
                         from components.java
                     }
                 }
@@ -666,16 +638,20 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
         succeeds "publish"
 
         then:
+        javaLibrary.removeGradleMetadataRedirection()
+        outputContains(DefaultIvyPublication.PUBLICATION_WARNING_FOOTER)
+        outputContains(DefaultIvyPublication.UNSUPPORTED_FEATURE)
+        outputContains('commons-collections:commons-collections declared without version')
         javaLibrary.assertPublished()
         javaLibrary.parsedIvy.configurations.keySet() == ["compile", "runtime", "default"] as Set
         javaLibrary.parsedIvy.assertDependsOn("commons-collections:commons-collections:@runtime")
 
         and:
-        javaLibrary.parsedModuleMetadata.variant('api') {
+        javaLibrary.parsedModuleMetadata.variant('apiElements') {
             noMoreDependencies()
         }
 
-        javaLibrary.parsedModuleMetadata.variant('runtime') {
+        javaLibrary.parsedModuleMetadata.variant('runtimeElements') {
             dependency('commons-collections:commons-collections:') {
                 rejects()
                 noMoreExcludes()
@@ -700,6 +676,195 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
         }
     }
 
+    @ToBeFixedForConfigurationCache
+    def "can publish java-library with dependencies without version and using versionMapping"() {
+        requiresExternalDependencies = true
+        given:
+        createBuildScripts("""
+
+            ${mavenCentralRepository()}
+
+            dependencies {
+                implementation "commons-collections:commons-collections:3.2.+"
+                constraints {
+                    implementation "commons-collections:commons-collections:3.2.2"
+                }
+            }
+
+            publishing {
+                publications {
+                    ivy(IvyPublication) {
+                        from components.java
+                        versionMapping {
+                            usage('java-runtime') {
+                                fromResolutionResult()
+                            }
+                        }
+                    }
+                }
+            }
+""")
+
+        when:
+        succeeds "publish"
+
+        then:
+        javaLibrary.removeGradleMetadataRedirection()
+        outputContains(DefaultIvyPublication.PUBLICATION_WARNING_FOOTER)
+        outputContains(DefaultIvyPublication.UNSUPPORTED_FEATURE)
+        outputDoesNotContain('commons-collections:commons-collections declared without version')
+        javaLibrary.assertPublished()
+        javaLibrary.parsedIvy.configurations.keySet() == ["compile", "runtime", "default"] as Set
+        javaLibrary.parsedIvy.assertDependsOn("commons-collections:commons-collections:3.2.2@runtime")
+        javaLibrary.parsedIvy.dependencies["commons-collections:commons-collections:3.2.2"].revisionConstraint == "3.2.+"
+
+        and:
+        javaLibrary.parsedModuleMetadata.variant('apiElements') {
+            noMoreDependencies()
+        }
+
+        javaLibrary.parsedModuleMetadata.variant('runtimeElements') {
+            dependency('commons-collections:commons-collections:3.2.2') {
+                rejects()
+                noMoreExcludes()
+            }
+            constraint('commons-collections:commons-collections:3.2.2') { rejects() }
+            noMoreDependencies()
+        }
+
+        and:
+        resolveArtifacts(javaLibrary) {
+            expectFiles 'commons-collections-3.2.2.jar', 'publishTest-1.9.jar'
+        }
+    }
+
+    @Unroll("'#requestedVersion' end up in '#expectedVersion' resolved version and '#requestedVersion' revConstraint")
+    @ToBeFixedForConfigurationCache
+    def "can publish java-library with revConstraint"() {
+        requiresExternalDependencies = true
+        given:
+        createBuildScripts("""
+
+            ${mavenCentralRepository()}
+
+            dependencies {
+                implementation "commons-collections:commons-collections:${requestedVersion}"
+                constraints {
+                    implementation "commons-collections:commons-collections:${expectedVersion}"
+                }
+            }
+
+            publishing {
+                publications {
+                    ivy(IvyPublication) {
+                        from components.java
+                        versionMapping {
+                            usage('java-runtime') {
+                                fromResolutionResult()
+                            }
+                        }
+                    }
+                }
+            }
+""")
+
+        when:
+        succeeds "publish"
+
+        then:
+        javaLibrary.removeGradleMetadataRedirection()
+        outputContains(DefaultIvyPublication.PUBLICATION_WARNING_FOOTER)
+        outputContains(DefaultIvyPublication.UNSUPPORTED_FEATURE)
+        outputDoesNotContain('commons-collections:commons-collections declared without version')
+        javaLibrary.assertPublished()
+        javaLibrary.parsedIvy.configurations.keySet() == ["compile", "runtime", "default"] as Set
+        javaLibrary.parsedIvy.assertDependsOn("commons-collections:commons-collections:${expectedVersion}@runtime")
+        javaLibrary.parsedIvy.dependencies["commons-collections:commons-collections:${expectedVersion}"].revisionConstraint == requestedVersion
+
+        and:
+        javaLibrary.parsedModuleMetadata.variant('apiElements') {
+            noMoreDependencies()
+        }
+
+        javaLibrary.parsedModuleMetadata.variant('runtimeElements') {
+            dependency("commons-collections:commons-collections:${expectedVersion}") {
+                rejects()
+                noMoreExcludes()
+            }
+            constraint("commons-collections:commons-collections:${expectedVersion}") { rejects() }
+            noMoreDependencies()
+        }
+
+        and:
+        resolveArtifacts(javaLibrary) {
+            expectFiles "commons-collections-${expectedVersion}.jar", 'publishTest-1.9.jar'
+        }
+
+        where:
+        requestedVersion | expectedVersion
+        "3.2.+"          | "3.2.2"
+        "[2.1.0,4.0.0)"  | "3.2.2"
+        "latest.release" | "20040616"
+    }
+
+
+    @ToBeFixedForConfigurationCache
+    def "can publish java-library with dependencies with version using versionMapping and not adding revConstraints"() {
+        requiresExternalDependencies = true
+        given:
+        createBuildScripts("""
+
+            ${mavenCentralRepository()}
+
+            dependencies {
+                implementation "commons-collections:commons-collections:3.2.2"
+            }
+
+            publishing {
+                publications {
+                    ivy(IvyPublication) {
+                        from components.java
+                        versionMapping {
+                            usage('java-runtime') {
+                                fromResolutionResult()
+                            }
+                        }
+                    }
+                }
+            }
+""")
+
+        when:
+        succeeds "publish"
+
+        then:
+        javaLibrary.removeGradleMetadataRedirection()
+        outputDoesNotContain(DefaultIvyPublication.PUBLICATION_WARNING_FOOTER)
+        javaLibrary.assertPublished()
+        javaLibrary.parsedIvy.configurations.keySet() == ["compile", "runtime", "default"] as Set
+        javaLibrary.parsedIvy.assertDependsOn("commons-collections:commons-collections:3.2.2@runtime")
+        !javaLibrary.parsedIvy.dependencies["commons-collections:commons-collections:3.2.2"].revisionConstraint
+
+        and:
+        javaLibrary.parsedModuleMetadata.variant('apiElements') {
+            noMoreDependencies()
+        }
+
+        javaLibrary.parsedModuleMetadata.variant('runtimeElements') {
+            dependency('commons-collections:commons-collections:3.2.2') {
+                noMoreExcludes()
+            }
+            noMoreDependencies()
+        }
+
+        and:
+        resolveArtifacts(javaLibrary) {
+            expectFiles 'commons-collections-3.2.2.jar', 'publishTest-1.9.jar'
+        }
+    }
+
+
+    @ToBeFixedForConfigurationCache
     def "can publish java-library with rejected versions"() {
         requiresExternalDependencies = true
 
@@ -715,7 +880,7 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
                     }
                 }
                 implementation("commons-collections:commons-collections:[3.2, 4)") {
-                    version { 
+                    version {
                         reject '3.2.1', '[3.2.2,)'
                     }
                 }
@@ -734,20 +899,23 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
         run "publish"
 
         then:
+        javaLibrary.removeGradleMetadataRedirection()
+        outputContains(DefaultIvyPublication.PUBLICATION_WARNING_FOOTER)
+        outputContains(DefaultIvyPublication.UNSUPPORTED_FEATURE)
         javaLibrary.assertPublished()
 
         javaLibrary.parsedIvy.configurations.keySet() == ["compile", "runtime", "default"] as Set
         javaLibrary.parsedIvy.assertDependsOn("commons-collections:commons-collections:[3.2, 4)@runtime")
 
         and:
-        javaLibrary.parsedModuleMetadata.variant('api') {
+        javaLibrary.parsedModuleMetadata.variant('apiElements') {
             constraint('commons-logging:commons-logging:') {
                 rejects '+'
             }
             noMoreDependencies()
         }
 
-        javaLibrary.parsedModuleMetadata.variant('runtime') {
+        javaLibrary.parsedModuleMetadata.variant('runtimeElements') {
             dependency('commons-collections:commons-collections:[3.2, 4)') {
                 noMoreExcludes()
                 rejects '3.2.1', '[3.2.2,)'
@@ -769,8 +937,8 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
         }
     }
 
+    @ToBeFixedForConfigurationCache
     def "can publish java-library with capabilities"() {
-        requiresExternalDependencies = true
         given:
         createBuildScripts("""
 
@@ -790,23 +958,114 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
         run "publish"
 
         then:
+        outputContains(DefaultIvyPublication.PUBLICATION_WARNING_FOOTER)
+        outputContains('Declares capability org:foo:1.0')
         javaLibrary.assertPublished()
 
         and:
-        javaLibrary.parsedModuleMetadata.variant('api') {
+        javaLibrary.parsedModuleMetadata.variant('apiElements') {
             capability('org', 'foo', '1.0')
             noMoreCapabilities()
         }
 
-        javaLibrary.parsedModuleMetadata.variant('runtime') {
+        javaLibrary.parsedModuleMetadata.variant('runtimeElements') {
             capability('org', 'foo', '1.0')
             capability('org', 'bar', '1.0')
             noMoreCapabilities()
         }
     }
 
+    @ToBeFixedForConfigurationCache
+    def "can ignore publication warnings"() {
+        given:
+        def silenceMethod = "suppressIvyMetadataWarningsFor"
+        createBuildScripts("""
+
+            configurations.api.outgoing.capability 'org:foo:1.0'
+            configurations.implementation.outgoing.capability 'org:bar:1.0'
+
+            publishing {
+                publications {
+                    ivy(IvyPublication) {
+                        from components.java
+                        $silenceMethod('apiElements')
+                    }
+                }
+            }
+""")
+
+        when:
+        run "publish"
+
+        then:
+        outputContains(DefaultIvyPublication.PUBLICATION_WARNING_FOOTER)
+        outputContains("$silenceMethod(variant)")
+        outputContains('Declares capability org:foo:1.0')
+        outputContains("Variant runtimeElements")
+        outputDoesNotContain("Variant apiElements")
+        javaLibrary.assertPublished()
+    }
+
+    @ToBeFixedForConfigurationCache
+    def "can ignore all publication warnings by variant name"() {
+        given:
+        def silenceMethod = "suppressIvyMetadataWarningsFor"
+        createBuildScripts("""
+
+            configurations.api.outgoing.capability 'org:foo:1.0'
+            configurations.implementation.outgoing.capability 'org:bar:1.0'
+
+            publishing {
+                publications {
+                    ivy(IvyPublication) {
+                        from components.java
+                        $silenceMethod('apiElements')
+                        $silenceMethod('runtimeElements')
+                    }
+                }
+            }
+""")
+
+        when:
+        run "publish"
+
+        then:
+        outputDoesNotContain(DefaultIvyPublication.PUBLICATION_WARNING_FOOTER)
+        outputDoesNotContain("Ivy publication 'ivy' warnings:")
+        outputDoesNotContain('Declares capability org:foo:1.0')
+        javaLibrary.assertPublished()
+    }
+
+    @ToBeFixedForConfigurationCache
+    def "can ignore all publication warnings"() {
+        given:
+        createBuildScripts("""
+
+            configurations.api.outgoing.capability 'org:foo:1.0'
+            configurations.implementation.outgoing.capability 'org:bar:1.0'
+
+            publishing {
+                publications {
+                    ivy(IvyPublication) {
+                        from components.java
+                        suppressAllIvyMetadataWarnings()
+                    }
+                }
+            }
+""")
+
+        when:
+        run "publish"
+
+        then:
+        outputDoesNotContain(DefaultIvyPublication.PUBLICATION_WARNING_FOOTER)
+        outputDoesNotContain("Ivy publication 'ivy' warnings:")
+        outputDoesNotContain('Declares capability org:foo:1.0')
+        javaLibrary.assertPublished()
+    }
+
+    @ToBeFixedForConfigurationCache
     def "can publish java-library with dependencies/constraints with attributes"() {
-        requiresExternalDependencies = true
         given:
         settingsFile << "include 'utils'\n"
         file("utils/build.gradle") << '''
@@ -814,7 +1073,7 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
             version = '1.0'
             configurations {
                 one {
-                    attributes.attribute(attr1, 'magnificient')
+                    attributes.attribute(attr1, 'magnificent')
                 }
                 two {
                     attributes.attribute(attr1, 'bazinga')
@@ -831,13 +1090,13 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
                         attribute(attr1, 'hello')
                     }
                 }
-                
+
                 api(project(':utils')) {
                     attributes {
                         attribute(attr1, 'bazinga')
                     }
                 }
-                
+
                 constraints {
                     implementation("org.test:bar:1.1") {
                         attributes {
@@ -847,7 +1106,7 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
                     }
                 }
             }
-            
+
             publishing {
                 publications {
                     ivy(IvyPublication) {
@@ -861,10 +1120,12 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
         run "publish"
 
         then:
+        outputContains(DefaultIvyPublication.PUBLICATION_WARNING_FOOTER)
+        outputContains(DefaultIvyPublication.UNSUPPORTED_FEATURE)
         javaLibrary.assertPublished()
 
         and:
-        javaLibrary.parsedModuleMetadata.variant('api') {
+        javaLibrary.parsedModuleMetadata.variant('apiElements') {
             dependency('org.test:bar:1.0') {
                 hasAttribute('custom', 'hello')
             }
@@ -874,7 +1135,7 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
             noMoreDependencies()
         }
 
-        javaLibrary.parsedModuleMetadata.variant('runtime') {
+        javaLibrary.parsedModuleMetadata.variant('runtimeElements') {
             dependency('org.test:bar:1.0') {
                 hasAttribute('custom', 'hello')
             }
@@ -889,6 +1150,7 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
     }
 
     @Issue("gradle/gradle#5450")
+    @ToBeFixedForConfigurationCache
     def "doesn't fail with NPE if no component is attached to a publication"() {
         createBuildScripts("""
         publishing {
@@ -906,6 +1168,145 @@ class IvyPublishJavaIntegTest extends AbstractIvyPublishIntegTest {
         then:
         skipped(':generateMetadataFileForJavaPublication')
         outputContains "Ivy publication 'java' isn't attached to a component. Gradle metadata only supports publications with software components (e.g. from component.java)"
+    }
+
+    @Unroll
+    @ToBeFixedForConfigurationCache
+    def "publishes Gradle metadata redirection marker when Gradle metadata task is enabled (enabled=#enabled)"() {
+        given:
+        createBuildScripts("""
+            publishing {
+                publications {
+                    ivy(IvyPublication) {
+                        from components.java
+                    }
+                }
+            }
+
+            generateMetadataFileForIvyPublication.enabled = $enabled
+        """)
+        settingsFile.text = "rootProject.name = 'publishTest' "
+
+        when:
+        succeeds 'publish'
+
+        then:
+        def module = javaLibrary.backingModule
+        module.hasGradleMetadataRedirectionMarker() == hasMarker
+
+        where:
+        enabled | hasMarker
+        false   | false
+        true    | true
+    }
+
+    @Unroll
+    @ToBeFixedForConfigurationCache
+    def "can publish feature variants (optional: #optional)"() {
+        given:
+        createBuildScripts """
+            ${optionalFeatureSetup()}
+            dependencies {
+                optionalFeatureImplementation 'org:foo:4.0'
+            }
+            components.java.addVariantsFromConfiguration(configurations.optionalFeatureRuntimeElements) {
+                if ($optional) mapToOptional()
+            }
+            publishing {
+                publications {
+                    ivy(IvyPublication) {
+                        from components.java
+                    }
+                }
+            }
+        """
+
+        when:
+        succeeds "publish"
+
+        then:
+        with(javaLibrary.parsedIvy) {
+            configurations.keySet() == ["default", "compile", "runtime", "optionalFeatureRuntimeElements"] as Set
+            if (optional) {
+                configurations["default"].extend == ["runtime"] as Set
+            } else {
+                configurations["default"].extend == ["runtime", "optionalFeatureRuntimeElements"] as Set
+            }
+            configurations["runtime"].extend == null
+            configurations["optionalFeatureRuntimeElements"].extend == null
+
+            expectArtifact("publishTest", "jar").hasConf(["compile", "runtime"])
+            expectArtifact("publishTest", "jar", "optional-feature").hasConf(["optionalFeatureRuntimeElements"])
+            assertConfigurationDependsOn("optionalFeatureRuntimeElements", "org:foo:4.0")
+        }
+
+        where:
+        optional << [true, false]
+    }
+
+    @ToBeFixedForConfigurationCache
+    def "an optional feature variant can repeat a dependency from a main variant"() {
+        given:
+        createBuildScripts("""
+            ${optionalFeatureSetup()}
+            dependencies {
+                implementation 'org:foo:1.0'
+                optionalFeatureImplementation 'org:foo:1.0'
+            }
+            components.java.addVariantsFromConfiguration(configurations.optionalFeatureRuntimeElements) {
+                mapToOptional()
+            }
+            publishing {
+                publications {
+                    ivy(IvyPublication) {
+                        from components.java
+                    }
+                }
+            }
+""")
+
+        when:
+        succeeds "publish"
+
+        then:
+        with(javaLibrary.parsedIvy) {
+            assertConfigurationDependsOn("optionalFeatureRuntimeElements", "org:foo:1.0")
+            assertConfigurationDependsOn('runtime', "org:foo:1.0")
+        }
+    }
+
+    @ToBeFixedForConfigurationCache
+    def "a component's variant can be modified before publishing"() {
+        given:
+        createBuildScripts """
+            dependencies {
+                api 'org:foo:1.0'
+                implementation 'org:bar:1.0'
+            }
+            components.java.withVariantsFromConfiguration(configurations.runtimeElements) {
+                skip()
+            }
+            publishing {
+                publications {
+                    ivy(IvyPublication) {
+                        from components.java
+                    }
+                }
+            }
+        """
+
+        when:
+        succeeds "publish"
+
+        then:
+        with(javaLibrary.parsedIvy) {
+            assert configurations.keySet() == ["compile", "default"] as Set // skipped runtime
+            assertConfigurationDependsOn('compile', "org:foo:1.0")
+        }
+        with(javaLibrary.parsedModuleMetadata) {
+            assert variants.collect { it.name } == ["apiElements"]
+            assert variants[0].dependencies.collect { it.toString() } == ["org:foo:1.0"]
+        }
     }
 
     private void createBuildScripts(def append) {
@@ -929,5 +1330,31 @@ $append
             ${mavenCentralRepository()}
 
 """
+    }
+
+    private static String optionalFeatureSetup() {
+        """
+            configurations {
+                optionalFeatureImplementation
+                optionalFeatureRuntimeElements {
+                    extendsFrom optionalFeatureImplementation
+                    canBeResolved = false
+                    canBeConsumed = true
+                    attributes {
+                        attribute(Usage.USAGE_ATTRIBUTE, project.objects.named(Usage, Usage.JAVA_RUNTIME_JARS))
+                    }
+                    outgoing.capability("org:optional-feature:\${version}")
+                }
+                compileClasspath.extendsFrom(optionalFeatureImplementation)
+            }
+            artifacts {
+                optionalFeatureRuntimeElements file:file("\$buildDir/other-artifact.jar"), builtBy: 'touchFile', classifier: 'optional-feature'
+            }
+            task touchFile {
+                doLast {
+                    file("\$buildDir/other-artifact.jar") << "test"
+                }
+            }
+        """
     }
 }

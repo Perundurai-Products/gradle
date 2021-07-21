@@ -26,13 +26,14 @@ import org.gradle.api.NamedDomainObjectCollection;
 import org.gradle.api.NamedDomainObjectCollectionSchema;
 import org.gradle.api.NamedDomainObjectProvider;
 import org.gradle.api.Namer;
+import org.gradle.api.NonExtensible;
 import org.gradle.api.Rule;
 import org.gradle.api.UnknownDomainObjectException;
 import org.gradle.api.internal.collections.CollectionEventRegister;
 import org.gradle.api.internal.collections.CollectionFilter;
 import org.gradle.api.internal.collections.ElementSource;
 import org.gradle.api.internal.plugins.DslObject;
-import org.gradle.api.internal.provider.AbstractReadOnlyProvider;
+import org.gradle.api.internal.provider.AbstractMinimalProvider;
 import org.gradle.api.internal.provider.ProviderInternal;
 import org.gradle.api.internal.provider.Providers;
 import org.gradle.api.provider.Provider;
@@ -49,7 +50,7 @@ import org.gradle.internal.metaobject.MethodMixIn;
 import org.gradle.internal.metaobject.PropertyAccess;
 import org.gradle.internal.metaobject.PropertyMixIn;
 import org.gradle.internal.reflect.Instantiator;
-import org.gradle.util.ConfigureUtil;
+import org.gradle.util.internal.ConfigureUtil;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -220,8 +221,9 @@ public class DefaultNamedDomainObjectCollection<T> extends DefaultDomainObjectCo
         assertCanAdd(getNamer().determineName(t));
     }
 
+    @Override
     public Namer<T> getNamer() {
-        return (Namer) this.namer;
+        return Cast.uncheckedNonnullCast(this.namer);
     }
 
     protected Instantiator getInstantiator() {
@@ -235,8 +237,9 @@ public class DefaultNamedDomainObjectCollection<T> extends DefaultDomainObjectCo
     /**
      * Creates a filtered version of this collection.
      */
+    @Override
     protected <S extends T> DefaultNamedDomainObjectCollection<S> filtered(CollectionFilter<S> filter) {
-        return instantiator.newInstance(DefaultNamedDomainObjectCollection.class, this, filter, instantiator, namer);
+        return Cast.uncheckedNonnullCast(instantiator.newInstance(DefaultNamedDomainObjectCollection.class, this, filter, instantiator, namer));
     }
 
     public String getDisplayName() {
@@ -248,10 +251,12 @@ public class DefaultNamedDomainObjectCollection<T> extends DefaultDomainObjectCo
         return getDisplayName();
     }
 
+    @Override
     public SortedMap<String, T> getAsMap() {
         return index.asMap();
     }
 
+    @Override
     public SortedSet<String> getNames() {
         NavigableSet<String> realizedNames = index.asMap().navigableKeySet();
         Set<String> pendingNames = index.getPendingAsMap().keySet();
@@ -263,18 +268,22 @@ public class DefaultNamedDomainObjectCollection<T> extends DefaultDomainObjectCo
         return allNames;
     }
 
+    @Override
     public <S extends T> NamedDomainObjectCollection<S> withType(Class<S> type) {
         return filtered(createFilter(type));
     }
 
+    @Override
     public NamedDomainObjectCollection<T> matching(Spec<? super T> spec) {
         return filtered(createFilter(spec));
     }
 
+    @Override
     public NamedDomainObjectCollection<T> matching(Closure spec) {
         return matching(Specs.<T>convertClosureToSpec(spec));
     }
 
+    @Override
     public T findByName(String name) {
         T value = findByNameWithoutRules(name);
         if (value != null) {
@@ -317,6 +326,7 @@ public class DefaultNamedDomainObjectCollection<T> extends DefaultDomainObjectCo
         }
     }
 
+    @Override
     public T getByName(String name) throws UnknownDomainObjectException {
         T t = findByName(name);
         if (t == null) {
@@ -325,6 +335,7 @@ public class DefaultNamedDomainObjectCollection<T> extends DefaultDomainObjectCo
         return t;
     }
 
+    @Override
     public T getByName(String name, Closure configureClosure) throws UnknownDomainObjectException {
         return getByName(name, ConfigureUtil.configureUsing(configureClosure));
     }
@@ -337,6 +348,7 @@ public class DefaultNamedDomainObjectCollection<T> extends DefaultDomainObjectCo
         return t;
     }
 
+    @Override
     public T getAt(String name) throws UnknownDomainObjectException {
         return getByName(name);
     }
@@ -438,11 +450,13 @@ public class DefaultNamedDomainObjectCollection<T> extends DefaultDomainObjectCo
         return true;
     }
 
+    @Override
     public Rule addRule(Rule rule) {
         rules.add(rule);
         return rule;
     }
 
+    @Override
     public Rule addRule(final String description, final Closure ruleAction) {
         return addRule(new RuleAdapter(description) {
             @Override
@@ -481,6 +495,7 @@ public class DefaultNamedDomainObjectCollection<T> extends DefaultDomainObjectCo
         }
     }
 
+    @Override
     public List<Rule> getRules() {
         return Collections.unmodifiableList(rules);
     }
@@ -677,7 +692,7 @@ public class DefaultNamedDomainObjectCollection<T> extends DefaultDomainObjectCo
         public ProviderInternal<? extends T> getPending(String name) {
             ProviderInternal<?> provider = delegate.getPending(name);
             if (provider != null && provider.getType() != null && filter.getType().isAssignableFrom(provider.getType())) {
-                return (ProviderInternal<? extends T>) provider;
+                return Cast.uncheckedNonnullCast(provider);
             } else {
                 return null;
             }
@@ -721,11 +736,11 @@ public class DefaultNamedDomainObjectCollection<T> extends DefaultDomainObjectCo
 
     private static class ObjectBackedElementInfo<T> implements ElementInfo<T> {
         private final String name;
-        private final T o;
+        private final T obj;
 
-        ObjectBackedElementInfo(String name, T o) {
+        ObjectBackedElementInfo(String name, T obj) {
             this.name = name;
-            this.o = o;
+            this.obj = obj;
         }
 
         @Override
@@ -735,7 +750,7 @@ public class DefaultNamedDomainObjectCollection<T> extends DefaultDomainObjectCo
 
         @Override
         public Class<?> getType() {
-            return new DslObject(o).getDeclaredType();
+            return new DslObject(obj).getDeclaredType();
         }
     }
 
@@ -794,7 +809,8 @@ public class DefaultNamedDomainObjectCollection<T> extends DefaultDomainObjectCo
         return Cast.uncheckedCast(getInstantiator().newInstance(ExistingNamedDomainObjectProvider.class, this, name, new DslObject(object).getDeclaredType()));
     }
 
-    protected abstract class AbstractNamedDomainObjectProvider<I extends T> extends AbstractReadOnlyProvider<I> implements Named, NamedDomainObjectProvider<I> {
+    @NonExtensible
+    protected abstract class AbstractNamedDomainObjectProvider<I extends T> extends AbstractMinimalProvider<I> implements Named, NamedDomainObjectProvider<I> {
         private final String name;
         private final Class<I> type;
 
@@ -815,29 +831,30 @@ public class DefaultNamedDomainObjectCollection<T> extends DefaultDomainObjectCo
         }
 
         @Override
-        public boolean isPresent() {
+        public boolean calculatePresence(ValueConsumer consumer) {
             return findDomainObject(getName()) != null;
         }
 
         @Override
         public String toString() {
-            return String.format("provider(%s %s, %s)", getTypeDisplayName(), getName(), getType());
+            return String.format("provider(%s '%s', %s)", getTypeDisplayName(), getName(), getType());
         }
     }
 
     protected class ExistingNamedDomainObjectProvider<I extends T> extends AbstractNamedDomainObjectProvider<I> {
 
-        public ExistingNamedDomainObjectProvider(String name, Class type) {
+        public ExistingNamedDomainObjectProvider(String name, Class<I> type) {
             super(name, type);
         }
 
+        @Override
         public void configure(Action<? super I> action) {
             assertMutable("NamedDomainObjectProvider.configure(Action)");
             withMutationDisabled(action).execute(get());
         }
 
         @Override
-        public boolean isPresent() {
+        public boolean calculatePresence(ValueConsumer consumer) {
             return getOrNull() != null;
         }
 
@@ -850,8 +867,8 @@ public class DefaultNamedDomainObjectCollection<T> extends DefaultDomainObjectCo
         }
 
         @Override
-        public I getOrNull() {
-            return Cast.uncheckedCast(findByNameWithoutRules(getName()));
+        protected Value<I> calculateOwnValue(ValueConsumer consumer) {
+            return Value.ofNullable(Cast.uncheckedCast(findByNameWithoutRules(getName())));
         }
     }
 
@@ -871,7 +888,7 @@ public class DefaultNamedDomainObjectCollection<T> extends DefaultDomainObjectCo
         }
 
         @Override
-        public boolean isPresent() {
+        public boolean calculatePresence(ValueConsumer consumer) {
             return findDomainObject(getName()) != null;
         }
 
@@ -899,9 +916,9 @@ public class DefaultNamedDomainObjectCollection<T> extends DefaultDomainObjectCo
         }
 
         @Override
-        public I getOrNull() {
+        protected Value<? extends I> calculateOwnValue(ValueConsumer consumer) {
             if (wasElementRemoved()) {
-                return null;
+                return Value.missing();
             }
             if (failure != null) {
                 throw failure;
@@ -912,7 +929,7 @@ public class DefaultNamedDomainObjectCollection<T> extends DefaultDomainObjectCo
                     tryCreate();
                 }
             }
-            return object;
+            return Value.of(object);
         }
 
         protected void tryCreate() {

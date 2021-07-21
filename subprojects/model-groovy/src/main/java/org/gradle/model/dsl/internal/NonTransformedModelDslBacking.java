@@ -20,7 +20,7 @@ import groovy.lang.Closure;
 import groovy.lang.GroovyObjectSupport;
 import groovy.lang.MissingMethodException;
 import groovy.lang.MissingPropertyException;
-import net.jcip.annotations.NotThreadSafe;
+import javax.annotation.concurrent.NotThreadSafe;
 import org.gradle.api.Action;
 import org.gradle.api.GradleException;
 import org.gradle.internal.Actions;
@@ -36,7 +36,7 @@ import org.gradle.model.internal.core.rule.describe.ModelRuleDescriptor;
 import org.gradle.model.internal.core.rule.describe.SimpleModelRuleDescriptor;
 import org.gradle.model.internal.registry.ModelRegistry;
 import org.gradle.model.internal.type.ModelType;
-import org.gradle.util.ClosureBackedAction;
+import org.gradle.util.internal.ClosureBackedAction;
 
 import static org.gradle.model.internal.core.DefaultNodeInitializerRegistry.DEFAULT_REFERENCE;
 import static org.gradle.model.internal.core.NodeInitializerContext.forType;

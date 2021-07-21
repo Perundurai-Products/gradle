@@ -20,10 +20,11 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
 import org.gradle.api.DefaultTask;
+import org.gradle.api.internal.file.FileOperations;
 import org.gradle.internal.IoActions;
 import org.gradle.internal.UncheckedException;
 import org.gradle.internal.util.PropertiesUtils;
-import org.gradle.util.DeferredUtil;
+import org.gradle.util.internal.DeferredUtil;
 
 import javax.annotation.Nullable;
 import java.io.BufferedOutputStream;
@@ -191,7 +192,7 @@ public class WriteProperties extends DefaultTask {
      */
     @OutputFile
     public File getOutputFile() {
-        return getProject().file(outputFile);
+        return getServices().get(FileOperations.class).file(outputFile);
     }
 
     /**

@@ -15,6 +15,10 @@
  */
 package org.gradle.internal.nativeintegration.filesystem;
 
+import org.gradle.internal.file.Chmod;
+import org.gradle.internal.file.FileException;
+import org.gradle.internal.file.Stat;
+
 import java.io.File;
 
 /**
@@ -24,25 +28,27 @@ public interface FileSystem extends Chmod, Stat {
     /**
      * Default Unix permissions for directories, {@code 755}.
      */
-    public static final int DEFAULT_DIR_MODE = 0755;
+    @SuppressWarnings("OctalInteger")
+    int DEFAULT_DIR_MODE = 0755;
 
     /**
      * Default Unix permissions for files, {@code 644}.
      */
-    public static final int DEFAULT_FILE_MODE = 0644;
+    @SuppressWarnings("OctalInteger")
+    int DEFAULT_FILE_MODE = 0644;
 
     /**
      * Tells whether the file system is case sensitive.
      *
-     * @return <code>true</code> if the file system is case sensitive, <code>false</code> otherwise
+     * @return <tt>true</tt> if the file system is case sensitive, <tt>false</tt> otherwise
      */
     boolean isCaseSensitive();
 
     /**
      * Tells if the file system can create symbolic links. If the answer cannot be determined accurately,
-     * <code>false</code> is returned.
+     * <tt>false</tt> is returned.
      *
-     * @return <code>true</code> if the file system can create symbolic links, <code>false</code> otherwise
+     * @return <tt>true</tt> if the file system can create symbolic links, <tt>false</tt> otherwise
      */
     boolean canCreateSymbolicLink();
 

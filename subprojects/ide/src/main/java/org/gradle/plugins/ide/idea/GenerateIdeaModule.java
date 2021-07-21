@@ -20,6 +20,7 @@ import org.gradle.internal.xml.XmlTransformer;
 import org.gradle.plugins.ide.api.XmlGeneratorTask;
 import org.gradle.plugins.ide.idea.model.IdeaModule;
 import org.gradle.plugins.ide.idea.model.Module;
+import org.gradle.work.DisableCachingByDefault;
 
 import javax.inject.Inject;
 import java.io.File;
@@ -31,6 +32,7 @@ import java.io.File;
  * <p>
  * At this moment nearly all configuration is done via {@link IdeaModule}.
  */
+@DisableCachingByDefault(because = "Not made cacheable, yet")
 public class GenerateIdeaModule extends XmlGeneratorTask<Module> {
 
     private IdeaModule module;
@@ -65,6 +67,7 @@ public class GenerateIdeaModule extends XmlGeneratorTask<Module> {
      * change the output file name it is much easier to do it via the <b>idea.module.name</b> property. <p> Please refer to documentation in {@link IdeaModule} <b>name</b> property. In IntelliJ IDEA
      * the module name is the same as the name of the *.iml file.
      */
+    @Override
     public File getOutputFile() {
         if (module == null) {
             return super.getOutputFile();
@@ -72,6 +75,7 @@ public class GenerateIdeaModule extends XmlGeneratorTask<Module> {
         return module.getOutputFile();
     }
 
+    @Override
     public void setOutputFile(File newOutputFile) {
         module.setOutputFile(newOutputFile);
     }

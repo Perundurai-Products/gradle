@@ -30,10 +30,10 @@ class GroovySecurityManagerIssuesIntegrationTest extends AbstractIntegrationSpec
         writeGroovyTestSource("src/test/groovy")
         file('build.gradle') << """
             apply plugin:'groovy'
-            ${jcenterRepository()}
+            ${mavenCentralRepository()}
             dependencies{
                 compile localGroovy()
-                testCompile 'junit:junit:4.12'
+                testCompile 'junit:junit:4.13'
             }
             """
         executer.withArguments("-i")

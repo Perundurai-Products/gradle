@@ -16,22 +16,29 @@
 
 package org.gradle.api.internal.project
 
+
+import org.gradle.api.internal.GradleInternal
 import org.gradle.api.internal.SettingsInternal
 import org.gradle.api.internal.artifacts.DefaultBuildIdentifier
 import org.gradle.api.internal.artifacts.DefaultProjectComponentIdentifier
+import org.gradle.api.internal.initialization.ClassLoaderScope
 import org.gradle.initialization.DefaultProjectDescriptor
 import org.gradle.initialization.DefaultProjectDescriptorRegistry
 import org.gradle.internal.build.BuildState
-import org.gradle.internal.concurrent.ParallelismConfigurationManagerFixture
+import org.gradle.internal.concurrent.DefaultParallelismConfiguration
 import org.gradle.internal.resources.DefaultResourceLockCoordinationService
+import org.gradle.internal.service.DefaultServiceRegistry
 import org.gradle.internal.work.DefaultWorkerLeaseService
 import org.gradle.test.fixtures.concurrent.ConcurrentSpec
 import org.gradle.util.Path
 
+import static org.junit.Assert.assertTrue
+
 class DefaultProjectStateRegistryTest extends ConcurrentSpec {
-    def workerLeaseService =  new DefaultWorkerLeaseService(new DefaultResourceLockCoordinationService(), new ParallelismConfigurationManagerFixture(true, 4))
+    def workerLeaseService = new DefaultWorkerLeaseService(new DefaultResourceLockCoordinationService(), new DefaultParallelismConfiguration(true, 4))
     def parentLease = workerLeaseService.getWorkerLease()
     def registry = new DefaultProjectStateRegistry(workerLeaseService)
+    def projectFactory = Mock(IProjectFactory)
 
     def "adds projects for a build"() {
         given:
@@ -43,14 +50,22 @@ class DefaultProjectStateRegistryTest extends ConcurrentSpec {
 
         def root = registry.stateFor(project(":"))
         root.name == "root"
+        root.identityPath == Path.ROOT
+        root.projectPath == Path.ROOT
         root.componentIdentifier.projectPath == ":"
         root.parent == null
+
         def p1 = registry.stateFor(project("p1"))
         p1.name == "p1"
+        p1.identityPath == Path.path(":p1")
+        p1.projectPath == Path.path(":p1")
         p1.parent == root
         p1.componentIdentifier.projectPath == ":p1"
+
         def p2 = registry.stateFor(project("p2"))
         p2.name == "p2"
+        p2.identityPath == Path.path(":p2")
+        p2.projectPath == Path.path(":p2")
         p2.parent == root
         p2.componentIdentifier.projectPath == ":p2"
 
@@ -58,9 +73,72 @@ class DefaultProjectStateRegistryTest extends ConcurrentSpec {
         registry.stateFor(p1.componentIdentifier).is(p1)
         registry.stateFor(p2.componentIdentifier).is(p2)
 
-        registry.stateFor(build.buildIdentifier, Path.ROOT).is(root)
-        registry.stateFor(build.buildIdentifier, Path.path(":p1")).is(p1)
-        registry.stateFor(build.buildIdentifier, Path.path(":p2")).is(p2)
+        def projects = registry.projectsFor(build.buildIdentifier)
+        projects.getProject(Path.ROOT).is(root)
+        projects.getProject(Path.path(":p1")).is(p1)
+        projects.getProject(Path.path(":p2")).is(p2)
+
+        // Currently need to attach the project objects in order to query all projects from registry
+        createRootProject()
+        createProject(p1, project("p1"))
+        createProject(p2, project("p2"))
+
+        projects.allProjects.toList() == [root, p1, p2]
+    }
+
+    def "can create mutable project model"() {
+        given:
+        def build = build("p1", "p2")
+        registry.registerProjects(build)
+
+        def rootProject = project(':')
+        def rootState = registry.stateFor(rootProject)
+
+        1 * projectFactory.createProject(_, _, rootState, _, _, _) >> rootProject
+
+        rootState.createMutableModel(Stub(ClassLoaderScope), Stub(ClassLoaderScope))
+
+        def project = project("p1")
+        def state = registry.stateFor(project)
+
+        1 * projectFactory.createProject(_, _, state, _, _, _) >> project
+
+        state.createMutableModel(Stub(ClassLoaderScope), Stub(ClassLoaderScope))
+
+        expect:
+        rootState.mutableModel == rootProject
+        state.mutableModel == project
+    }
+
+    def "cannot query mutable project instance when not set"() {
+        given:
+        def build = build("p1", "p2")
+        registry.registerProjects(build)
+        def project = project("p1")
+
+        def state = registry.stateFor(project)
+
+        when:
+        state.mutableModel
+
+        then:
+        def e = thrown(IllegalStateException)
+        e.message == 'The project object for project :p1 has not been attached yet.'
+    }
+
+    void createRootProject() {
+        def rootProject = project(':')
+        def rootState = registry.stateFor(rootProject)
+
+        1 * projectFactory.createProject(_, _, rootState, _, _, _) >> rootProject
+
+        rootState.createMutableModel(Stub(ClassLoaderScope), Stub(ClassLoaderScope))
+    }
+
+    void createProject(ProjectState state, ProjectInternal project) {
+        1 * projectFactory.createProject(_, _, state, _, _, _) >> project
+
+        state.createMutableModel(Stub(ClassLoaderScope), Stub(ClassLoaderScope))
     }
 
     def "one thread can access state at a time"() {
@@ -69,22 +147,34 @@ class DefaultProjectStateRegistryTest extends ConcurrentSpec {
         def project = project("p1")
 
         registry.registerProjects(build)
+        createRootProject()
         def state = registry.stateFor(project)
+        createProject(state, project)
 
         when:
         async {
             workerThread {
-                state.withMutableState {
+                assert !state.hasMutableState()
+                state.applyToMutableState {
+                    assert state.hasMutableState()
                     instant.start
                     thread.block()
+                    state.applyToMutableState {
+                        // nested
+                    }
+                    assert state.hasMutableState()
                     instant.thread1
                 }
+                assert !state.hasMutableState()
             }
             workerThread {
                 thread.blockUntil.start
-                state.withMutableState {
+                assert !state.hasMutableState()
+                state.applyToMutableState {
+                    assert state.hasMutableState()
                     instant.thread2
                 }
+                assert !state.hasMutableState()
             }
         }
 
@@ -99,8 +189,11 @@ class DefaultProjectStateRegistryTest extends ConcurrentSpec {
         def project2 = project("p2")
 
         registry.registerProjects(build)
+        createRootProject()
         def state1 = registry.stateFor(project1)
+        createProject(state1, project1)
         def state2 = registry.stateFor(project2)
+        createProject(state2, project2)
 
         def projectLock1 = workerLeaseService.getProjectLock(build.getIdentityPath(), project1.getIdentityPath())
         def projectLock2 = workerLeaseService.getProjectLock(build.getIdentityPath(), project2.getIdentityPath())
@@ -108,10 +201,10 @@ class DefaultProjectStateRegistryTest extends ConcurrentSpec {
         expect:
         async {
             workerThread {
-                state1.withMutableState {
+                state1.applyToMutableState {
                     instant.start1
                     thread.blockUntil.start2
-                    state2.withMutableState {
+                    state2.applyToMutableState {
                         assert workerLeaseService.getCurrentProjectLocks().contains(projectLock2)
                         assert !workerLeaseService.getCurrentProjectLocks().contains(projectLock1)
                         instant.thread1
@@ -120,10 +213,10 @@ class DefaultProjectStateRegistryTest extends ConcurrentSpec {
                 }
             }
             workerThread {
-                state2.withMutableState {
+                state2.applyToMutableState {
                     instant.start2
                     thread.blockUntil.start1
-                    state1.withMutableState {
+                    state1.applyToMutableState {
                         assert workerLeaseService.getCurrentProjectLocks().contains(projectLock1)
                         assert !workerLeaseService.getCurrentProjectLocks().contains(projectLock2)
                         instant.thread2
@@ -134,24 +227,466 @@ class DefaultProjectStateRegistryTest extends ConcurrentSpec {
         }
     }
 
-    def "can access projects with lenient state"() {
+    def "can access projects with all projects locked"() {
+        given:
+        def build = build("p1", "p2")
+        registry.registerProjects(build)
+        def state = registry.stateFor(project("p1"))
+
+        expect:
+        !state.hasMutableState()
+
+        and:
+        registry.withMutableStateOfAllProjects {
+            assert state.hasMutableState()
+            registry.withMutableStateOfAllProjects {
+                assert state.hasMutableState()
+            }
+            assert state.hasMutableState()
+        }
+
+        and:
+        !state.hasMutableState()
+    }
+
+    def "cannot lock projects state while another thread has locked all projects"() {
         given:
         def build = build("p1", "p2")
         registry.registerProjects(build)
 
-        expect:
-        !registry.stateFor(project("p1")).hasMutableState()
+        when:
+        async {
+            start {
+                registry.withMutableStateOfAllProjects {
+                    instant.start
+                    thread.block()
+                }
+            }
+            start {
+                thread.blockUntil.start
+                registry.withMutableStateOfAllProjects {
+                }
+            }
+        }
 
-        and:
-        registry.withLenientState({ assert registry.stateFor(project("p1")).hasMutableState() })
+        then:
+        thrown(IllegalStateException)
+    }
 
-        and:
-        !registry.stateFor(project("p1")).hasMutableState()
+    def "cannot lock project state while another thread has locked all projects"() {
+        given:
+        def build = build("p1", "p2")
+        registry.registerProjects(build)
+
+        when:
+        async {
+            start {
+                registry.withMutableStateOfAllProjects {
+                    instant.start
+                    thread.block()
+                }
+            }
+            start {
+                thread.blockUntil.start
+                registry.stateFor(project("p1")).applyToMutableState {
+                }
+            }
+        }
+
+        then:
+        thrown(IllegalStateException)
+    }
+
+    def "releases lock for all projects while running blocking operation"() {
+        given:
+        def build = build("p1", "p2")
+        registry.registerProjects(build)
+
+        when:
+        async {
+            registry.withMutableStateOfAllProjects {
+                def state = registry.stateFor(project("p1"))
+                assert state.hasMutableState()
+                registry.blocking {
+                    assertTrue !state.hasMutableState()
+                }
+                assert state.hasMutableState()
+            }
+        }
+
+        then:
+        noExceptionThrown()
+    }
+
+    def "thread can be granted uncontrolled access to all projects"() {
+        given:
+        registry.registerProjects(build("p1", "p2"))
+        createRootProject()
+        def project1 = project("p1")
+        def state1 = registry.stateFor(project1)
+        createProject(state1, project1)
+        def state2 = registry.stateFor(project("p2"))
+
+        when:
+        async {
+            start {
+                state1.applyToMutableState { p ->
+                    assert state1.hasMutableState()
+                    assert !state2.hasMutableState()
+                    instant.mutating1
+                    thread.blockUntil.finished1
+                }
+                state1.applyToMutableState { p ->
+                    assert state1.hasMutableState()
+                    instant.mutating2
+                    thread.blockUntil.finished2
+                }
+            }
+            start {
+                registry.allowUncontrolledAccessToAnyProject {
+                    assert state1.hasMutableState()
+                    assert state2.hasMutableState()
+                    thread.blockUntil.mutating1
+                    // both threads are accessing project
+                    instant.finished1
+                    thread.blockUntil.mutating2
+                    // both threads are accessing project
+                    instant.finished2
+                }
+            }
+        }
+
+        then:
+        noExceptionThrown()
+    }
+
+    def "multiple threads can nest calls with uncontrolled access to all projects"() {
+        given:
+        registry.registerProjects(build("p1", "p2"))
+        createRootProject()
+        def project1 = project("p1")
+        def state1 = registry.stateFor(project1)
+        createProject(state1, project1)
+        def state2 = registry.stateFor(project("p2"))
+
+        when:
+        async {
+            def action = {
+                registry.allowUncontrolledAccessToAnyProject {
+                    assert state1.hasMutableState()
+                    assert state2.hasMutableState()
+                    registry.allowUncontrolledAccessToAnyProject {
+                        assertTrue state1.hasMutableState()
+                        assertTrue state2.hasMutableState()
+                    }
+                    state1.applyToMutableState {
+                        assertTrue state1.hasMutableState()
+                        assertTrue state2.hasMutableState()
+                    }
+                    assert state1.hasMutableState()
+                    assert state2.hasMutableState()
+                }
+            }
+            start(action)
+            start(action)
+            start(action)
+            start(action)
+            start(action)
+        }
+
+        then:
+        noExceptionThrown()
+    }
+
+    def "thread can be granted uncontrolled access to a single project"() {
+        given:
+        registry.registerProjects(build("p1", "p2"))
+        createRootProject()
+        def project1 = project("p1")
+        def state1 = registry.stateFor(project1)
+        createProject(state1, project1)
+        def state2 = registry.stateFor(project("p2"))
+
+        when:
+        async {
+            start {
+                state1.applyToMutableState { p ->
+                    assert state1.hasMutableState()
+                    assert !state2.hasMutableState()
+                    instant.mutating1
+                    thread.blockUntil.finished1
+                }
+                state1.applyToMutableState { p ->
+                    assert state1.hasMutableState()
+                    instant.mutating2
+                    thread.blockUntil.finished2
+                }
+            }
+            start {
+                state1.forceAccessToMutableState {
+                    assert state1.hasMutableState()
+                    assert !state2.hasMutableState()
+                    thread.blockUntil.mutating1
+                    // both threads are accessing project
+                    instant.finished1
+                    thread.blockUntil.mutating2
+                    // both threads are accessing project
+                    instant.finished2
+                }
+            }
+        }
+
+        then:
+        noExceptionThrown()
+    }
+
+    def "multiple threads can nest calls with uncontrolled access to specific projects"() {
+        given:
+        registry.registerProjects(build("p1", "p2"))
+        createRootProject()
+        def project1 = project("p1")
+        def state1 = registry.stateFor(project1)
+        createProject(state1, project1)
+        def project2 = project("p2")
+        def state2 = registry.stateFor(project2)
+        createProject(state2, project2)
+
+        when:
+        async {
+            def action = {
+                state1.forceAccessToMutableState {
+                    assert state1.hasMutableState()
+                    assert !state2.hasMutableState()
+                    state1.forceAccessToMutableState {
+                        assertTrue state1.hasMutableState()
+                        assertTrue !state2.hasMutableState()
+                    }
+                    state1.applyToMutableState {
+                        assertTrue state1.hasMutableState()
+                        assertTrue !state2.hasMutableState()
+                    }
+                    state2.applyToMutableState {
+                        assertTrue state1.hasMutableState()
+                        assertTrue state2.hasMutableState()
+                    }
+                    assert state1.hasMutableState()
+                    assert !state2.hasMutableState()
+                }
+            }
+            start(action)
+            start(action)
+            start(action)
+            start(action)
+            start(action)
+        }
+
+        then:
+        noExceptionThrown()
+    }
+
+    def "thread must own project state in order to set calculated value"() {
+        given:
+        registry.registerProjects(build("p1", "p2"))
+        createRootProject()
+        def project1 = project("p1")
+        def project2 = project("p2")
+        def state1 = registry.stateFor(project1)
+        createProject(state1, project1)
+        def state2 = registry.stateFor(project2)
+        createProject(state2, project2)
+        def calculatedValue = state1.newCalculatedValue("initial")
+
+        when:
+        calculatedValue.set("bad")
+
+        then:
+        thrown(IllegalStateException)
+        calculatedValue.get() == "initial"
+
+        when:
+        state1.applyToMutableState {
+            calculatedValue.set("updated")
+        }
+
+        then:
+        calculatedValue.get() == "updated"
+
+        when:
+        state1.applyToMutableState {
+            state2.applyToMutableState {
+                // Thread no longer owns the project state
+                calculatedValue.set("bad")
+            }
+        }
+
+        then:
+        thrown(IllegalStateException)
+        calculatedValue.get() == "updated"
+    }
+
+    def "thread must own project state in order to update calculated value"() {
+        given:
+        registry.registerProjects(build("p1", "p2"))
+        createRootProject()
+        def project1 = project("p1")
+        def project2 = project("p2")
+        def state1 = registry.stateFor(project1)
+        createProject(state1, project1)
+        def state2 = registry.stateFor(project2)
+        createProject(state2, project2)
+        def calculatedValue = state1.newCalculatedValue("initial")
+
+        when:
+        calculatedValue.update { throw new RuntimeException() }
+
+        then:
+        thrown(IllegalStateException)
+        calculatedValue.get() == "initial"
+
+        when:
+        state1.applyToMutableState {
+            calculatedValue.update {
+                assert it == "initial"
+                "updated"
+            }
+        }
+
+        then:
+        calculatedValue.get() == "updated"
+
+        when:
+        state1.applyToMutableState {
+            state2.applyToMutableState {
+                // Thread no longer owns the project state
+                calculatedValue.update { throw new RuntimeException() }
+            }
+        }
+
+        then:
+        thrown(IllegalStateException)
+        calculatedValue.get() == "updated"
+    }
+
+    def "update thread blocks other update threads"() {
+        given:
+        registry.registerProjects(build("p1", "p2"))
+        createRootProject()
+        def project1 = project("p1")
+        def state1 = registry.stateFor(project1)
+        createProject(state1, project1)
+        def calculatedValue = state1.newCalculatedValue("initial")
+
+        when:
+        async {
+            workerThread {
+                state1.applyToMutableState {
+                    calculatedValue.update {
+                        assert it == "initial"
+                        instant.start
+                        thread.block()
+                        instant.thread1
+                        "updated1"
+                    }
+                }
+            }
+            workerThread {
+                thread.blockUntil.start
+                state1.applyToMutableState {
+                    calculatedValue.update {
+                        assert it == "updated1"
+                        instant.thread2
+                        "updated2"
+                    }
+                }
+            }
+        }
+
+        then:
+        calculatedValue.get() == "updated2"
+        instant.thread1 < instant.thread2
+    }
+
+    def "update thread does not block other read threads"() {
+        given:
+        registry.registerProjects(build("p1", "p2"))
+        createRootProject()
+        def project1 = project("p1")
+        def state1 = registry.stateFor(project1)
+        createProject(state1, project1)
+        def calculatedValue = state1.newCalculatedValue("initial")
+
+        when:
+        async {
+            workerThread {
+                state1.applyToMutableState {
+                    calculatedValue.update {
+                        assert it == "initial"
+                        instant.start
+                        thread.blockUntil.read
+                        "updated"
+                    }
+                }
+            }
+            workerThread {
+                thread.blockUntil.start
+                assert calculatedValue.get() == "initial"
+                instant.read
+            }
+        }
+
+        then:
+        calculatedValue.get() == "updated"
+    }
+
+    def "can have cycle in project dependencies"() {
+        given:
+        registry.registerProjects(build("p1", "p2"))
+        createRootProject()
+        def project1 = project("p1")
+        def state1 = registry.stateFor(project1)
+        createProject(state1, project1)
+        def project2 = project("p2")
+        def state2 = registry.stateFor(project2)
+        createProject(state2, project2)
+        def calculatedValue = state1.newCalculatedValue("initial")
+
+        when:
+        async {
+            workerThread {
+                state1.applyToMutableState {
+                    instant.start
+                    thread.blockUntil.start2
+                    calculatedValue.update {
+                        assert it == "initial"
+                        state2.applyToMutableState {
+                        }
+                        "updated1"
+                    }
+                }
+            }
+            workerThread {
+                thread.blockUntil.start
+                state2.applyToMutableState {
+                    instant.start2
+                    state1.applyToMutableState {
+                        calculatedValue.update {
+                            assert it == "updated1"
+                            "updated2"
+                        }
+                    }
+                }
+            }
+        }
+
+        then:
+        calculatedValue.get() == "updated2"
     }
 
     ProjectInternal project(String name) {
         def project = Stub(ProjectInternal)
-        project.identityPath >> (name == ':' ? Path.ROOT : Path.ROOT.child(name))
+        def path = name == ':' ? Path.ROOT : Path.ROOT.child(name)
+        project.identityPath >> path
+        project.compareTo(_) >> { ProjectInternal other -> path.compareTo(other.identityPath) }
         return project
     }
 
@@ -171,6 +706,11 @@ class DefaultProjectStateRegistryTest extends ConcurrentSpec {
         build.buildIdentifier >> DefaultBuildIdentifier.ROOT
         build.getIdentityPathForProject(_) >> { Path path -> path }
         build.getIdentifierForProject(_) >> { Path path -> new DefaultProjectComponentIdentifier(DefaultBuildIdentifier.ROOT, path, path, "??") }
+        def services = new DefaultServiceRegistry()
+        services.add(projectFactory)
+        build.mutableModel >> Stub(GradleInternal) {
+            getServices() >> services
+        }
         return build
     }
 
@@ -179,4 +719,5 @@ class DefaultProjectStateRegistryTest extends ConcurrentSpec {
             workerLeaseService.withLocks([parentLease.createChild()], closure)
         }
     }
+
 }

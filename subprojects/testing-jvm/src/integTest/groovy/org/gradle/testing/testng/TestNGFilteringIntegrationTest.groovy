@@ -26,18 +26,22 @@ import spock.lang.Issue
 import static org.gradle.testing.fixture.JUnitMultiVersionIntegrationSpec.*
 
 @TargetCoverage({TestNGCoverage.STANDARD_COVERAGE})
-public class TestNGFilteringIntegrationTest extends AbstractTestFilteringIntegrationTest {
+class TestNGFilteringIntegrationTest extends AbstractTestFilteringIntegrationTest {
 
     String imports = "org.testng.annotations.*"
     String framework = "TestNG"
-    String dependencies = "testCompile 'org.testng:testng:${dependencyVersion}'"
+
+    @Override
+    String getDependencies() {
+        return "testImplementation 'org.testng:testng:${dependencyVersion}'"
+    }
 
     void theUsualFiles() {
         buildFile << """
             apply plugin: 'java'
             ${mavenCentralRepository()}
             dependencies {
-                testCompile 'org.testng:testng:$version'
+                testImplementation 'org.testng:testng:$version'
             }
             test {
               useTestNG {

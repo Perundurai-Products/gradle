@@ -26,13 +26,13 @@ import org.junit.Test
 
 import static org.gradle.api.reflect.TypeOf.typeOf
 import static org.gradle.util.Matchers.isEmpty
-import static org.hamcrest.Matchers.equalTo
-import static org.hamcrest.Matchers.hasItem
-import static org.hamcrest.Matchers.instanceOf
-import static org.junit.Assert.assertThat
+import static org.hamcrest.CoreMatchers.equalTo
+import static org.hamcrest.CoreMatchers.hasItem
+import static org.hamcrest.CoreMatchers.instanceOf
+import static org.hamcrest.MatcherAssert.assertThat
 
 class DefaultScalaSourceSetTest {
-    public @Rule TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
+    public @Rule TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider(getClass())
 
     private final DefaultScalaSourceSet sourceSet = new DefaultScalaSourceSet("<set-display-name>", TestUtil.objectFactory(tmpDir.testDirectory))
 

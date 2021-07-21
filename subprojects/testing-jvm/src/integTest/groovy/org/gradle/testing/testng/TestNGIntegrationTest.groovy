@@ -23,8 +23,8 @@ import org.gradle.testing.fixture.TestNGCoverage
 import spock.lang.Ignore
 import spock.lang.Issue
 
-import static org.hamcrest.Matchers.containsString
-import static org.hamcrest.Matchers.not
+import static org.hamcrest.CoreMatchers.containsString
+import static org.hamcrest.CoreMatchers.not
 
 @TargetCoverage({ TestNGCoverage.STANDARD_COVERAGE_WITH_INITIAL_ICLASS_LISTENER })
 class TestNGIntegrationTest extends MultiVersionIntegrationSpec {
@@ -45,15 +45,15 @@ class TestNGIntegrationTest extends MultiVersionIntegrationSpec {
         """.stripIndent()
         file('src/test/java/org/gradle/OkTest.java') << '''
             package org.gradle;
-            
+
             import static org.testng.Assert.*;
-            
+
             public class OkTest {
                 @org.testng.annotations.Test
                 public void ok() throws Exception {
                     // check working dir
                     assertEquals(System.getProperty("testDir"), System.getProperty("user.dir"));
-            
+
                     // check Gradle classes not visible
                     try {
                         getClass().getClassLoader().loadClass("org.gradle.api.Project");
@@ -61,16 +61,16 @@ class TestNGIntegrationTest extends MultiVersionIntegrationSpec {
                     } catch (ClassNotFoundException e) {
                         // Expected
                     }
-            
+
                     // check context classloader
                     assertSame(getClass().getClassLoader(), Thread.currentThread().getContextClassLoader());
-            
+
                     // check sys properties
                     assertEquals("value", System.getProperty("testSysProperty"));
-            
+
                     // check env vars
                     assertEquals("value", System.getenv("TEST_ENV_VAR"));
-            
+
                     // check other environmental stuff
                     assertEquals("Test worker", Thread.currentThread().getName());
                     assertNull(System.getSecurityManager());
@@ -91,7 +91,7 @@ class TestNGIntegrationTest extends MultiVersionIntegrationSpec {
             test {
                 ignoreFailures = true
             }
-            
+
             ${testListener()}
         """.stripIndent()
         file('src/test/java/AppException.java') << 'public class AppException extends Exception {}'
@@ -99,13 +99,13 @@ class TestNGIntegrationTest extends MultiVersionIntegrationSpec {
             public class SomeTest {
                 @org.testng.annotations.Test
                 public void pass() {}
-            
+
                 @org.testng.annotations.Test
                 public void fail() { assert false; }
-            
+
                 @org.testng.annotations.Test
                 public void knownError() { throw new RuntimeException("message"); }
-            
+
                 @org.testng.annotations.Test
                 public void unknownError() throws AppException { throw new AppException(); }
             }
@@ -139,7 +139,7 @@ class TestNGIntegrationTest extends MultiVersionIntegrationSpec {
         file('src/test/java/SomeTest.java') << '''
             import org.testng.Assert;
             import org.testng.annotations.Test;
-            
+
             public class SomeTest {
                 @Test(invocationCount = 2, threadPoolSize = 2)
                 public void someTest() { Assert.assertTrue(true); }
@@ -155,7 +155,7 @@ class TestNGIntegrationTest extends MultiVersionIntegrationSpec {
             ext {
                 ngIncluded = "database"
                 ngExcluded = "slow"
-            }            
+            }
             test {
                 useTestNG {
                     includeGroups ngIncluded
@@ -166,14 +166,14 @@ class TestNGIntegrationTest extends MultiVersionIntegrationSpec {
         file('src/test/java/org/gradle/groups/SomeTest.java') << '''
             package org.gradle.groups;
             import org.testng.annotations.Test;
-            
+
             public class SomeTest {
                 @Test(groups = "web")
                 public void webTest() {}
-            
+
                 @Test(groups = "database")
                 public void databaseTest() {}
-            
+
                 @Test(groups = {"database", "slow"})
                 public void slowDatabaseTest() {}
             }
@@ -193,8 +193,8 @@ class TestNGIntegrationTest extends MultiVersionIntegrationSpec {
         file('src/test/java/org/gradle/factory/FactoryTest.java') << '''
             package org.gradle.factory;
             import org.testng.annotations.Test;
-            
-            public class FactoryTest {            
+
+            public class FactoryTest {
                 private final String name;
                 public FactoryTest(String name) { this.name = name; }
 
@@ -205,7 +205,7 @@ class TestNGIntegrationTest extends MultiVersionIntegrationSpec {
         file('src/test/java/org/gradle/factory/TestNGFactory.java') << '''
             package org.gradle.factory;
             import org.testng.annotations.Factory;
-            
+
             public class TestNGFactory {
                 @Factory
                 public Object[] factory() {
@@ -233,7 +233,7 @@ class TestNGIntegrationTest extends MultiVersionIntegrationSpec {
         file('src/test/java/SomeTest.java') << """
             import org.testng.Assert;
             import org.testng.annotations.Test;
-            
+
             public class SomeTest {
                 @Test(invocationCount = 2, threadPoolSize = 2)
                 public void someTest() { Assert.assertTrue(true); }
@@ -247,7 +247,7 @@ class TestNGIntegrationTest extends MultiVersionIntegrationSpec {
         file('src/test/java/SomeTest.java') << """
             import org.testng.Assert;
             import org.testng.annotations.Test;
-            
+
             public class SomeTest {
                 @Test(invocationCount = 2, threadPoolSize = 2)
                 public void someTest() { Assert.assertTrue(false); }
@@ -283,19 +283,19 @@ class TestNGIntegrationTest extends MultiVersionIntegrationSpec {
             import org.testng.annotations.Factory;
             import org.testng.annotations.Test;
             import org.testng.Assert;
-            
+
             public class TestNG7878 {
                 @Factory
                 public static Object[] createTests() {
-                    return new Object[]{ 
-                            new TestNG7878(), 
-                            new TestNG7878() 
+                    return new Object[]{
+                            new TestNG7878(),
+                            new TestNG7878()
                     };
                 }
-            
+
                 @Test
                 public void runFirst() {}
-                
+
                 @Test(dependsOnMethods = "runFirst")
                 public void testGet2() {
                     Assert.assertEquals(true, true);
@@ -316,7 +316,7 @@ class TestNGIntegrationTest extends MultiVersionIntegrationSpec {
         return '''
             def listener = new TestListenerImpl()
             test {
-                addTestListener(listener)                
+                addTestListener(listener)
             }
             class TestListenerImpl implements TestListener {
                 void beforeSuite(TestDescriptor suite) { println "START [$suite] [$suite.name]" }

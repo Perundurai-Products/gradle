@@ -18,12 +18,18 @@ package org.gradle.testkit.runner.internal;
 
 import org.apache.commons.io.output.WriterOutputStream;
 import org.gradle.api.Action;
+import org.gradle.api.internal.file.temp.DefaultTemporaryFileProvider;
+import org.gradle.api.internal.file.temp.TemporaryFileProvider;
+import org.gradle.initialization.StartParameterBuildOptions;
+import org.gradle.internal.Factory;
+import org.gradle.internal.FileUtils;
 import org.gradle.internal.SystemProperties;
 import org.gradle.internal.classloader.ClasspathUtil;
 import org.gradle.internal.classpath.ClassPath;
 import org.gradle.internal.classpath.DefaultClassPath;
 import org.gradle.internal.installation.CurrentGradleInstallation;
 import org.gradle.internal.installation.GradleInstallation;
+import org.gradle.internal.os.OperatingSystem;
 import org.gradle.testkit.runner.BuildResult;
 import org.gradle.testkit.runner.GradleRunner;
 import org.gradle.testkit.runner.InvalidRunnerConfigurationException;
@@ -61,6 +67,7 @@ public class DefaultGradleRunner extends GradleRunner {
     private OutputStream standardError;
     private InputStream standardInput;
     private boolean forwardingSystemStreams;
+    private Map<String, String> environment;
 
     public DefaultGradleRunner() {
         this(new ToolingApiGradleExecutor(), calculateTestKitDirProvider(SystemProperties.getInstance()));
@@ -73,12 +80,22 @@ public class DefaultGradleRunner extends GradleRunner {
     }
 
     private static TestKitDirProvider calculateTestKitDirProvider(SystemProperties systemProperties) {
-        Map<String, String> systemPropertiesMap = systemProperties.asMap();
-        if (systemPropertiesMap.containsKey(TEST_KIT_DIR_SYS_PROP)) {
-            return new ConstantTestKitDirProvider(new File(systemPropertiesMap.get(TEST_KIT_DIR_SYS_PROP)));
-        } else {
-            return new TempTestKitDirProvider(systemProperties);
-        }
+        return systemProperties.withSystemProperties((Factory<TestKitDirProvider>) () -> {
+            if (System.getProperties().containsKey(TEST_KIT_DIR_SYS_PROP)) {
+                return new ConstantTestKitDirProvider(new File(System.getProperty(TEST_KIT_DIR_SYS_PROP)));
+            } else {
+                TemporaryFileProvider temporaryFileProvider = new DefaultTemporaryFileProvider(() -> {
+                    String rootTmpDir = SystemProperties.getInstance().getWorkerTmpDir();
+                    if (rootTmpDir == null) {
+                        @SuppressWarnings("deprecation")
+                        String javaIoTmpDir = SystemProperties.getInstance().getJavaIoTmpDir();
+                        rootTmpDir = javaIoTmpDir;
+                    }
+                    return FileUtils.canonicalize(new File(rootTmpDir));
+                });
+                return new ConstantTestKitDirProvider(temporaryFileProvider.newTemporaryFile(".gradle-test-kit"));
+            }
+        });
     }
 
     public TestKitDirProvider getTestKitDirProvider() {
@@ -111,7 +128,7 @@ public class DefaultGradleRunner extends GradleRunner {
     }
 
     public DefaultGradleRunner withJvmArguments(List<String> jvmArguments) {
-        this.jvmArguments = Collections.unmodifiableList(new ArrayList<String>(jvmArguments));
+        this.jvmArguments = Collections.unmodifiableList(new ArrayList<>(jvmArguments));
         return this;
     }
 
@@ -137,7 +154,7 @@ public class DefaultGradleRunner extends GradleRunner {
 
     @Override
     public DefaultGradleRunner withArguments(List<String> arguments) {
-        this.arguments = Collections.unmodifiableList(new ArrayList<String>(arguments));
+        this.arguments = Collections.unmodifiableList(new ArrayList<>(arguments));
         return this;
     }
 
@@ -159,7 +176,7 @@ public class DefaultGradleRunner extends GradleRunner {
 
     @Override
     public GradleRunner withPluginClasspath(Iterable<? extends File> classpath) {
-        List<File> f = new ArrayList<File>();
+        List<File> f = new ArrayList<>();
         for (File file : classpath) {
             // These objects are going across the wire.
             // 1. Convert any subclasses back to File in case the subclass isn't available in Gradle.
@@ -180,6 +197,17 @@ public class DefaultGradleRunner extends GradleRunner {
     @Override
     public GradleRunner withDebug(boolean flag) {
         this.debug = flag;
+        return this;
+    }
+
+    @Override
+    public Map<String, String> getEnvironment() {
+        return environment;
+    }
+
+    @Override
+    public GradleRunner withEnvironment(Map<String, String> environment) {
+        this.environment = environment;
         return this;
     }
 
@@ -231,27 +259,22 @@ public class DefaultGradleRunner extends GradleRunner {
 
     @Override
     public BuildResult build() {
-        return run(new Action<GradleExecutionResult>() {
-            public void execute(GradleExecutionResult gradleExecutionResult) {
-                if (!gradleExecutionResult.isSuccessful()) {
-                    throw new UnexpectedBuildFailure(createDiagnosticsMessage("Unexpected build execution failure", gradleExecutionResult), createBuildResult(gradleExecutionResult));
-                }
+        return run(gradleExecutionResult -> {
+            if (!gradleExecutionResult.isSuccessful()) {
+                throw new UnexpectedBuildFailure(createDiagnosticsMessage("Unexpected build execution failure", gradleExecutionResult), createBuildResult(gradleExecutionResult));
             }
         });
     }
 
     @Override
     public BuildResult buildAndFail() {
-        return run(new Action<GradleExecutionResult>() {
-            public void execute(GradleExecutionResult gradleExecutionResult) {
-                if (gradleExecutionResult.isSuccessful()) {
-                    throw new UnexpectedBuildSuccess(createDiagnosticsMessage("Unexpected build execution success", gradleExecutionResult), createBuildResult(gradleExecutionResult));
-                }
+        return run(gradleExecutionResult -> {
+            if (gradleExecutionResult.isSuccessful()) {
+                throw new UnexpectedBuildSuccess(createDiagnosticsMessage("Unexpected build execution success", gradleExecutionResult), createBuildResult(gradleExecutionResult));
             }
         });
     }
 
-    @SuppressWarnings("StringBufferReplaceableByString")
     String createDiagnosticsMessage(String trailingMessage, GradleExecutionResult gradleExecutionResult) {
         String lineBreak = SystemProperties.getInstance().getLineSeparator();
         StringBuilder message = new StringBuilder();
@@ -278,21 +301,38 @@ public class DefaultGradleRunner extends GradleRunner {
             throw new InvalidRunnerConfigurationException("Please specify a project directory before executing the build");
         }
 
+        if (environment != null && debug) {
+            throw new InvalidRunnerConfigurationException("Debug mode is not allowed when environment variables are specified. " +
+                "Debug mode runs 'in process' but we need to fork a separate process to pass environment variables. " +
+                "To run with debug mode, please remove environment variables.");
+        }
+
         File testKitDir = createTestKitDir(testKitDirProvider);
 
         GradleProvider effectiveDistribution = gradleProvider == null ? findGradleInstallFromGradleRunner() : gradleProvider;
 
+        List<String> effectiveArguments = new ArrayList<>();
+        if (OperatingSystem.current().isWindows()) {
+            // When using file system watching in Windows tests it becomes harder to delete the project directory,
+            // since file system watching on Windows adds a lock on the watched directory, which is currently the project directory.
+            // After deleting the contents of the watched directory, Gradle will stop watching the directory and release the file lock.
+            // That may require a retry to delete the watched directory.
+            // To avoid those problems for TestKit tests on Windows, we disable file system watching there.
+            effectiveArguments.add("-D" + StartParameterBuildOptions.WatchFileSystemOption.GRADLE_PROPERTY + "=false");
+        }
+        effectiveArguments.addAll(arguments);
         GradleExecutionResult execResult = gradleExecutor.run(new GradleExecutionParameters(
             effectiveDistribution,
             testKitDir,
             projectDirectory,
-            arguments,
+            effectiveArguments,
             jvmArguments,
             classpath,
             debug,
             standardOutput,
             standardError,
-            standardInput
+            standardInput,
+            environment
         ));
 
         resultVerification.execute(execResult);
@@ -326,6 +366,9 @@ public class DefaultGradleRunner extends GradleRunner {
     private static GradleProvider findGradleInstallFromGradleRunner() {
         GradleInstallation gradleInstallation = CurrentGradleInstallation.get();
         if (gradleInstallation == null) {
+            if ("embedded".equals(System.getProperty("org.gradle.integtest.executer"))) {
+                return GradleProvider.embedded();
+            }
             String messagePrefix = "Could not find a Gradle installation to use based on the location of the GradleRunner class";
             try {
                 File classpathForClass = ClasspathUtil.getClasspathForClass(GradleRunner.class);

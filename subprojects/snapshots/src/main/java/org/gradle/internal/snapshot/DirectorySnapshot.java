@@ -16,22 +16,37 @@
 
 package org.gradle.internal.snapshot;
 
+import com.google.common.annotations.VisibleForTesting;
+import org.gradle.internal.file.FileMetadata.AccessType;
 import org.gradle.internal.file.FileType;
 import org.gradle.internal.hash.HashCode;
 
 import java.util.List;
+import java.util.Optional;
+import java.util.stream.Collectors;
+
+import static org.gradle.internal.snapshot.ChildMapFactory.childMapFromSorted;
+import static org.gradle.internal.snapshot.SnapshotVisitResult.CONTINUE;
 
 /**
- * A file snapshot which can have children (i.e. a directory).
+ * A snapshot of an existing directory hierarchy.
+ *
+ * Includes snapshots of any child element and the Merkle tree hash.
  */
-public class DirectorySnapshot extends AbstractFileSystemLocationSnapshot implements FileSystemLocationSnapshot {
-    private final List<FileSystemLocationSnapshot> children;
+public class DirectorySnapshot extends AbstractFileSystemLocationSnapshot {
+    private final ChildMap<FileSystemLocationSnapshot> children;
     private final HashCode contentHash;
 
-    public DirectorySnapshot(String absolutePath, String name, List<FileSystemLocationSnapshot> children, HashCode contentHash) {
-        super(absolutePath, name);
-        this.children = children;
+    public DirectorySnapshot(String absolutePath, String name, AccessType accessType, HashCode contentHash, List<FileSystemLocationSnapshot> children) {
+        this(absolutePath, name, accessType, contentHash, childMapFromSorted(children.stream()
+            .map(it -> new ChildMap.Entry<>(it.getName(), it))
+            .collect(Collectors.toList())));
+    }
+
+    public DirectorySnapshot(String absolutePath, String name, AccessType accessType, HashCode contentHash, ChildMap<FileSystemLocationSnapshot> children) {
+        super(absolutePath, name, accessType);
         this.contentHash = contentHash;
+        this.children = children;
     }
 
     @Override
@@ -46,17 +61,137 @@ public class DirectorySnapshot extends AbstractFileSystemLocationSnapshot implem
 
     @Override
     public boolean isContentAndMetadataUpToDate(FileSystemLocationSnapshot other) {
+        return isContentUpToDate(other);
+    }
+
+    @Override
+    public boolean isContentUpToDate(FileSystemLocationSnapshot other) {
         return other instanceof DirectorySnapshot;
     }
 
     @Override
-    public void accept(FileSystemSnapshotVisitor visitor) {
-        if (!visitor.preVisitDirectory(this)) {
-            return;
+    public SnapshotVisitResult accept(FileSystemSnapshotHierarchyVisitor visitor) {
+        SnapshotVisitResult result = visitor.visitEntry(this);
+        switch (result) {
+            case CONTINUE:
+                visitor.enterDirectory(this);
+                children.visitChildren((name, child) -> child.accept(visitor));
+                visitor.leaveDirectory(this);
+                return CONTINUE;
+            case SKIP_SUBTREE:
+                return CONTINUE;
+            case TERMINATE:
+                return SnapshotVisitResult.TERMINATE;
+            default:
+                throw new AssertionError();
         }
-        for (FileSystemLocationSnapshot child : children) {
-            child.accept(visitor);
+    }
+
+    @Override
+    public SnapshotVisitResult accept(RelativePathTracker pathTracker, RelativePathTrackingFileSystemSnapshotHierarchyVisitor visitor) {
+        pathTracker.enter(getName());
+        try {
+            SnapshotVisitResult result = visitor.visitEntry(this, pathTracker);
+            switch (result) {
+                case CONTINUE:
+                    visitor.enterDirectory(this, pathTracker);
+                    children.visitChildren((name, child) -> child.accept(pathTracker, visitor));
+                    visitor.leaveDirectory(this, pathTracker);
+                    return CONTINUE;
+                case SKIP_SUBTREE:
+                    return CONTINUE;
+                case TERMINATE:
+                    return SnapshotVisitResult.TERMINATE;
+                default:
+                    throw new AssertionError();
+            }
+        } finally {
+            pathTracker.leave();
         }
-        visitor.postVisitDirectory(this);
+    }
+
+    @Override
+    public void accept(FileSystemLocationSnapshotVisitor visitor) {
+        visitor.visitDirectory(this);
+    }
+
+    @Override
+    public <T> T accept(FileSystemLocationSnapshotTransformer<T> transformer) {
+        return transformer.visitDirectory(this);
+    }
+
+    @VisibleForTesting
+    public List<FileSystemLocationSnapshot> getChildren() {
+        return children.values();
+    }
+
+    @Override
+    protected Optional<MetadataSnapshot> getChildSnapshot(VfsRelativePath targetPath, CaseSensitivity caseSensitivity) {
+        return Optional.of(
+            SnapshotUtil.getMetadataFromChildren(children, targetPath, caseSensitivity, Optional::empty)
+                .orElseGet(() -> missingSnapshotForAbsolutePath(targetPath.getAbsolutePath()))
+        );
+    }
+
+    @Override
+    protected ReadOnlyFileSystemNode getChildNode(VfsRelativePath targetPath, CaseSensitivity caseSensitivity) {
+        ReadOnlyFileSystemNode childNode = SnapshotUtil.getChild(children, targetPath, caseSensitivity);
+        return childNode == ReadOnlyFileSystemNode.EMPTY
+            ? missingSnapshotForAbsolutePath(targetPath.getAbsolutePath())
+            : childNode;
+    }
+
+    @Override
+    public Optional<FileSystemNode> invalidate(VfsRelativePath targetPath, CaseSensitivity caseSensitivity, SnapshotHierarchy.NodeDiffListener diffListener) {
+        ChildMap<FileSystemNode> newChildren = children.invalidate(targetPath, caseSensitivity, new ChildMap.InvalidationHandler<FileSystemLocationSnapshot, FileSystemNode>() {
+            @Override
+            public Optional<FileSystemNode> handleAsDescendantOfChild(VfsRelativePath pathInChild, FileSystemLocationSnapshot child) {
+                diffListener.nodeRemoved(DirectorySnapshot.this);
+                Optional<FileSystemNode> invalidated = child.invalidate(pathInChild, caseSensitivity, new SnapshotHierarchy.NodeDiffListener() {
+                    @Override
+                    public void nodeRemoved(FileSystemNode node) {
+                        // the parent already has been removed. No children need to be removed.
+                    }
+
+                    @Override
+                    public void nodeAdded(FileSystemNode node) {
+                        diffListener.nodeAdded(node);
+                    }
+                });
+                children.visitChildren((__, existingChild) -> {
+                    if (existingChild != child) {
+                        diffListener.nodeAdded(existingChild);
+                    }
+                });
+                return invalidated;
+            }
+
+            @Override
+            public void handleAsAncestorOfChild(String childPath, FileSystemLocationSnapshot child) {
+                throw new IllegalStateException("Can't have an ancestor of a single path element");
+            }
+
+            @Override
+            public void handleExactMatchWithChild(FileSystemLocationSnapshot child) {
+                diffListener.nodeRemoved(DirectorySnapshot.this);
+                children.visitChildren((__, existingChild) -> {
+                    if (existingChild != child) {
+                        diffListener.nodeAdded(existingChild);
+                    }
+                });
+            }
+
+            @Override
+            public void handleUnrelatedToAnyChild() {
+                diffListener.nodeRemoved(DirectorySnapshot.this);
+                children.visitChildren((__, child) -> diffListener.nodeAdded(child));
+            }
+        });
+        return Optional.of(new PartialDirectoryNode(newChildren));
+    }
+
+    @Override
+    public String toString() {
+        return String.format("%s@%s/%s(%s)", super.toString(), contentHash, getName(), children);
     }
 }

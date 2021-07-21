@@ -23,6 +23,8 @@ import spock.lang.Specification
 
 import javax.annotation.processing.Processor
 import javax.annotation.processing.RoundEnvironment
+import javax.lang.model.element.Element
+import javax.lang.model.element.ExecutableElement
 import javax.lang.model.element.Name
 import javax.lang.model.element.TypeElement
 import java.lang.annotation.Retention
@@ -78,6 +80,23 @@ class AggregatingProcessorTest extends Specification {
         result.getAggregatedTypes() == ["A", "B"] as Set
     }
 
+    def "doesn't aggregated types which have source when annotation isn't at top level"() {
+        given:
+        delegate.getSupportedAnnotationTypes() >> annotationTypes.collect { it.getQualifiedName().toString() }
+        roundEnvironment = Stub(RoundEnvironment) {
+            getRootElements() >> ([type("A"), type("B"), type("C")] as Set)
+            getElementsAnnotatedWith(_ as TypeElement) >> { TypeElement annotationType ->
+                [method(type("A")), type("C")] as Set
+            }
+        }
+
+        when:
+        processor.process(annotationTypes, roundEnvironment)
+
+        then:
+        result.getAggregatedTypes() == ["A", "C"] as Set
+    }
+
     def "aggregating processors do not work with source retention annotations"() {
         given:
         def sourceRetentionAnnotation = annotation("Broken", RetentionPolicy.SOURCE)
@@ -105,13 +124,23 @@ class AggregatingProcessorTest extends Specification {
         }
     }
 
+    Element method(Element parent) {
+        Stub(ExecutableElement) {
+            getEnclosingElement() >> parent
+        }
+    }
+
     TypeElement type(String name) {
         Stub(TypeElement) {
             getEnclosingElement() >> null
-            getQualifiedName() >> Stub(Name) {
-                toString() >> name
+            getQualifiedName() >> {
+                Stub(Name) {
+                    toString() >> name
+                }
             }
         }
     }
+
+
 
 }

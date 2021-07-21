@@ -30,6 +30,7 @@ import org.codehaus.groovy.ast.expr.EmptyExpression;
 import org.codehaus.groovy.ast.expr.Expression;
 import org.codehaus.groovy.ast.expr.MethodCall;
 import org.codehaus.groovy.ast.expr.MethodCallExpression;
+import org.codehaus.groovy.ast.expr.PropertyExpression;
 import org.codehaus.groovy.ast.expr.VariableExpression;
 import org.codehaus.groovy.ast.stmt.BlockStatement;
 import org.codehaus.groovy.ast.stmt.ExpressionStatement;
@@ -146,7 +147,7 @@ public abstract class AstUtils {
         }
 
         ClosureExpression closureExpression = getSingleClosureArg(methodCall);
-        return closureExpression == null ? null : new ScriptBlock(methodName, closureExpression);
+        return closureExpression == null ? null : new ScriptBlock(methodName, methodCall, closureExpression);
     }
 
     public static Pair<ClassExpression, ClosureExpression> getClassAndClosureArgs(MethodCall methodCall) {
@@ -201,6 +202,7 @@ public abstract class AstUtils {
     @Nullable
     public static ScriptBlock detectScriptBlock(Statement statement, final Collection<String> names) {
         return detectScriptBlock(statement, new Predicate<ScriptBlock>() {
+            @Override
             public boolean apply(ScriptBlock input) {
                 return names.contains(input.getName());
             }
@@ -226,6 +228,19 @@ public abstract class AstUtils {
                 if (isOfType(constantArgumentExpression, type)) {
                     return constantArgumentExpression;
                 }
+            }
+        }
+
+        return null;
+    }
+
+    @Nullable
+    public static PropertyExpression hasSinglePropertyExpressionArgument(MethodCallExpression call) {
+        ArgumentListExpression argumentList = (ArgumentListExpression) call.getArguments();
+        if (argumentList.getExpressions().size() == 1) {
+            Expression argumentExpression = argumentList.getExpressions().get(0);
+            if (argumentExpression instanceof PropertyExpression) {
+                return (PropertyExpression) argumentExpression;
             }
         }
 

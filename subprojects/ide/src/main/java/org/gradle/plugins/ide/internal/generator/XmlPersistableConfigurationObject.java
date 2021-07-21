@@ -20,7 +20,7 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
 import groovy.lang.Closure;
 import groovy.util.Node;
-import groovy.util.XmlParser;
+import groovy.xml.XmlParser;
 import org.gradle.api.Action;
 import org.gradle.api.XmlProvider;
 import org.gradle.internal.Cast;
@@ -33,7 +33,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
-import static org.gradle.util.ConfigureUtil.configureUsing;
+import static org.gradle.util.internal.ConfigureUtil.configureUsing;
 
 /**
  * A {@link org.gradle.plugins.ide.internal.generator.generator.PersistableConfigurationObject}

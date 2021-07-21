@@ -15,8 +15,8 @@
  */
 package org.gradle.plugins.ide.internal.tooling
 
+import org.gradle.api.DefaultTask
 import org.gradle.api.Project
-import org.gradle.api.internal.AbstractTask
 import org.gradle.plugins.ide.internal.tooling.eclipse.DefaultEclipseProject
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.gradle.util.TestUtil
@@ -25,10 +25,10 @@ import spock.lang.Specification
 
 class TasksFactoryTest extends Specification {
     @Rule
-    public TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider()
+    public TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider(getClass())
     final Project project = Mock()
     final def eclipseProject = new DefaultEclipseProject(null, null, null, null, [])
-    final task = TestUtil.create(temporaryFolder).task(AbstractTask)
+    final task = TestUtil.create(temporaryFolder).task(DefaultTask)
 
     def "does not return tasks"() {
         TasksFactory factory = new TasksFactory(false)

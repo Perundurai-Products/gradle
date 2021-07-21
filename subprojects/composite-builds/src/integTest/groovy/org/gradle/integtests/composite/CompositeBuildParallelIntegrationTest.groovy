@@ -16,8 +16,8 @@
 
 package org.gradle.integtests.composite
 
-import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
 import org.gradle.api.internal.tasks.execution.ExecuteTaskBuildOperationType
+import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
 import org.gradle.test.fixtures.server.http.BlockingHttpServer
 import org.junit.Rule
 import spock.lang.IgnoreIf
@@ -106,8 +106,11 @@ class CompositeBuildParallelIntegrationTest extends AbstractCompositeBuildIntegr
             buildFile << """
                 allprojects {
                     apply plugin: 'java'
-                    compileJava.doLast {
-                        ${server.callFromBuildUsingExpression('project.name')}
+                    compileJava {
+                        def projectName = project.name
+                        doLast {
+                            ${server.callFromBuildUsingExpression('projectName')}
+                        }
                     }
                 }
             """

@@ -17,12 +17,12 @@
 package org.gradle.api.plugins.quality.internal
 
 import org.gradle.api.GradleException
+import org.gradle.api.InvalidUserDataException
 import org.gradle.api.file.FileCollection
 import org.gradle.api.plugins.quality.Checkstyle
 import org.gradle.api.plugins.quality.CheckstyleReports
 import org.gradle.internal.logging.ConsoleRenderer
-import org.gradle.util.GFileUtils
-import org.gradle.util.SingleMessageLogger
+import org.gradle.util.internal.GFileUtils
 
 abstract class CheckstyleInvoker {
     private final static String FAILURE_PROPERTY_NAME = 'org.gradle.checkstyle.violations'
@@ -41,11 +41,11 @@ abstract class CheckstyleInvoker {
         def ignoreFailures = checkstyleTask.ignoreFailures
         def logger = checkstyleTask.logger
         def config = checkstyleTask.config
-        def configDir = checkstyleTask.configDir
-        def xmlDestination = reports.xml.destination
+        def configDir = checkstyleTask.configDirectory.getAsFile().getOrNull()
+        def xmlDestination = reports.xml.outputLocation.asFile.get()
 
         if (isHtmlReportEnabledOnly(reports)) {
-            xmlDestination = new File(checkstyleTask.temporaryDir, reports.xml.destination.name)
+            xmlDestination = new File(checkstyleTask.temporaryDir, reports.xml.outputLocation.asFile.get().name)
         }
 
         antBuilder.withClasspath(checkstyleClasspath).execute {
@@ -65,29 +65,29 @@ abstract class CheckstyleInvoker {
                     formatter(type: 'plain', useFile: false)
                 }
 
-                if (reports.xml.enabled || reports.html.enabled) {
+                if (reports.xml.required.get() || reports.html.required.get()) {
                     formatter(type: 'xml', toFile: xmlDestination)
-                }
-
-                // User provided their own config_loc
-                def userProvidedConfigLoc = configProperties[CONFIG_LOC_PROPERTY]
-
-                if (userProvidedConfigLoc) {
-                    SingleMessageLogger.nagUserWithDeprecatedIndirectUserCodeCause("Adding 'config_loc' to checkstyle.configProperties", "Use checkstyle.configDir instead as this will behave better with up-to-date checks.")
-                } else if (configDir) {
-                    // Use configDir for config_loc
-                    property(key: CONFIG_LOC_PROPERTY, value: configDir.toString())
                 }
 
                 configProperties.each { key, value ->
                     property(key: key, value: value.toString())
                 }
+
+                if (configDir) {
+                    // User provided their own config_loc
+                    def userProvidedConfigLoc = configProperties[CONFIG_LOC_PROPERTY]
+                    if (userProvidedConfigLoc) {
+                        throw new InvalidUserDataException("Cannot add config_loc to checkstyle.configProperties. Please configure the configDirectory on the checkstyle task instead.")
+                    }
+                    // Use configDir for config_loc
+                    property(key: CONFIG_LOC_PROPERTY, value: configDir.toString())
+                }
             }
 
-            if (reports.html.enabled) {
+            if (reports.html.getRequired().get()) {
                 def stylesheet = reports.html.stylesheet ? reports.html.stylesheet.asString() :
                     Checkstyle.getClassLoader().getResourceAsStream('checkstyle-noframes-sorted.xsl').text
-                ant.xslt(in: xmlDestination, out: reports.html.destination) {
+                ant.xslt(in: xmlDestination, out: reports.html.outputLocation.asFile.get()) {
                     style {
                         string(value: stylesheet)
                     }
@@ -102,7 +102,7 @@ abstract class CheckstyleInvoker {
                 throw new GradleException(getMessage(reports, parseCheckstyleXml(reports)))
             } else {
                 def reportXml = parseCheckstyleXml(reports)
-                if(violationsExist(reportXml)) {
+                if (violationsExist(reportXml)) {
                     logger.warn(getMessage(reports, reportXml))
                 }
             }
@@ -114,7 +114,7 @@ abstract class CheckstyleInvoker {
     }
 
     private static parseCheckstyleXml(CheckstyleReports reports) {
-        return reports.xml.enabled ? new XmlParser().parse(reports.xml.destination) : null
+        return reports.xml.required.get() ? new XmlParser().parse(reports.xml.outputLocation.asFile.get()) : null
     }
 
     private static String getMessage(CheckstyleReports reports, Node reportXml) {
@@ -126,8 +126,8 @@ abstract class CheckstyleInvoker {
     }
 
     private static String getReportUrlMessage(CheckstyleReports reports) {
-        def report = reports.html.enabled ? reports.html : reports.xml.enabled ? reports.xml : null
-        return report ? " See the report at: ${new ConsoleRenderer().asClickableFileUrl(report.destination)}" : "\n"
+        def report = reports.html.required.get() ? reports.html : reports.xml.required.get() ? reports.xml : null
+        return report ? " See the report at: ${new ConsoleRenderer().asClickableFileUrl(report.outputLocation.asFile.get())}" : "\n"
     }
 
     private static String getViolationMessage(Node reportXml) {
@@ -143,6 +143,6 @@ abstract class CheckstyleInvoker {
     }
 
     private static boolean isHtmlReportEnabledOnly(CheckstyleReports reports) {
-        return !reports.xml.enabled && reports.html.enabled
+        return !reports.xml.required.get() && reports.html.required.get()
     }
 }

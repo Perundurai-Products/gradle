@@ -17,8 +17,8 @@
 package org.gradle.api.internal.plugins
 
 import org.gradle.jvm.application.scripts.JavaAppStartScriptGenerationDetails
-import org.gradle.util.TextUtil
-import org.gradle.util.WrapUtil
+import org.gradle.util.internal.TextUtil
+import org.gradle.util.internal.WrapUtil
 import spock.lang.Specification
 
 class UnixStartScriptGeneratorTest extends Specification {
@@ -46,7 +46,8 @@ class UnixStartScriptGeneratorTest extends Specification {
         generator.generateScript(details, destination)
 
         then:
-        destination.toString().split(TextUtil.unixLineSeparator).length == 172
+        !destination.toString().contains(TextUtil.windowsLineSeparator)
+        destination.toString().contains(TextUtil.unixLineSeparator)
     }
 
     def "defaultJvmOpts is expanded properly in unix script"() {
@@ -121,21 +122,9 @@ class UnixStartScriptGeneratorTest extends Specification {
         destination.toString().contains(/DEFAULT_JVM_OPTS=""/)
     }
 
-    def "determines application-relative path"() {
-        given:
-        JavaAppStartScriptGenerationDetails details = createScriptGenerationDetails(null, 'bin/sample/start')
-        Writer destination = new StringWriter()
-
-        when:
-        generator.generateScript(details, destination)
-
-        then:
-        destination.toString().contains('cd "`dirname \\"$PRG\\"`/../.." >/dev/null')
-    }
-
     private JavaAppStartScriptGenerationDetails createScriptGenerationDetails(List<String> defaultJvmOpts, String scriptRelPath) {
         final String applicationName = 'TestApp'
         final List<String> classpath = WrapUtil.toList('path\\to\\Jar.jar')
-        return new DefaultJavaAppStartScriptGenerationDetails(applicationName, null, null, null, defaultJvmOpts, classpath, scriptRelPath, null)
+        return new DefaultJavaAppStartScriptGenerationDetails(applicationName, null, null, "", defaultJvmOpts, classpath, [], scriptRelPath, null)
     }
 }

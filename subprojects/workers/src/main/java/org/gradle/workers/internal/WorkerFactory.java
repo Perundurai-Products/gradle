@@ -16,10 +16,8 @@
 
 package org.gradle.workers.internal;
 
-import org.gradle.workers.IsolationMode;
-
 public interface WorkerFactory {
-    Worker getWorker(DaemonForkOptions forkOptions);
+    BuildOperationAwareWorker getWorker(WorkerRequirement workerRequirement);
 
     IsolationMode getIsolationMode();
 }

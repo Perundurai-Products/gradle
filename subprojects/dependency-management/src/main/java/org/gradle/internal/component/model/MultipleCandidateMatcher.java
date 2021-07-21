@@ -24,6 +24,7 @@ import org.gradle.api.internal.attributes.AttributeContainerInternal;
 import org.gradle.api.internal.attributes.AttributeValue;
 import org.gradle.api.internal.attributes.ImmutableAttributes;
 
+import javax.annotation.Nullable;
 import java.util.BitSet;
 import java.util.Collection;
 import java.util.Collections;
@@ -74,6 +75,7 @@ class MultipleCandidateMatcher<T extends HasAttributes> {
     private final ImmutableAttributes requested;
     private final List<? extends T> candidates;
     private final ImmutableAttributes[] candidateAttributeSets;
+    private final AttributeMatchingExplanationBuilder explanationBuilder;
 
     private final List<Attribute<?>> requestedAttributes;
     private final BitSet compatible;
@@ -85,11 +87,12 @@ class MultipleCandidateMatcher<T extends HasAttributes> {
     private BitSet remaining;
     private Attribute<?>[] extraAttributes;
 
-    MultipleCandidateMatcher(AttributeSelectionSchema schema, Collection<? extends T> candidates, ImmutableAttributes requested) {
+    MultipleCandidateMatcher(AttributeSelectionSchema schema, Collection<? extends T> candidates, ImmutableAttributes requested, AttributeMatchingExplanationBuilder explanationBuilder) {
         this.schema = schema;
         this.requested = requested;
         this.candidates = (candidates instanceof List) ? (List<? extends T>) candidates : ImmutableList.copyOf(candidates);
         candidateAttributeSets = new ImmutableAttributes[candidates.size()];
+        this.explanationBuilder = explanationBuilder;
         for (int i = 0; i < candidates.size(); i++) {
             candidateAttributeSets[i] = ((AttributeContainerInternal) this.candidates.get(i).getAttributes()).asImmutable();
         }
@@ -106,7 +109,9 @@ class MultipleCandidateMatcher<T extends HasAttributes> {
             return getCandidates(compatible);
         }
         if (longestMatchIsSuperSetOfAllOthers()) {
-            return Collections.singletonList(candidates.get(candidateWithLongestMatch));
+            T o = candidates.get(candidateWithLongestMatch);
+            explanationBuilder.candidateIsSuperSetOfAllOthers(o);
+            return Collections.singletonList(o);
         }
         return disambiguateCompatibleCandidates();
     }
@@ -156,13 +161,18 @@ class MultipleCandidateMatcher<T extends HasAttributes> {
 
         if (!candidateValue.isPresent()) {
             setCandidateValue(c, a, null);
+            explanationBuilder.candidateAttributeMissing(candidates.get(c), attribute, requestedValue);
             return MatchResult.MISSING;
         }
 
         Object coercedValue = candidateValue.coerce(attribute);
         setCandidateValue(c, a, coercedValue);
 
-        return schema.matchValue(attribute, requestedValue, coercedValue) ? MatchResult.MATCH : MatchResult.NO_MATCH;
+        if (schema.matchValue(attribute, requestedValue, coercedValue)) {
+            return MatchResult.MATCH;
+        }
+        explanationBuilder.candidateAttributeDoesNotMatch(candidates.get(c), attribute, requestedValue, candidateValue);
+        return MatchResult.NO_MATCH;
     }
 
 
@@ -193,15 +203,44 @@ class MultipleCandidateMatcher<T extends HasAttributes> {
         remaining = new BitSet(candidates.size());
         remaining.or(compatible);
 
-        disambiguateWithRequestedAttributes();
+        disambiguateWithRequestedAttributeValues();
         if (remaining.cardinality() > 1) {
             disambiguateWithExtraAttributes();
         }
-
+        if (remaining.cardinality() > 1) {
+            disambiguateWithRequestedAttributeKeys();
+        }
         return remaining.cardinality() == 0 ? getCandidates(compatible) : getCandidates(remaining);
     }
 
-    private void disambiguateWithRequestedAttributes() {
+    private void disambiguateWithRequestedAttributeKeys() {
+        if (requestedAttributes.isEmpty()) {
+            return;
+        }
+        for (Attribute<?> extraAttribute : extraAttributes) {
+            // We consider only extra attributes which are NOT on every candidate:
+            // Because they are EXTRA attributes, we consider that a
+            // candidate which does NOT provide this value is a better match
+            int candidateCount = candidateAttributeSets.length;
+            BitSet any = new BitSet(candidateCount);
+            for (int c = 0; c < candidateCount; c++) {
+                ImmutableAttributes candidateAttributeSet = candidateAttributeSets[c];
+                if (candidateAttributeSet.findEntry(extraAttribute.getName()).isPresent()) {
+                    any.set(c);
+                }
+            }
+            if (any.cardinality() > 0 && any.cardinality() != candidateCount) {
+                // there is at least one candidate which does NOT provide this attribute
+                remaining.andNot(any);
+                if (remaining.cardinality() == 0) {
+                    // there are no left candidate, do not bother checking other attributes
+                    break;
+                }
+            }
+        }
+    }
+
+    private void disambiguateWithRequestedAttributeValues() {
         for (int a = 0; a < requestedAttributes.size(); a++) {
             disambiguateWithAttribute(a);
             if (remaining.cardinality() == 0) {
@@ -309,6 +348,7 @@ class MultipleCandidateMatcher<T extends HasAttributes> {
         }
     }
 
+    @Nullable
     private Object getRequestedValue(int a) {
         if (a < requestedAttributes.size()) {
             return requestedAttributeValues[a];
@@ -317,17 +357,18 @@ class MultipleCandidateMatcher<T extends HasAttributes> {
         }
     }
 
+    @Nullable
     private Object getCandidateValue(int c, int a) {
         if (a < requestedAttributes.size()) {
             return requestedAttributeValues[getValueIndex(c, a)];
         } else {
             Attribute<?> extraAttribute = getAttribute(a);
-            AttributeValue attributeValue = candidateAttributeSets[c].findEntry(extraAttribute.getName());
+            AttributeValue<?> attributeValue = candidateAttributeSets[c].findEntry(extraAttribute.getName());
             return attributeValue.isPresent() ? attributeValue.coerce(extraAttribute) : null;
         }
     }
 
-    private void setRequestedValue(int a, Object value) {
+    private void setRequestedValue(int a, @Nullable Object value) {
         requestedAttributeValues[a] = value;
     }
 

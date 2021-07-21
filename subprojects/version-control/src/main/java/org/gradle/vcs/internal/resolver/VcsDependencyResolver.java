@@ -25,14 +25,14 @@ import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.ComponentResolver
 import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.strategy.VersionSelector;
 import org.gradle.api.internal.artifacts.ivyservice.projectmodule.LocalComponentRegistry;
 import org.gradle.api.internal.artifacts.ivyservice.resolveengine.artifact.ArtifactSet;
-import org.gradle.api.internal.artifacts.ivyservice.resolveengine.excludes.ModuleExclusion;
+import org.gradle.api.internal.artifacts.ivyservice.resolveengine.excludes.specs.ExcludeSpec;
 import org.gradle.api.internal.artifacts.type.ArtifactTypeRegistry;
 import org.gradle.api.internal.attributes.ImmutableAttributes;
 import org.gradle.api.internal.component.ArtifactType;
 import org.gradle.api.specs.Spec;
 import org.gradle.initialization.definition.InjectedPluginResolver;
+import org.gradle.internal.Actions;
 import org.gradle.internal.Pair;
-import org.gradle.internal.build.BuildState;
 import org.gradle.internal.build.BuildStateRegistry;
 import org.gradle.internal.build.IncludedBuildState;
 import org.gradle.internal.build.PublicBuildPath;
@@ -42,7 +42,7 @@ import org.gradle.internal.component.model.ComponentOverrideMetadata;
 import org.gradle.internal.component.model.ComponentResolveMetadata;
 import org.gradle.internal.component.model.ConfigurationMetadata;
 import org.gradle.internal.component.model.DependencyMetadata;
-import org.gradle.internal.component.model.ModuleSource;
+import org.gradle.internal.component.model.ModuleSources;
 import org.gradle.internal.resolve.ModuleVersionNotFoundException;
 import org.gradle.internal.resolve.ModuleVersionResolveException;
 import org.gradle.internal.resolve.resolver.ArtifactResolver;
@@ -53,7 +53,7 @@ import org.gradle.internal.resolve.result.BuildableArtifactResolveResult;
 import org.gradle.internal.resolve.result.BuildableArtifactSetResolveResult;
 import org.gradle.internal.resolve.result.BuildableComponentIdResolveResult;
 import org.gradle.internal.resolve.result.BuildableComponentResolveResult;
-import org.gradle.util.CollectionUtils;
+import org.gradle.util.internal.CollectionUtils;
 import org.gradle.vcs.VersionControlSpec;
 import org.gradle.vcs.internal.VcsResolver;
 import org.gradle.vcs.internal.VersionControlRepositoryConnection;
@@ -64,23 +64,25 @@ import javax.annotation.Nullable;
 import java.io.File;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
 
 public class VcsDependencyResolver implements DependencyToComponentIdResolver, ComponentResolvers, ComponentMetaDataResolver, OriginArtifactSelector, ArtifactResolver {
     private final LocalComponentRegistry localComponentRegistry;
     private final VcsResolver vcsResolver;
     private final VersionControlRepositoryConnectionFactory versionControlSystemFactory;
     private final VcsVersionWorkingDirResolver workingDirResolver;
-    private final BuildState containingBuild;
     private final PublicBuildPath publicBuildPath;
     private final BuildStateRegistry buildRegistry;
 
-    public VcsDependencyResolver(LocalComponentRegistry localComponentRegistry, VcsResolver vcsResolver, VersionControlRepositoryConnectionFactory versionControlSystemFactory, BuildStateRegistry buildRegistry, VcsVersionWorkingDirResolver workingDirResolver, BuildState containingBuild, PublicBuildPath publicBuildPath) {
+    private final Set<String> names = new HashSet<>();
+
+    public VcsDependencyResolver(LocalComponentRegistry localComponentRegistry, VcsResolver vcsResolver, VersionControlRepositoryConnectionFactory versionControlSystemFactory, BuildStateRegistry buildRegistry, VcsVersionWorkingDirResolver workingDirResolver, PublicBuildPath publicBuildPath) {
         this.localComponentRegistry = localComponentRegistry;
         this.vcsResolver = vcsResolver;
         this.versionControlSystemFactory = versionControlSystemFactory;
         this.buildRegistry = buildRegistry;
         this.workingDirResolver = workingDirResolver;
-        this.containingBuild = containingBuild;
         this.publicBuildPath = publicBuildPath;
     }
 
@@ -119,7 +121,7 @@ public class VcsDependencyResolver implements DependencyToComponentIdResolver, C
                     }
                 });
                 if (entry == null) {
-                    result.failed(new ModuleVersionResolveException(depSelector, spec.getDisplayName() + " did not contain a project publishing the specified dependency."));
+                    result.failed(new ModuleVersionResolveException(depSelector, () -> spec.getDisplayName() + " did not contain a project publishing the specified dependency."));
                 } else {
                     LocalComponentMetadata componentMetaData = localComponentRegistry.getComponent(entry.right);
                     result.resolved(componentMetaData);
@@ -129,8 +131,24 @@ public class VcsDependencyResolver implements DependencyToComponentIdResolver, C
     }
 
     private BuildDefinition toBuildDefinition(AbstractVersionControlSpec spec, File buildDirectory) {
-        InjectedPluginResolver resolver = new InjectedPluginResolver(containingBuild.getLoadedSettings().getClassLoaderScope());
-        return BuildDefinition.fromStartParameterForBuild(buildRegistry.getRootBuild().getStartParameter(), null, buildDirectory, resolver.resolveAll(spec.getInjectedPlugins()), publicBuildPath);
+        InjectedPluginResolver resolver = new InjectedPluginResolver();
+        return BuildDefinition.fromStartParameterForBuild(
+            buildRegistry.getRootBuild().getStartParameter(),
+            assignBuildName(buildDirectory.getName()),
+            buildDirectory,
+            resolver.resolveAll(spec.getInjectedPlugins()),
+            Actions.doNothing(),
+            publicBuildPath,
+            false
+        );
+    }
+
+    private String assignBuildName(String name) {
+        int counter = 0;
+        while (!names.add(name)) {
+            name = name + ++counter;
+        }
+        return name;
     }
 
     @Override
@@ -159,7 +177,7 @@ public class VcsDependencyResolver implements DependencyToComponentIdResolver, C
 
     @Nullable
     @Override
-    public ArtifactSet resolveArtifacts(ComponentResolveMetadata component, ConfigurationMetadata configuration, ArtifactTypeRegistry artifactTypeRegistry, ModuleExclusion exclusions, ImmutableAttributes overriddenAttributes) {
+    public ArtifactSet resolveArtifacts(ComponentResolveMetadata component, ConfigurationMetadata configuration, ArtifactTypeRegistry artifactTypeRegistry, ExcludeSpec exclusions, ImmutableAttributes overriddenAttributes) {
         return null;
     }
 
@@ -173,6 +191,6 @@ public class VcsDependencyResolver implements DependencyToComponentIdResolver, C
     }
 
     @Override
-    public void resolveArtifact(ComponentArtifactMetadata artifact, ModuleSource moduleSource, BuildableArtifactResolveResult result) {
+    public void resolveArtifact(ComponentArtifactMetadata artifact, ModuleSources moduleSources, BuildableArtifactResolveResult result) {
     }
 }

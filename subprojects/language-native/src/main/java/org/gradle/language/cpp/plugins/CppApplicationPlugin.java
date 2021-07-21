@@ -16,7 +16,6 @@
 
 package org.gradle.language.cpp.plugins;
 
-import org.gradle.api.Incubating;
 import org.gradle.api.Plugin;
 import org.gradle.api.Project;
 import org.gradle.api.internal.attributes.ImmutableAttributesFactory;
@@ -26,10 +25,12 @@ import org.gradle.language.cpp.CppApplication;
 import org.gradle.language.cpp.CppExecutable;
 import org.gradle.language.cpp.CppPlatform;
 import org.gradle.language.cpp.internal.DefaultCppApplication;
+import org.gradle.language.cpp.internal.DefaultCppPlatform;
 import org.gradle.language.internal.NativeComponentFactory;
 import org.gradle.language.nativeplatform.internal.Dimensions;
 import org.gradle.language.nativeplatform.internal.toolchains.ToolChainSelector;
 import org.gradle.nativeplatform.TargetMachineFactory;
+import org.gradle.nativeplatform.platform.internal.Architectures;
 import org.gradle.nativeplatform.platform.internal.DefaultNativePlatform;
 
 import javax.inject.Inject;
@@ -46,7 +47,6 @@ import static org.gradle.language.nativeplatform.internal.Dimensions.useHostAsDe
  *
  * @since 4.5
  */
-@Incubating
 public class CppApplicationPlugin implements Plugin<Project> {
     private final NativeComponentFactory componentFactory;
     private final ToolChainSelector toolChainSelector;
@@ -82,7 +82,7 @@ public class CppApplicationPlugin implements Plugin<Project> {
             return application.getBinaries().get().stream()
                     .filter(CppExecutable.class::isInstance)
                     .map(CppExecutable.class::cast)
-                    .filter(binary -> !binary.isOptimized() && binary.getTargetPlatform().getArchitecture().equals(DefaultNativePlatform.host().getArchitecture()))
+                    .filter(binary -> !binary.isOptimized() && Architectures.forInput(binary.getTargetMachine().getArchitecture().getName()).equals(DefaultNativePlatform.host().getArchitecture()))
                     .findFirst()
                     .orElse(application.getBinaries().get().stream()
                             .filter(CppExecutable.class::isInstance)
@@ -102,7 +102,7 @@ public class CppApplicationPlugin implements Plugin<Project> {
                     providers.provider(() -> project.getGroup().toString()), providers.provider(() -> project.getVersion().toString()),
                     variantIdentity -> {
                         if (tryToBuildOnHost(variantIdentity)) {
-                            ToolChainSelector.Result<CppPlatform> result = toolChainSelector.select(CppPlatform.class, variantIdentity.getTargetMachine());
+                            ToolChainSelector.Result<CppPlatform> result = toolChainSelector.select(CppPlatform.class, new DefaultCppPlatform(variantIdentity.getTargetMachine()));
                             application.addExecutable(variantIdentity, result.getTargetPlatform(), result.getToolChain(), result.getPlatformToolProvider());
                         } else {
                             // Known, but not buildable

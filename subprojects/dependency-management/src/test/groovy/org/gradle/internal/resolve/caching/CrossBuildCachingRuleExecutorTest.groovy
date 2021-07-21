@@ -26,7 +26,7 @@ import org.gradle.cache.CacheDecorator
 import org.gradle.cache.CacheRepository
 import org.gradle.cache.PersistentCache
 import org.gradle.cache.PersistentIndexedCache
-import org.gradle.cache.internal.InMemoryCacheDecoratorFactory
+import org.gradle.cache.internal.DefaultInMemoryCacheDecoratorFactory
 import org.gradle.internal.action.DefaultConfigurableRule
 import org.gradle.internal.action.DefaultConfigurableRules
 import org.gradle.internal.action.InstantiatingAction
@@ -37,7 +37,7 @@ import org.gradle.internal.service.ServiceRegistry
 import org.gradle.internal.snapshot.ValueSnapshot
 import org.gradle.internal.snapshot.ValueSnapshotter
 import org.gradle.internal.snapshot.impl.StringValueSnapshot
-import org.gradle.util.BuildCommencedTimeProvider
+import org.gradle.util.internal.BuildCommencedTimeProvider
 import org.gradle.util.TestUtil
 import spock.lang.Specification
 import spock.lang.Subject
@@ -47,9 +47,9 @@ import javax.inject.Inject
 class CrossBuildCachingRuleExecutorTest extends Specification {
 
     CacheRepository cacheRepository = Mock()
-    InMemoryCacheDecoratorFactory cacheDecoratorFactory = Mock()
+    DefaultInMemoryCacheDecoratorFactory cacheDecoratorFactory = Mock()
     ValueSnapshotter valueSnapshotter = Mock()
-    BuildCommencedTimeProvider timeProvider = new BuildCommencedTimeProvider()
+    BuildCommencedTimeProvider timeProvider = Stub()
     PersistentIndexedCache<ValueSnapshot, CrossBuildCachingRuleExecutor.CachedEntry<Result>> store = Mock()
     CrossBuildCachingRuleExecutor.EntryValidator<Result> validator = Mock()
     Transformer<Serializable, Id> keyTransformer = new Transformer<Serializable, Id>() {
@@ -154,7 +154,7 @@ class CrossBuildCachingRuleExecutorTest extends Specification {
             1 * store.put(keyHash, _)
             snapshot
         }
-        1 * store.get(_) >> null
+        1 * store.getIfPresent(_) >> null
         0 * _
         result.length == 6
     }
@@ -171,7 +171,7 @@ class CrossBuildCachingRuleExecutorTest extends Specification {
             def snapshot = new StringValueSnapshot(it.toString())
             snapshot
         }
-        1 * store.get(_) >> Stub(CrossBuildCachingRuleExecutor.CachedEntry) {
+        1 * store.getIfPresent(_) >> Stub(CrossBuildCachingRuleExecutor.CachedEntry) {
             getResult() >> new Result(length: 123)
         }
         1 * validator.isValid(_, _) >> true
@@ -196,7 +196,7 @@ class CrossBuildCachingRuleExecutorTest extends Specification {
             keyHash = hasher.hash()
             snapshot
         }
-        1 * store.get(_) >> Stub(CrossBuildCachingRuleExecutor.CachedEntry) {
+        1 * store.getIfPresent(_) >> Stub(CrossBuildCachingRuleExecutor.CachedEntry) {
             getResult() >> new Result(length: 123)
         }
         1 * validator.isValid(_, _) >> false
@@ -221,7 +221,7 @@ class CrossBuildCachingRuleExecutorTest extends Specification {
             def snapshot = new StringValueSnapshot(it.toString())
             snapshot
         }
-        1 * store.get(_) >> Mock(CrossBuildCachingRuleExecutor.CachedEntry) {
+        1 * store.getIfPresent(_) >> Mock(CrossBuildCachingRuleExecutor.CachedEntry) {
             getResult() >> new Result(length: 123)
             getImplicits() >> ImmutableMultimap.builder()
                 .putAll("SomeService", implicitInput)
@@ -255,7 +255,7 @@ class CrossBuildCachingRuleExecutorTest extends Specification {
             def snapshot = new StringValueSnapshot(it.toString())
             snapshot
         }
-        1 * store.get(_) >> Mock(CrossBuildCachingRuleExecutor.CachedEntry) {
+        1 * store.getIfPresent(_) >> Mock(CrossBuildCachingRuleExecutor.CachedEntry) {
             getResult() >> new Result(length: 123)
             getImplicits() >> ImmutableMultimap.builder()
                 .putAll("SomeService", implicitInput1, implicitInput2)
@@ -357,7 +357,7 @@ class CrossBuildCachingRuleExecutorTest extends Specification {
         private final SomeService service
 
         @Inject
-        WithServiceInjected(SomeService service){
+        WithServiceInjected(SomeService service) {
             this.service = service
         }
 

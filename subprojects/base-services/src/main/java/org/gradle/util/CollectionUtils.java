@@ -24,7 +24,6 @@ import com.google.common.collect.Lists;
 import org.gradle.api.Action;
 import org.gradle.api.Transformer;
 import org.gradle.api.specs.Spec;
-import org.gradle.internal.Cast;
 import org.gradle.internal.Factory;
 import org.gradle.internal.Pair;
 import org.gradle.internal.Transformers;
@@ -50,7 +49,18 @@ import java.util.NoSuchElementException;
 import java.util.Set;
 
 import static org.gradle.internal.Cast.cast;
+import static org.gradle.internal.Cast.castNullable;
+import static org.gradle.internal.Cast.uncheckedNonnullCast;
 
+/**
+ * This class is only here to maintain binary compatibility with existing plugins.
+ * <p>
+ * Plugins should prefer external collection frameworks over this class.
+ * Internally, all code should use {@link org.gradle.util.internal.CollectionUtils}.
+ *
+ * @deprecated Will be removed in Gradle 8.0.
+ */
+@Deprecated
 public abstract class CollectionUtils {
 
     /**
@@ -78,9 +88,9 @@ public abstract class CollectionUtils {
 
     public static <T> Collection<? extends T> checkedCast(Class<T> type, Collection<?> input) {
         for (Object o : input) {
-            cast(type, o);
+            castNullable(type, o);
         }
-        return Cast.uncheckedCast(input);
+        return uncheckedNonnullCast(input);
     }
 
     @Nullable
@@ -142,7 +152,7 @@ public abstract class CollectionUtils {
     /**
      * Returns a sorted copy of the provided collection of things. Uses the natural ordering of the things.
      */
-    public static <T extends Comparable> List<T> sort(Iterable<T> things) {
+    public static <T extends Comparable<T>> List<T> sort(Iterable<T> things) {
         List<T> copy = toMutableList(things);
         Collections.sort(copy);
         return copy;
@@ -184,20 +194,21 @@ public abstract class CollectionUtils {
         return destination;
     }
 
-    public static <R, I> List<R> collect(List<? extends I> list, Transformer<? extends R, ? super I> transformer) {
-        return collect(list, new ArrayList<R>(list.size()), transformer);
-    }
-
     public static <R, I> List<R> collect(I[] list, Transformer<? extends R, ? super I> transformer) {
         return collect(Arrays.asList(list), transformer);
     }
 
     public static <R, I> Set<R> collect(Set<? extends I> set, Transformer<? extends R, ? super I> transformer) {
-        return collect(set, new HashSet<R>(), transformer);
+        return collect(set, new HashSet<R>(set.size()), transformer);
     }
 
     public static <R, I> List<R> collect(Iterable<? extends I> source, Transformer<? extends R, ? super I> transformer) {
-        return collect(source, new LinkedList<R>(), transformer);
+        if (source instanceof Collection<?>) {
+            Collection<? extends I> collection = uncheckedNonnullCast(source);
+            return collect(source, new ArrayList<R>(collection.size()), transformer);
+        } else {
+            return collect(source, new LinkedList<R>(), transformer);
+        }
     }
 
     public static <R, I, C extends Collection<R>> C collect(Iterable<? extends I> source, C destination, Transformer<? extends R, ? super I> transformer) {
@@ -438,7 +449,7 @@ public abstract class CollectionUtils {
      * @param <T> The element type of t1
      * @return t1
      */
-    public static <T> Collection<T> addAll(Collection<T> t1, Iterable<? extends T> t2) {
+    public static <T, C extends Collection<? super T>> C addAll(C t1, Iterable<? extends T> t2) {
         for (T t : t2) {
             t1.add(t);
         }
@@ -453,7 +464,7 @@ public abstract class CollectionUtils {
      * @param <T> The element type of t1
      * @return t1
      */
-    public static <T> Collection<T> addAll(Collection<T> t1, T... t2) {
+    public static <T, C extends Collection<? super T>> C addAll(C t1, T... t2) {
         Collections.addAll(t1, t2);
         return t1;
     }
@@ -593,6 +604,12 @@ public abstract class CollectionUtils {
         return Pair.of(left, right);
     }
 
+    /**
+     * Injection step.
+     * @param <T> target type.
+     * @param <I> item type.
+     */
+    @Deprecated
     public static class InjectionStep<T, I> {
         private final T target;
         private final I item;
@@ -643,16 +660,20 @@ public abstract class CollectionUtils {
         return new Iterable<T>() {
             private final Iterator<? extends Factory<? extends T>> delegate = factories.iterator();
 
+            @Override
             public Iterator<T> iterator() {
                 return new Iterator<T>() {
+                    @Override
                     public boolean hasNext() {
                         return delegate.hasNext();
                     }
 
+                    @Override
                     public T next() {
                         return delegate.next().create();
                     }
 
+                    @Override
                     public void remove() {
                         throw new UnsupportedOperationException();
                     }

@@ -16,7 +16,6 @@
 
 package org.gradle.tooling;
 
-import org.gradle.api.Incubating;
 import org.gradle.tooling.events.OperationType;
 
 import java.io.File;
@@ -31,7 +30,7 @@ import java.util.Set;
  * @param <T> the ConfigurableLauncher implementation to return as part of the fluent API.
  * @since 2.6
  * */
-public interface ConfigurableLauncher<T extends ConfigurableLauncher> extends LongRunningOperation {
+public interface ConfigurableLauncher<T extends ConfigurableLauncher<T>> extends LongRunningOperation {
     /**
      * {@inheritDoc}
      * @since 1.0
@@ -50,14 +49,14 @@ public interface ConfigurableLauncher<T extends ConfigurableLauncher> extends Lo
      * {@inheritDoc}
      * @since 5.0
      */
-    @Incubating
+    @Override
     T addArguments(String... arguments);
 
     /**
      * {@inheritDoc}
      * @since 5.0
      */
-    @Incubating
+    @Override
     T addArguments(Iterable<String> arguments);
 
     /**
@@ -113,14 +112,14 @@ public interface ConfigurableLauncher<T extends ConfigurableLauncher> extends Lo
      * {@inheritDoc}
      * @since 5.0
      */
-    @Incubating
+    @Override
     T addJvmArguments(String... jvmArguments);
 
     /**
      * {@inheritDoc}
      * @since 5.0
      */
-    @Incubating
+    @Override
     T addJvmArguments(Iterable<String> jvmArguments);
 
     /**

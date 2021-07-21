@@ -19,14 +19,14 @@ package org.gradle.api.publish.ivy.internal.artifact;
 import com.google.common.base.Strings;
 import org.gradle.api.internal.tasks.AbstractTaskDependency;
 import org.gradle.api.internal.tasks.DefaultTaskDependency;
-import org.gradle.api.internal.tasks.TaskDependencyInternal;
 import org.gradle.api.internal.tasks.TaskDependencyResolveContext;
+import org.gradle.api.publish.internal.PublicationArtifactInternal;
 import org.gradle.api.publish.ivy.IvyArtifact;
 import org.gradle.api.tasks.TaskDependency;
 
 import javax.annotation.Nullable;
 
-public abstract class AbstractIvyArtifact implements IvyArtifact {
+public abstract class AbstractIvyArtifact implements IvyArtifact, PublicationArtifactInternal {
     private final TaskDependency allBuildDependencies;
     private final DefaultTaskDependency additionalBuildDependencies;
 
@@ -113,7 +113,7 @@ public abstract class AbstractIvyArtifact implements IvyArtifact {
         return allBuildDependencies;
     }
 
-    protected abstract TaskDependencyInternal getDefaultBuildDependencies();
+    protected abstract TaskDependency getDefaultBuildDependencies();
 
     @Override
     public String toString() {
@@ -123,7 +123,7 @@ public abstract class AbstractIvyArtifact implements IvyArtifact {
     private class CompositeTaskDependency extends AbstractTaskDependency {
         @Override
         public void visitDependencies(TaskDependencyResolveContext context) {
-            getDefaultBuildDependencies().visitDependencies(context);
+            context.add(getDefaultBuildDependencies());
             additionalBuildDependencies.visitDependencies(context);
         }
     }

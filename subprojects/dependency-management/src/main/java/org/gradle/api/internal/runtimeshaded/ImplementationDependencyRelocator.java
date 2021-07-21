@@ -57,6 +57,7 @@ class ImplementationDependencyRelocator extends Remapper {
         prefixes = readPrefixes(type);
     }
 
+    @Override
     public String map(String name) {
         String value = name;
 
@@ -92,6 +93,7 @@ class ImplementationDependencyRelocator extends Remapper {
     private final List<String> mustRelocateList = Arrays.asList(
         // In order to use a newer version of jna the resources must not be available in the old location
         "com/sun/jna",
+        "org/apache/groovy",
         // JGit properties work from their relocated locations and conflict if they are left in place.
         "org/eclipse/jgit");
 

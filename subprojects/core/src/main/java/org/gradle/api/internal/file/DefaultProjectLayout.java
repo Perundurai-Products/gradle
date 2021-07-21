@@ -18,36 +18,43 @@ package org.gradle.api.internal.file;
 
 import org.gradle.api.Project;
 import org.gradle.api.Task;
+import org.gradle.api.Transformer;
 import org.gradle.api.file.ConfigurableFileCollection;
 import org.gradle.api.file.Directory;
 import org.gradle.api.file.DirectoryProperty;
 import org.gradle.api.file.FileCollection;
 import org.gradle.api.file.ProjectLayout;
 import org.gradle.api.file.RegularFile;
-import org.gradle.api.file.RegularFileProperty;
-import org.gradle.api.internal.file.collections.DefaultConfigurableFileCollection;
-import org.gradle.api.internal.file.collections.ImmutableFileCollection;
 import org.gradle.api.internal.file.collections.MinimalFileSet;
-import org.gradle.api.internal.provider.AbstractMappingProvider;
+import org.gradle.api.internal.provider.MappingProvider;
+import org.gradle.api.internal.provider.PropertyHost;
 import org.gradle.api.internal.provider.Providers;
-import org.gradle.api.internal.tasks.TaskResolver;
+import org.gradle.api.internal.tasks.TaskDependencyFactory;
 import org.gradle.api.provider.Provider;
-import org.gradle.util.DeprecationLogger;
+import org.gradle.api.tasks.util.PatternSet;
+import org.gradle.internal.Factory;
 
 import java.io.File;
 
-public class DefaultProjectLayout extends DefaultFilePropertyFactory implements ProjectLayout, TaskFileVarFactory {
-    private final FixedDirectory projectDir;
-    private final DefaultDirectoryVar buildDir;
-    private final TaskResolver taskResolver;
+public class DefaultProjectLayout implements ProjectLayout, TaskFileVarFactory {
+    private final Directory projectDir;
+    private final DirectoryProperty buildDir;
     private final FileResolver fileResolver;
+    private final TaskDependencyFactory taskDependencyFactory;
+    private final Factory<PatternSet> patternSetFactory;
+    private final PropertyHost propertyHost;
+    private final FileCollectionFactory fileCollectionFactory;
+    private final FileFactory fileFactory;
 
-    public DefaultProjectLayout(File projectDir, FileResolver resolver, TaskResolver taskResolver) {
-        super(resolver);
-        this.taskResolver = taskResolver;
-        this.fileResolver = resolver;
-        this.projectDir = new FixedDirectory(projectDir, resolver);
-        this.buildDir = new DefaultDirectoryVar(resolver, Project.DEFAULT_BUILD_DIR_NAME);
+    public DefaultProjectLayout(File projectDir, FileResolver fileResolver, TaskDependencyFactory taskDependencyFactory, Factory<PatternSet> patternSetFactory, PropertyHost propertyHost, FileCollectionFactory fileCollectionFactory, FilePropertyFactory filePropertyFactory, FileFactory fileFactory) {
+        this.fileResolver = fileResolver;
+        this.taskDependencyFactory = taskDependencyFactory;
+        this.patternSetFactory = patternSetFactory;
+        this.propertyHost = propertyHost;
+        this.fileCollectionFactory = fileCollectionFactory;
+        this.fileFactory = fileFactory;
+        this.projectDir = fileFactory.dir(projectDir);
+        this.buildDir = filePropertyFactory.newDirectoryProperty().convention(fileFactory.dir(fileResolver.resolve(Project.DEFAULT_BUILD_DIR_NAME)));
     }
 
     @Override
@@ -61,34 +68,8 @@ public class DefaultProjectLayout extends DefaultFilePropertyFactory implements 
     }
 
     @Override
-    public DirectoryProperty directoryProperty() {
-        DeprecationLogger.nagUserOfReplacedMethod("ProjectLayout.directoryProperty()", "ObjectFactory.directoryProperty()");
-        return newDirectoryProperty();
-    }
-
-    @Override
-    public DirectoryProperty directoryProperty(Provider<? extends Directory> initialProvider) {
-        DirectoryProperty result = directoryProperty();
-        result.set(initialProvider);
-        return result;
-    }
-
-    @Override
-    public RegularFileProperty fileProperty() {
-        DeprecationLogger.nagUserOfReplacedMethod("ProjectLayout.fileProperty()", "ObjectFactory.fileProperty()");
-        return newFileProperty();
-    }
-
-    @Override
-    public RegularFileProperty fileProperty(Provider<? extends RegularFile> initialProvider) {
-        RegularFileProperty result = fileProperty();
-        result.set(initialProvider);
-        return result;
-    }
-
-    @Override
     public ConfigurableFileCollection newInputFileCollection(Task consumer) {
-        return new CachingTaskInputFileCollection(consumer.getPath(), projectDir.fileResolver, taskResolver);
+        return new CachingTaskInputFileCollection(fileResolver, patternSetFactory, taskDependencyFactory, propertyHost);
     }
 
     @Override
@@ -98,28 +79,33 @@ public class DefaultProjectLayout extends DefaultFilePropertyFactory implements 
 
     @Override
     public Provider<RegularFile> file(Provider<File> provider) {
-        return new AbstractMappingProvider<RegularFile, File>(RegularFile.class, Providers.internal(provider)) {
+        return new MappingProvider<>(RegularFile.class, Providers.internal(provider), new Transformer<RegularFile, File>() {
             @Override
-            protected RegularFile map(File file) {
-                return new FixedFile(projectDir.fileResolver.resolve(file));
+            public RegularFile transform(File file) {
+                return fileFactory.file(fileResolver.resolve(file));
             }
-        };
+        });
+    }
+
+    @Override
+    public Provider<Directory> dir(Provider<File> provider) {
+        return new MappingProvider<>(Directory.class, Providers.internal(provider), new Transformer<Directory, File>() {
+            @Override
+            public Directory transform(File file) {
+                return fileFactory.dir(fileResolver.resolve(file));
+            }
+        });
     }
 
     @Override
     public FileCollection files(Object... paths) {
-        return ImmutableFileCollection.usingResolver(fileResolver, paths);
-    }
-
-    @Override
-    public ConfigurableFileCollection configurableFiles(Object... files) {
-        return new DefaultConfigurableFileCollection(fileResolver, taskResolver, files);
+        return fileCollectionFactory.resolving(paths);
     }
 
     /**
      * A temporary home. Should be on the public API somewhere
      */
     public void setBuildDirectory(Object value) {
-        buildDir.resolveAndSet(value);
+        buildDir.set(fileResolver.resolve(value));
     }
 }

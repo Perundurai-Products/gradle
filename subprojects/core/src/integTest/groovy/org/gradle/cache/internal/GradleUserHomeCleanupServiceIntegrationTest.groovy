@@ -44,7 +44,7 @@ class GradleUserHomeCleanupServiceIntegrationTest extends AbstractIntegrationSpe
         def currentDist = createDistributionChecksumDir(GradleVersion.current()).parentFile
 
         when:
-        succeeds("tasks")
+        succeeds("help")
 
         then:
         oldButRecentlyUsedCacheDir.assertExists()

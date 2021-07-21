@@ -39,21 +39,24 @@ abstract class AbstractBasicGroupedTaskLoggingFunctionalTest extends AbstractCon
 
         buildFile << """
             subprojects {
-                task log { 
-                    doFirst { 
-                        logger.error "Error from " + project.name
-                        logger.quiet "Output from " + project.name
-                        new java.net.URL("${server.uri}/log" + project.name).openConnection().getContentLength()
-                        logger.quiet "Done with " + project.name 
-                        logger.error "Done with " + project.name
-                    } 
+                task log {
+                    def projectName = project.name
+                    doFirst {
+                        logger.error "Error from " + projectName
+                        logger.quiet "Output from " + projectName
+                        new java.net.URL("${server.uri}/log" + projectName).openConnection().getContentLength()
+                        logger.quiet "Done with " + projectName
+                        logger.error "Done with " + projectName
+                    }
                 }
             }
         """
 
         when:
         server.expectConcurrent("log1", "log2", "log3")
-        result = executer.withArgument("--parallel").withTasks("log").start().waitForFinish()
+        executer.withArgument("--parallel")
+        // run build in another process to avoid interference from logging from test fixtures
+        result = executer.withTasks("log").start().waitForFinish()
 
         then:
         result.groupedOutput.taskCount == 3
@@ -67,9 +70,7 @@ abstract class AbstractBasicGroupedTaskLoggingFunctionalTest extends AbstractCon
             assert result.groupedOutput.task(':2:log').output == "Output from 2\nDone with 2"
             assert result.groupedOutput.task(':3:log').output == "Output from 3\nDone with 3"
 
-            result.assertHasErrorOutput("Error from 1\nDone with 1")
-            result.assertHasErrorOutput("Error from 2\nDone with 2")
-            result.assertHasErrorOutput("Error from 3\nDone with 3")
+            ['Error from 1', 'Done with 1', 'Error from 2', 'Done with 2', 'Error from 3', 'Done with 3'].each(result.&assertHasErrorOutput)
         }
     }
 
@@ -229,7 +230,7 @@ abstract class AbstractBasicGroupedTaskLoggingFunctionalTest extends AbstractCon
     }
 
     protected static void assertOutputContains(GradleHandle gradle, String str) {
-        ConcurrentTestUtil.poll(sleepTimeout/1000 as double) {
+        ConcurrentTestUtil.poll(sleepTimeout / 1000 as double) {
             assert gradle.standardOutput =~ /(?ms)$str/
         }
     }

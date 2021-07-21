@@ -24,11 +24,11 @@ import org.gradle.api.internal.tasks.testing.TestExecuter;
 import org.gradle.api.internal.tasks.testing.TestResultProcessor;
 import org.gradle.api.internal.tasks.testing.processors.TestMainAction;
 import org.gradle.api.tasks.testing.TestOutputEvent;
+import org.gradle.internal.SystemProperties;
 import org.gradle.internal.id.IdGenerator;
 import org.gradle.internal.id.LongIdGenerator;
 import org.gradle.internal.io.LineBufferingOutputStream;
 import org.gradle.internal.io.TextStream;
-import org.gradle.internal.operations.BuildOperationExecutor;
 import org.gradle.internal.os.OperatingSystem;
 import org.gradle.internal.time.Clock;
 import org.gradle.process.ExecResult;
@@ -63,11 +63,6 @@ public class XCTestExecuter implements TestExecuter<XCTestTestExecutionSpec> {
         throw new UnsupportedOperationException();
     }
 
-    @Inject
-    public BuildOperationExecutor getBuildOperationExcecutor() {
-        throw new UnsupportedOperationException();
-    }
-
     public IdGenerator<?> getIdGenerator() {
         return new LongIdGenerator();
     }
@@ -93,9 +88,7 @@ public class XCTestExecuter implements TestExecuter<XCTestTestExecutionSpec> {
 
         Runnable detector = new XCTestDetector(processor, testExecutionSpec.getTestSelection());
 
-        Object testTaskOperationId = getBuildOperationExcecutor().getCurrentOperation().getParentId();
-
-        new TestMainAction(detector, processor, testResultProcessor, getTimeProvider(), testTaskOperationId, rootTestSuiteId, "Gradle Test Run " + testExecutionSpec.getPath()).run();
+        new TestMainAction(detector, processor, testResultProcessor, getTimeProvider(), rootTestSuiteId, "Gradle Test Run " + testExecutionSpec.getPath()).run();
     }
 
     @Override
@@ -150,7 +143,8 @@ public class XCTestExecuter implements TestExecuter<XCTestTestExecutionSpec> {
             TextStream stdOut = new XCTestScraper(TestOutputEvent.Destination.StdOut, resultProcessor, idGenerator, clock, rootTestSuiteId, testDescriptors);
             TextStream stdErr = new XCTestScraper(TestOutputEvent.Destination.StdErr, resultProcessor, idGenerator, clock, rootTestSuiteId, testDescriptors);
 
-            execHandle = executeTest(testClass.getTestClassName(), new LineBufferingOutputStream(stdOut), new LineBufferingOutputStream(stdErr));
+            String lineSeparator = SystemProperties.getInstance().getLineSeparator();
+            execHandle = executeTest(testClass.getTestClassName(), new LineBufferingOutputStream(stdOut, lineSeparator), new LineBufferingOutputStream(stdErr, lineSeparator));
             try {
                 execHandle.start();
                 ExecResult result = execHandle.waitForFinish();

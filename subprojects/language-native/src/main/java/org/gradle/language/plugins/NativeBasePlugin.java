@@ -24,10 +24,12 @@ import org.gradle.api.Task;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.artifacts.ConfigurationContainer;
 import org.gradle.api.artifacts.ModuleVersionIdentifier;
+import org.gradle.api.artifacts.dsl.DependencyHandler;
 import org.gradle.api.attributes.Attribute;
 import org.gradle.api.attributes.AttributeContainer;
 import org.gradle.api.attributes.AttributeDisambiguationRule;
 import org.gradle.api.attributes.MultipleCandidatesDetails;
+import org.gradle.api.attributes.Usage;
 import org.gradle.api.component.ComponentWithVariants;
 import org.gradle.api.component.PublishableComponent;
 import org.gradle.api.component.SoftwareComponent;
@@ -35,6 +37,9 @@ import org.gradle.api.component.SoftwareComponentContainer;
 import org.gradle.api.file.DirectoryProperty;
 import org.gradle.api.file.FileCollection;
 import org.gradle.api.file.RegularFile;
+import org.gradle.api.internal.artifacts.ArtifactAttributes;
+import org.gradle.api.internal.artifacts.transform.UnzipTransform;
+import org.gradle.api.model.ObjectFactory;
 import org.gradle.api.plugins.ExtensionContainer;
 import org.gradle.api.provider.Provider;
 import org.gradle.api.publish.PublishingExtension;
@@ -46,6 +51,7 @@ import org.gradle.api.tasks.TaskProvider;
 import org.gradle.internal.Cast;
 import org.gradle.language.ComponentWithBinaries;
 import org.gradle.language.ComponentWithOutputs;
+import org.gradle.language.ComponentWithTargetMachines;
 import org.gradle.language.ProductionComponent;
 import org.gradle.language.base.plugins.LifecycleBasePlugin;
 import org.gradle.language.nativeplatform.internal.ComponentWithNames;
@@ -59,6 +65,7 @@ import org.gradle.language.nativeplatform.internal.PublicationAwareComponent;
 import org.gradle.nativeplatform.Linkage;
 import org.gradle.nativeplatform.TargetMachine;
 import org.gradle.nativeplatform.TargetMachineFactory;
+import org.gradle.nativeplatform.internal.DefaultTargetMachineFactory;
 import org.gradle.nativeplatform.platform.NativePlatform;
 import org.gradle.nativeplatform.tasks.AbstractLinkTask;
 import org.gradle.nativeplatform.tasks.CreateStaticLibrary;
@@ -71,8 +78,12 @@ import org.gradle.nativeplatform.toolchain.NativeToolChain;
 import org.gradle.nativeplatform.toolchain.internal.PlatformToolProvider;
 
 import javax.inject.Inject;
+import java.util.Collections;
 import java.util.Set;
+import java.util.concurrent.Callable;
 
+import static org.gradle.api.artifacts.type.ArtifactTypeDefinition.DIRECTORY_TYPE;
+import static org.gradle.api.artifacts.type.ArtifactTypeDefinition.ZIP_TYPE;
 import static org.gradle.language.cpp.CppBinary.LINKAGE_ATTRIBUTE;
 
 /**
@@ -124,13 +135,19 @@ public class NativeBasePlugin implements Plugin<Project> {
 
         final SoftwareComponentContainer components = project.getComponents();
 
-        addLifecycleTasks(tasks, components);
+        addLifecycleTasks(project, tasks, components);
 
         // Add tasks to build various kinds of components
 
         addTasksForComponentWithExecutable(tasks, buildDirectory, components);
         addTasksForComponentWithSharedLibrary(tasks, buildDirectory, components);
         addTasksForComponentWithStaticLibrary(tasks, buildDirectory, components);
+
+        // Add incoming artifact transforms
+        final DependencyHandler dependencyHandler = project.getDependencies();
+        final ObjectFactory objects = project.getObjects();
+
+        addHeaderZipTransform(dependencyHandler, objects);
 
         // Add outgoing configurations and publications
         final ConfigurationContainer configurations = project.getConfigurations();
@@ -147,7 +164,7 @@ public class NativeBasePlugin implements Plugin<Project> {
         extensions.add(TargetMachineFactory.class, "machines", targetMachineFactory);
     }
 
-    private void addLifecycleTasks(final TaskContainer tasks, final SoftwareComponentContainer components) {
+    private void addLifecycleTasks(final Project project, final TaskContainer tasks, final SoftwareComponentContainer components) {
         components.withType(ComponentWithBinaries.class, component -> {
             // Register each child of each component
             component.getBinaries().whenElementKnown(binary -> components.add(binary));
@@ -165,6 +182,20 @@ public class NativeBasePlugin implements Plugin<Project> {
                     }
                 });
             }
+
+            if (component instanceof ComponentWithTargetMachines) {
+                ComponentWithTargetMachines componentWithTargetMachines = (ComponentWithTargetMachines)component;
+                tasks.named(LifecycleBasePlugin.ASSEMBLE_TASK_NAME, task -> {
+                    task.dependsOn((Callable) () -> {
+                        TargetMachine currentHost = ((DefaultTargetMachineFactory)targetMachineFactory).host();
+                        boolean targetsCurrentMachine = componentWithTargetMachines.getTargetMachines().get().stream().anyMatch(targetMachine -> currentHost.getOperatingSystemFamily().equals(targetMachine.getOperatingSystemFamily()));
+                        if (!targetsCurrentMachine) {
+                            task.getLogger().warn("'" + component.getName() + "' component in project '" + project.getPath() + "' does not target this operating system.");
+                        }
+                        return Collections.emptyList();
+                    });
+                });
+            }
         });
     }
 
@@ -172,7 +203,7 @@ public class NativeBasePlugin implements Plugin<Project> {
         components.withType(ConfigurableComponentWithExecutable.class, executable -> {
             final Names names = executable.getNames();
             final NativeToolChain toolChain = executable.getToolChain();
-            final NativePlatform targetPlatform = executable.getTargetPlatform();
+            final NativePlatform targetPlatform = executable.getNativePlatform();
             final PlatformToolProvider toolProvider = executable.getPlatformToolProvider();
 
             // Add a link task
@@ -226,7 +257,7 @@ public class NativeBasePlugin implements Plugin<Project> {
     private void addTasksForComponentWithSharedLibrary(final TaskContainer tasks, final DirectoryProperty buildDirectory, SoftwareComponentContainer components) {
         components.withType(ConfigurableComponentWithSharedLibrary.class, library -> {
             final Names names = library.getNames();
-            final NativePlatform targetPlatform = library.getTargetPlatform();
+            final NativePlatform targetPlatform = library.getNativePlatform();
             final NativeToolChain toolChain = library.getToolChain();
             final PlatformToolProvider toolProvider = library.getPlatformToolProvider();
 
@@ -238,7 +269,8 @@ public class NativeBasePlugin implements Plugin<Project> {
                 // TODO: We should set this for macOS, but this currently breaks XCTest support for Swift
                 // when Swift depends on C++ libraries built by Gradle.
                 if (!targetPlatform.getOperatingSystem().isMacOsX()) {
-                    task.getInstallName().set(task.getLinkedFile().map(linkedFile -> linkedFile.getAsFile().getName()));
+                    Provider<String> installName = task.getLinkedFile().getLocationOnly().map(linkedFile -> linkedFile.getAsFile().getName());
+                    task.getInstallName().set(installName);
                 }
                 task.getTargetPlatform().set(targetPlatform);
                 task.getToolChain().set(toolChain);
@@ -291,7 +323,7 @@ public class NativeBasePlugin implements Plugin<Project> {
                 Provider<RegularFile> linktimeFile = buildDirectory.file(
                         library.getBaseName().map(baseName -> toolProvider.getStaticLibraryName("lib/" + names.getDirName() + baseName)));
                 task.getOutputFile().set(linktimeFile);
-                task.getTargetPlatform().set(library.getTargetPlatform());
+                task.getTargetPlatform().set(library.getNativePlatform());
                 task.getToolChain().set(library.getToolChain());
             });
 
@@ -404,6 +436,15 @@ public class NativeBasePlugin implements Plugin<Project> {
             extractSymbols.getSymbolFile().set(symbolLocation);
             extractSymbols.getTargetPlatform().set(currentPlatform);
             extractSymbols.getToolChain().set(toolChain);
+        });
+    }
+
+    private void addHeaderZipTransform(DependencyHandler dependencyHandler, ObjectFactory objects) {
+        dependencyHandler.registerTransform(UnzipTransform.class, variantTransform -> {
+            variantTransform.getFrom().attribute(ArtifactAttributes.ARTIFACT_FORMAT, ZIP_TYPE);
+            variantTransform.getFrom().attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage.class, Usage.C_PLUS_PLUS_API));
+            variantTransform.getTo().attribute(ArtifactAttributes.ARTIFACT_FORMAT, DIRECTORY_TYPE);
+            variantTransform.getTo().attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage.class, Usage.C_PLUS_PLUS_API));
         });
     }
 

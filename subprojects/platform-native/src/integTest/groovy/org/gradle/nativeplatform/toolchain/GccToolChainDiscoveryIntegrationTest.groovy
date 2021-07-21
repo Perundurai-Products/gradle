@@ -16,12 +16,13 @@
 
 package org.gradle.nativeplatform.toolchain
 
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
 import org.gradle.nativeplatform.fixtures.AbstractInstalledToolChainIntegrationSpec
 import org.gradle.nativeplatform.fixtures.NativePlatformsTestFixture
 import org.gradle.nativeplatform.fixtures.RequiresInstalledToolChain
 import org.gradle.nativeplatform.fixtures.app.CHelloWorldApp
-import org.hamcrest.Matchers
+import org.hamcrest.CoreMatchers
 import spock.lang.IgnoreIf
 
 import static org.gradle.nativeplatform.fixtures.ToolChainRequirement.GCC_COMPATIBLE
@@ -53,6 +54,7 @@ model {
         helloWorldApp.library.writeSources(file("src/hello"))
     }
 
+    @ToBeFixedForConfigurationCache
     def "can build when language tools that are not required are not available"() {
         when:
         buildFile << """
@@ -92,6 +94,7 @@ model {
         succeeds "help"
     }
 
+    @ToBeFixedForConfigurationCache
     def "tool chain is not available when no tools are available"() {
         when:
         buildFile << """
@@ -123,6 +126,7 @@ model {
     }
 
     @IgnoreIf({GradleContextualExecuter.parallel})
+    @ToBeFixedForConfigurationCache
     def "fails when required language tool is not available but other language tools are available"() {
         when:
         buildFile << """
@@ -140,9 +144,10 @@ model {
 
         then:
         failure.assertHasDescription("Execution failed for task ':compileMainExecutableMainC'.")
-        failure.assertThatCause(Matchers.startsWith("Could not find C compiler 'does-not-exist'"))
+        failure.assertThatCause(CoreMatchers.startsWith("Could not find C compiler 'does-not-exist'"))
     }
 
+    @ToBeFixedForConfigurationCache
     def "fails when required linker tool is not available but language tool is available"() {
         when:
         buildFile << """
@@ -160,6 +165,6 @@ model {
 
         then:
         failure.assertHasDescription("Execution failed for task ':linkMainExecutable'.")
-        failure.assertThatCause(Matchers.startsWith("Could not find Linker 'does-not-exist'"))
+        failure.assertThatCause(CoreMatchers.startsWith("Could not find Linker 'does-not-exist'"))
     }
 }

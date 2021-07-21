@@ -30,24 +30,35 @@ import org.gradle.internal.HasInternalProtocol;
 @HasInternalProtocol
 public interface TaskOutputs {
     /**
-     * <p>Adds a predicate to determine whether the outputs of this task are up-to-date. The given closure is executed
-     * at task execution time. The closure is passed the task as a parameter. If the closure returns false, the task
-     * outputs are considered out-of-date and the task will be executed.</p>
+     * <p>
+     *     Adds a predicate to determine whether previous outputs of this task can be reused.
+     *     The given closure is executed at task execution time.
+     *     The closure is passed the task as a parameter.
+     *     If the closure returns false, previous outputs of this task cannot be reused and the task will be executed.
+     *     That means the task is out-of-date and no outputs will be loaded from the build cache.
+     * </p>
      *
-     * <p>You can add multiple such predicates. The task outputs are considered out-of-date when any predicate returns
-     * false.<p>
+     * <p>
+     *     You can add multiple such predicates.
+     *     The task outputs cannot be reused when any predicate returns false.
+     * </p>
      *
      * @param upToDateClosure The closure to use to determine whether the task outputs are up-to-date.
      */
     void upToDateWhen(Closure upToDateClosure);
 
     /**
-     * <p>Adds a predicate to determine whether the outputs of this task are up-to-date. The given spec is evaluated at
-     * task execution time. If the spec returns false, the task outputs are considered out-of-date and the task will be
-     * executed.</p>
+     * <p>
+     *     Adds a predicate to determine whether previous outputs of this task can be reused.
+     *     The given spec is evaluated at task execution time.
+     *     If the spec returns false, previous outputs of this task cannot be reused and the task will be executed.
+     *     That means the task is out-of-date and no outputs will be loaded from the build cache.
+     * </p>
      *
-     * <p>You can add multiple such predicates. The task outputs are considered out-of-date when any predicate returns
-     * false.<p>
+     * <p>
+     *     You can add multiple such predicates.
+     *     The task outputs cannot be reused when any predicate returns false.
+     * </p>
      *
      * @param upToDateSpec The spec to use to determine whether the task outputs are up-to-date.
      */
@@ -119,13 +130,13 @@ public interface TaskOutputs {
      * Registers some output files for this task.
      *
      * <p>When the given {@code paths} is a {@link java.util.Map}, then each output file
-     * will be associated with an identity. For cacheable tasks this is a requirement.
+     * will be associated with an identity.
      * The keys of the map must be non-empty strings.
      * The values of the map will be evaluated to individual files as per
      * {@link org.gradle.api.Project#file(Object)}.</p>
      *
-     * <p>Otherwise the given files will be evaluated as per {@link org.gradle.api.Project#files(Object...)},
-     * and task output caching will be disabled for the task.</p>
+     * <p>Otherwise the given files will be evaluated as per
+     * {@link org.gradle.api.Project#files(Object...)}.</p>
      *
      * @param paths The output files.
      *
@@ -137,13 +148,13 @@ public interface TaskOutputs {
      * Registers some output directories for this task.
      *
      * <p>When the given {@code paths} is a {@link java.util.Map}, then each output directory
-     * will be associated with an identity. For cacheable tasks this is a requirement.
+     * will be associated with an identity.
      * The keys of the map must be non-empty strings.
      * The values of the map will be evaluated to individual directories as per
      * {@link org.gradle.api.Project#file(Object)}.</p>
      *
-     * <p>Otherwise the given directories will be evaluated as per {@link org.gradle.api.Project#files(Object...)},
-     * and task output caching will be disabled for the task.</p>
+     * <p>Otherwise the given directories will be evaluated as per
+     * {@link org.gradle.api.Project#files(Object...)}.</p>
      *
      * @param paths The output files.
      *

@@ -17,7 +17,7 @@ package org.gradle.launcher.exec;
 
 import org.gradle.api.logging.LogLevel;
 import org.gradle.internal.classpath.ClassPath;
-import org.gradle.util.GUtil;
+import org.gradle.util.internal.GUtil;
 
 import java.io.File;
 import java.io.Serializable;
@@ -31,14 +31,12 @@ public class DefaultBuildActionParameters implements BuildActionParameters, Seri
     private final Map<String, String> envVariables;
 
     private final boolean useDaemon;
-    private final boolean continuous;
     private final ClassPath injectedPluginClasspath;
 
-    public DefaultBuildActionParameters(Map<?, ?> systemProperties, Map<String, String> envVariables, File currentDir, LogLevel logLevel, boolean useDaemon, boolean continuous, ClassPath injectedPluginClasspath) {
+    public DefaultBuildActionParameters(Map<?, ?> systemProperties, Map<String, String> envVariables, File currentDir, LogLevel logLevel, boolean useDaemon, ClassPath injectedPluginClasspath) {
         this.currentDir = currentDir;
         this.logLevel = logLevel;
         this.useDaemon = useDaemon;
-        this.continuous = continuous;
         assert systemProperties != null;
         assert envVariables != null;
         this.systemProperties = new HashMap<String, String>();
@@ -47,18 +45,22 @@ public class DefaultBuildActionParameters implements BuildActionParameters, Seri
         this.injectedPluginClasspath = injectedPluginClasspath;
     }
 
+    @Override
     public Map<String, String> getSystemProperties() {
         return systemProperties;
     }
 
+    @Override
     public Map<String, String> getEnvVariables() {
         return envVariables;
     }
 
+    @Override
     public File getCurrentDir() {
         return currentDir;
     }
 
+    @Override
     public LogLevel getLogLevel() {
         return logLevel;
     }
@@ -71,19 +73,16 @@ public class DefaultBuildActionParameters implements BuildActionParameters, Seri
             + ", envVariables size=" + envVariables.size()
             + ", logLevel=" + logLevel
             + ", useDaemon=" + useDaemon
-            + ", continuous=" + continuous
             + ", injectedPluginClasspath=" + injectedPluginClasspath
             + '}';
     }
 
+    @Override
     public boolean isUseDaemon() {
         return useDaemon;
     }
 
-    public boolean isContinuous() {
-        return continuous;
-    }
-
+    @Override
     public ClassPath getInjectedPluginClasspath() {
         return injectedPluginClasspath;
     }

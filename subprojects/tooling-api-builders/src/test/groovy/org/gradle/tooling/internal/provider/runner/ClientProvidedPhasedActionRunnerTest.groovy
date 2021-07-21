@@ -17,28 +17,30 @@
 package org.gradle.tooling.internal.provider.runner
 
 import org.gradle.BuildListener
-import org.gradle.BuildResult
 import org.gradle.api.internal.GradleInternal
 import org.gradle.api.internal.StartParameterInternal
+import org.gradle.execution.ProjectConfigurer
 import org.gradle.initialization.BuildEventConsumer
-import org.gradle.internal.invocation.BuildController
+import org.gradle.internal.build.event.BuildEventSubscriptions
+import org.gradle.internal.buildtree.BuildTreeLifecycleController
 import org.gradle.internal.service.ServiceRegistry
 import org.gradle.tooling.internal.protocol.InternalBuildActionFailureException
 import org.gradle.tooling.internal.protocol.InternalBuildActionVersion2
 import org.gradle.tooling.internal.protocol.InternalPhasedAction
 import org.gradle.tooling.internal.protocol.PhasedActionResult
-import org.gradle.tooling.internal.provider.BuildClientSubscriptions
-import org.gradle.tooling.internal.provider.ClientProvidedPhasedAction
 import org.gradle.tooling.internal.provider.PhasedBuildActionResult
+import org.gradle.tooling.internal.provider.action.ClientProvidedPhasedAction
 import org.gradle.tooling.internal.provider.serialization.PayloadSerializer
 import org.gradle.tooling.internal.provider.serialization.SerializedPayload
 import spock.lang.Specification
+
+import java.util.function.Function
 
 class ClientProvidedPhasedActionRunnerTest extends Specification {
 
     def startParameter = Stub(StartParameterInternal)
     def serializedAction = Stub(SerializedPayload)
-    def clientSubscriptions = Stub(BuildClientSubscriptions)
+    def clientSubscriptions = Stub(BuildEventSubscriptions)
     def clientProvidedPhasedAction = new ClientProvidedPhasedAction(startParameter, serializedAction, true, clientSubscriptions)
 
     def projectsLoadedAction = Mock(InternalBuildActionVersion2)
@@ -58,24 +60,13 @@ class ClientProvidedPhasedActionRunnerTest extends Specification {
             this.listener = listener
         }
         getServices() >> Stub(ServiceRegistry) {
-            get(PayloadSerializer) >> payloadSerializer
-            get(BuildEventConsumer) >> buildEventConsumer
+            get(ProjectConfigurer) >> Stub(ProjectConfigurer)
         }
     }
-    def buildResult = Mock(BuildResult)
-    def buildController = Mock(BuildController) {
-        run() >> {
-            listener.projectsLoaded(gradle)
-            listener.projectsEvaluated(gradle)
-            listener.buildFinished(buildResult)
-        }
-        setResult(_) >> {
-            buildController.hasResult() >> true
-        }
-        hasResult() >> false
+    def buildController = Mock(BuildTreeLifecycleController) {
         getGradle() >> gradle
     }
-    def runner = new ClientProvidedPhasedActionRunner()
+    def runner = new ClientProvidedPhasedActionRunner(Stub(BuildControllerFactory), payloadSerializer, buildEventConsumer)
 
     def "can run actions and results are sent to event consumer"() {
         def result1 = 'result1'
@@ -97,17 +88,22 @@ class ClientProvidedPhasedActionRunnerTest extends Specification {
         result.clientFailure == null
 
         and:
+        1 * buildController.fromBuildModel(_, _) >> { Boolean b, Function function ->
+            listener.projectsLoaded(gradle)
+            listener.projectsEvaluated(gradle)
+            function.apply(gradle)
+        }
         1 * projectsLoadedAction.execute(_) >> result1
         1 * buildFinishedAction.execute(_) >> result2
         1 * buildEventConsumer.dispatch({
             it instanceof PhasedBuildActionResult &&
-                    it.phase == PhasedActionResult.Phase.PROJECTS_LOADED &&
-                    it.result == serializedResult1
+                it.phase == PhasedActionResult.Phase.PROJECTS_LOADED &&
+                it.result == serializedResult1
         })
         1 * buildEventConsumer.dispatch({
             it instanceof PhasedBuildActionResult &&
-                    it.phase == PhasedActionResult.Phase.BUILD_FINISHED &&
-                    it.result == serializedResult2
+                it.phase == PhasedActionResult.Phase.BUILD_FINISHED &&
+                it.result == serializedResult2
         })
     }
 
@@ -126,6 +122,11 @@ class ClientProvidedPhasedActionRunnerTest extends Specification {
         result.clientFailure.cause == failure
 
         and:
+        1 * buildController.fromBuildModel(_, _) >> { Boolean b, Function function ->
+            listener.projectsLoaded(gradle)
+            listener.projectsEvaluated(gradle)
+            function.apply(gradle)
+        }
         1 * projectsLoadedAction.execute(_) >> {
             throw failure
         }
@@ -135,7 +136,6 @@ class ClientProvidedPhasedActionRunnerTest extends Specification {
 
     def "build failures are propagated"() {
         def failure = new RuntimeException()
-        def buildController = Mock(BuildController)
 
         when:
         def result = runner.run(clientProvidedPhasedAction, buildController)
@@ -143,8 +143,7 @@ class ClientProvidedPhasedActionRunnerTest extends Specification {
         then:
         result.buildFailure == failure
         result.clientFailure == failure
-        _ * buildController.gradle >> gradle
-        1 * buildController.run() >> { throw failure }
+        1 * buildController.fromBuildModel(_, _) >> { Boolean b, Function function -> throw failure }
     }
 
     def "action not run if null"() {
@@ -157,6 +156,11 @@ class ClientProvidedPhasedActionRunnerTest extends Specification {
         result.clientFailure == null
 
         and:
+        1 * buildController.fromBuildModel(_, _) >> { Boolean b, Function function ->
+            listener.projectsLoaded(gradle)
+            listener.projectsEvaluated(gradle)
+            function.apply(gradle)
+        }
         1 * phasedAction.getProjectsLoadedAction() >> null
         1 * phasedAction.getBuildFinishedAction() >> null
         0 * buildEventConsumer.dispatch(_)
@@ -167,16 +171,10 @@ class ClientProvidedPhasedActionRunnerTest extends Specification {
         runner.run(new ClientProvidedPhasedAction(startParameter, serializedAction, true, clientSubscriptions), buildController)
 
         then:
-        0 * buildController.configure()
-        1 * buildController.run()
-    }
-
-    def "configure instead of run if no tasks are defined"() {
-        when:
-        runner.run(new ClientProvidedPhasedAction(startParameter, serializedAction, false, clientSubscriptions), buildController)
-
-        then:
-        1 * buildController.configure()
-        0 * buildController.run()
+        1 * buildController.fromBuildModel(true, _) >> { Boolean b, Function function ->
+            listener.projectsLoaded(gradle)
+            listener.projectsEvaluated(gradle)
+            function.apply(gradle)
+        }
     }
 }

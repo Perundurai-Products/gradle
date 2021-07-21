@@ -16,12 +16,12 @@
 package org.gradle.api.internal.artifacts.ivyservice.modulecache;
 
 import com.google.common.collect.Maps;
-import org.gradle.util.BuildCommencedTimeProvider;
+import org.gradle.util.internal.BuildCommencedTimeProvider;
 
 import java.util.Map;
 
 public class InMemoryModuleMetadataCache extends AbstractModuleMetadataCache {
-    private Map<ModuleComponentAtRepositoryKey, CachedMetadata> inMemoryCache = Maps.newConcurrentMap();
+    private final Map<ModuleComponentAtRepositoryKey, CachedMetadata> inMemoryCache = Maps.newConcurrentMap();
     private final AbstractModuleMetadataCache delegate;
 
     public InMemoryModuleMetadataCache(BuildCommencedTimeProvider timeProvider) {
@@ -34,6 +34,7 @@ public class InMemoryModuleMetadataCache extends AbstractModuleMetadataCache {
         this.delegate = delegate;
     }
 
+    @Override
     protected CachedMetadata get(ModuleComponentAtRepositoryKey key) {
         CachedMetadata metadata = inMemoryCache.get(key);
         if (metadata == null && delegate != null) {
@@ -45,11 +46,14 @@ public class InMemoryModuleMetadataCache extends AbstractModuleMetadataCache {
         return metadata;
     }
 
-    protected void store(ModuleComponentAtRepositoryKey key, ModuleMetadataCacheEntry entry, CachedMetadata cachedMetaData) {
-        inMemoryCache.put(key, cachedMetaData);
+    @Override
+    protected CachedMetadata store(ModuleComponentAtRepositoryKey key, ModuleMetadataCacheEntry entry, CachedMetadata cachedMetaData) {
+        CachedMetadata dehydrated = cachedMetaData.dehydrate();
+        inMemoryCache.put(key, dehydrated);
         if (delegate != null) {
-            delegate.store(key, entry, cachedMetaData);
+            delegate.store(key, entry, dehydrated);
         }
+        return dehydrated;
     }
 
 }

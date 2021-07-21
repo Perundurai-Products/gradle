@@ -19,7 +19,7 @@ import org.gradle.api.Action
 import org.gradle.api.XmlProvider
 import org.gradle.api.internal.DomNode
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
-import org.gradle.util.TextUtil
+import org.gradle.util.internal.TextUtil
 import org.junit.Rule
 import spock.lang.Specification
 
@@ -27,7 +27,7 @@ import javax.xml.parsers.DocumentBuilderFactory
 
 class XmlTransformerTest extends Specification {
     final XmlTransformer transformer = new XmlTransformer()
-    @Rule TestNameTestDirectoryProvider tmpDir
+    @Rule TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider(getClass())
 
     def "returns original string when no actions are provided"() {
         expect:
@@ -313,6 +313,21 @@ class XmlTransformerTest extends Specification {
         expected | actual
         "    "   | "    "
         "\t"     | "  " // tabs not supported, two spaces used instead
+    }
+
+    def "empty text nodes are removed when writing out DOM element"() {
+        transformer.addAction { XmlProvider provider ->
+            def document = provider.asElement().ownerDocument
+            document.getElementsByTagName("child").item(0).appendChild(document.createElement("grandchild"))
+            document.getElementsByTagName("child").item(0).appendChild(document.createTextNode("         "))
+            document.getElementsByTagName("child").item(0).appendChild(document.createElement("grandchild"))
+        }
+
+        when:
+        def result = transformer.transform("<root>\n<child/>\n</root>\n")
+
+        then:
+        looksLike("<root>\n  <child>\n    <grandchild/>\n    <grandchild/>\n  </child>\n</root>\n", result)
     }
 
     def "can use with action api"() {

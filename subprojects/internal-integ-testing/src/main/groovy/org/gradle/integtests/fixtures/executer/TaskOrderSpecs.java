@@ -17,7 +17,7 @@
 package org.gradle.integtests.fixtures.executer;
 
 import com.google.common.collect.Sets;
-import org.gradle.util.GUtil;
+import org.gradle.util.internal.GUtil;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -58,8 +58,8 @@ import java.util.Set;
  */
 public class TaskOrderSpecs {
 
-    public static TaskOrderSpec any(Object[] contraints) {
-        return new AnyOrderSpec(Arrays.asList(contraints));
+    public static TaskOrderSpec any(Object[] constraints) {
+        return new AnyOrderSpec(Arrays.asList(constraints));
     }
 
     public static TaskOrderSpec exact(Object[] constraints) {

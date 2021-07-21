@@ -17,7 +17,7 @@ public class OkTest {
     @org.junit.Test
     public void ok() throws Exception {
         // check versions of dependencies
-        assertEquals("4.12", new org.junit.runner.JUnitCore().getVersion());
+        assertEquals("4.13", new org.junit.runner.JUnitCore().getVersion());
         assertTrue(org.apache.tools.ant.Main.getAntVersion().contains("1.6.1"));
 
         // check working dir
@@ -32,13 +32,13 @@ public class OkTest {
         // check classloader and classpath
         assertSame(ClassLoader.getSystemClassLoader(), getClass().getClassLoader());
         assertSame(getClass().getClassLoader(), Thread.currentThread().getContextClassLoader());
-        boolean isJava9 = Boolean.valueOf(System.getProperty("isJava9"));
+        boolean isJava9 = Boolean.parseBoolean(System.getProperty("isJava9"));
         String classPathString = System.getProperty("java.class.path");
         String expectedClassPathString = System.getProperty("expectedClassPath");
         if (isJava9) {
-            String[] splittedClasspath = splitClasspath(classPathString);
-            String workerJar = splittedClasspath[0];
-            String[] classpathWithoutWorkerJar = Arrays.copyOfRange(splittedClasspath, 1, splittedClasspath.length);
+            String[] splitClasspath = splitClasspath(classPathString);
+            String workerJar = splitClasspath[0];
+            String[] classpathWithoutWorkerJar = Arrays.copyOfRange(splitClasspath, 1, splitClasspath.length);
             assertTrue(workerJar + " is the worker jar", workerJar.contains("gradle-worker.jar"));
             assertEquals(splitClasspath(expectedClassPathString), classpathWithoutWorkerJar);
         } else {

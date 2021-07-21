@@ -18,15 +18,16 @@ package org.gradle.api.internal.artifacts.dependencies;
 import com.google.common.collect.ImmutableList;
 import org.gradle.api.artifacts.VersionConstraint;
 import org.gradle.api.internal.artifacts.ImmutableVersionConstraint;
-import org.gradle.util.GUtil;
+import org.gradle.util.internal.GUtil;
 
 import javax.annotation.Nullable;
+import java.io.Serializable;
 import java.util.List;
 
 // does not override equals() but hashCode() in order to cache the latter's
 // pre-computed value to improve performance when used in HashMaps
 @SuppressWarnings("checkstyle:EqualsHashCode")
-public class DefaultImmutableVersionConstraint extends AbstractVersionConstraint implements ImmutableVersionConstraint {
+public class DefaultImmutableVersionConstraint extends AbstractVersionConstraint implements ImmutableVersionConstraint, Serializable {
     private static final DefaultImmutableVersionConstraint EMPTY = new DefaultImmutableVersionConstraint("");
     private final String requiredVersion;
     private final String preferredVersion;
@@ -36,13 +37,6 @@ public class DefaultImmutableVersionConstraint extends AbstractVersionConstraint
     private final String requiredBranch;
 
     private final int hashCode;
-
-    public DefaultImmutableVersionConstraint(String preferredVersion,
-                                             String requiredVersion,
-                                             String strictVersion,
-                                             List<String> rejectedVersions) {
-        this(preferredVersion, requiredVersion, strictVersion, rejectedVersions, null);
-    }
 
     public DefaultImmutableVersionConstraint(String preferredVersion,
                                              String requiredVersion,
@@ -121,10 +115,10 @@ public class DefaultImmutableVersionConstraint extends AbstractVersionConstraint
         if (versionConstraint instanceof ImmutableVersionConstraint) {
             return (ImmutableVersionConstraint) versionConstraint;
         }
-        return new DefaultImmutableVersionConstraint(versionConstraint.getPreferredVersion(), versionConstraint.getRequiredVersion(), versionConstraint.getStrictVersion(), versionConstraint.getRejectedVersions());
+        return new DefaultImmutableVersionConstraint(versionConstraint.getPreferredVersion(), versionConstraint.getRequiredVersion(), versionConstraint.getStrictVersion(), versionConstraint.getRejectedVersions(), versionConstraint.getBranch());
     }
 
-    public static ImmutableVersionConstraint of(String version) {
+    public static ImmutableVersionConstraint of(@Nullable String version) {
         if (version == null) {
             return of();
         }
@@ -132,7 +126,7 @@ public class DefaultImmutableVersionConstraint extends AbstractVersionConstraint
     }
 
     public static ImmutableVersionConstraint of(String preferredVersion, String requiredVersion, String strictVersion, List<String> rejects) {
-        return new DefaultImmutableVersionConstraint(preferredVersion, requiredVersion, strictVersion, rejects);
+        return new DefaultImmutableVersionConstraint(preferredVersion, requiredVersion, strictVersion, rejects, null);
     }
 
     public static ImmutableVersionConstraint of() {

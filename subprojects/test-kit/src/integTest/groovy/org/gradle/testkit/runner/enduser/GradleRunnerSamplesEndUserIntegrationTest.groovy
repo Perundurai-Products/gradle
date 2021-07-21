@@ -19,20 +19,22 @@ package org.gradle.testkit.runner.enduser
 
 import org.gradle.integtests.fixtures.Sample
 import org.gradle.integtests.fixtures.UsesSample
+import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
 import org.gradle.testing.internal.util.RetryUtil
 import org.gradle.testkit.runner.fixtures.NoDebug
 import org.gradle.testkit.runner.fixtures.NonCrossVersion
 import org.gradle.util.Requires
 import org.junit.Rule
+import spock.lang.IgnoreIf
 import spock.lang.Unroll
 
-import static org.gradle.util.TestPrecondition.JDK8_OR_EARLIER
-import static org.gradle.util.TestPrecondition.KOTLIN_SCRIPT
+import static org.gradle.util.TestPrecondition.JDK11_OR_EARLIER
 import static org.gradle.util.TestPrecondition.ONLINE
 
 @NonCrossVersion
 @NoDebug
-@Requires(KOTLIN_SCRIPT)
+@IgnoreIf({ GradleContextualExecuter.embedded })
+// These tests run builds that themselves run a build in a test worker with 'gradleTestKit()' dependency, which needs to pick up Gradle modules from a real distribution
 class GradleRunnerSamplesEndUserIntegrationTest extends BaseTestKitEndUserIntegrationTest {
 
     @Rule
@@ -40,10 +42,17 @@ class GradleRunnerSamplesEndUserIntegrationTest extends BaseTestKitEndUserIntegr
 
     def setup() {
         executer.withRepositoryMirrors()
+        buildFile << """
+            dependencies {
+                testImplementation 'junit:junit:4.13.1'
+            }
+
+            ${mavenCentralRepository()}
+        """
     }
 
     @Unroll
-    @UsesSample("testKit/gradleRunner/junitQuickstart")
+    @UsesSample("testKit/junitQuickstart")
     def "junitQuickstart with #dsl dsl"() {
         expect:
         executer.inDirectory(sample.dir.file(dsl))
@@ -53,28 +62,15 @@ class GradleRunnerSamplesEndUserIntegrationTest extends BaseTestKitEndUserIntegr
         dsl << ['groovy', 'kotlin']
     }
 
-    @UsesSample("testKit/gradleRunner/spockQuickstart")
+    @UsesSample("testKit/spockQuickstart")
     def spockQuickstart() {
         expect:
-        executer.inDirectory(sample.dir)
+        executer.inDirectory(sample.dir.file('groovy'))
         succeeds "check"
     }
 
     @Unroll
-    @UsesSample("testKit/gradleRunner/manualClasspathInjection")
-    @Requires(JDK8_OR_EARLIER)
-    // Uses Gradle 2.8 which does not support Java 9
-    def "manualClasspathInjection with #dsl dsl"() {
-        expect:
-        executer.inDirectory(sample.dir.file(dsl))
-        succeeds "check"
-
-        where:
-        dsl << ['groovy', 'kotlin']
-    }
-
-    @Unroll
-    @UsesSample("testKit/gradleRunner/automaticClasspathInjectionQuickstart")
+    @UsesSample("testKit/automaticClasspathInjectionQuickstart")
     def "automaticClasspathInjectionQuickstart with #dsl dsl"() {
         expect:
         executer.inDirectory(sample.dir.file(dsl))
@@ -85,7 +81,7 @@ class GradleRunnerSamplesEndUserIntegrationTest extends BaseTestKitEndUserIntegr
     }
 
     @Unroll
-    @UsesSample("testKit/gradleRunner/automaticClasspathInjectionCustomTestSourceSet")
+    @UsesSample("testKit/automaticClasspathInjectionCustomTestSourceSet")
     def "automaticClasspathInjectionCustomTestSourceSet with #dsl dsl"() {
         expect:
         executer.inDirectory(sample.dir.file(dsl))
@@ -95,13 +91,13 @@ class GradleRunnerSamplesEndUserIntegrationTest extends BaseTestKitEndUserIntegr
         dsl << ['groovy', 'kotlin']
     }
 
-    @Requires([ONLINE, JDK8_OR_EARLIER])
-    // Uses Gradle 2.6 which does not support Java 9
-    @UsesSample("testKit/gradleRunner/gradleVersion")
+    @Requires([ONLINE, JDK11_OR_EARLIER])
+    // Uses Gradle 5.0 which does not support Java versions >11
+    @UsesSample("testKit/gradleVersion")
     def gradleVersion() {
         expect:
         RetryUtil.retry { //This test is also affected by gradle/gradle#1111 on Windows
-            executer.inDirectory(sample.dir)
+            executer.inDirectory(sample.dir.file('groovy'))
             succeeds "check"
 
         }

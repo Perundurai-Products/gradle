@@ -21,15 +21,15 @@ import org.gradle.api.specs.Spec;
 import org.gradle.integtests.fixtures.executer.GradleDistribution;
 import org.gradle.integtests.fixtures.executer.IntegrationTestBuildContext;
 import org.gradle.internal.Factory;
-import org.gradle.util.CollectionUtils;
+import org.gradle.util.internal.CollectionUtils;
 import org.gradle.util.GradleVersion;
 
 import java.util.Comparator;
 import java.util.List;
 import java.util.Properties;
 
-import static org.gradle.util.CollectionUtils.findFirst;
-import static org.gradle.util.CollectionUtils.sort;
+import static org.gradle.util.internal.CollectionUtils.findFirst;
+import static org.gradle.util.internal.CollectionUtils.sort;
 
 /**
  * Provides access to {@link GradleDistribution}s for versions of Gradle that have been released.
@@ -88,6 +88,7 @@ public class ReleasedVersionDistributions {
     public List<GradleDistribution> getAll() {
         if (distributions == null) {
             distributions = CollectionUtils.collect(getProperties().getProperty("versions").split("\\s+"), new Transformer<GradleDistribution, String>() {
+                @Override
                 public GradleDistribution transform(String version) {
                     return buildContext.distribution(version);
                 }
@@ -108,6 +109,7 @@ public class ReleasedVersionDistributions {
 
     public GradleDistribution getDistribution(final GradleVersion gradleVersion) {
         return findFirst(getAll(), new Spec<GradleDistribution>() {
+            @Override
             public boolean isSatisfiedBy(GradleDistribution element) {
                 return element.getVersion().equals(gradleVersion);
             }
@@ -116,6 +118,7 @@ public class ReleasedVersionDistributions {
 
     public GradleDistribution getDistribution(final String gradleVersion) {
         return findFirst(getAll(), new Spec<GradleDistribution>() {
+            @Override
             public boolean isSatisfiedBy(GradleDistribution element) {
                 return element.getVersion().getVersion().equals(gradleVersion);
             }
@@ -125,6 +128,7 @@ public class ReleasedVersionDistributions {
     public GradleDistribution getPrevious(final GradleVersion gradleVersion) {
         GradleDistribution distribution = getDistribution(gradleVersion);
         List<GradleDistribution> sortedDistributions = sort(distributions, new Comparator<GradleDistribution>() {
+            @Override
             public int compare(GradleDistribution dist1, GradleDistribution dist2) {
                 return dist1.getVersion().compareTo(dist2.getVersion());
             }

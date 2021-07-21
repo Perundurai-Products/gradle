@@ -22,8 +22,7 @@ import org.gradle.api.Transformer;
 import org.gradle.api.logging.LogLevel;
 import org.gradle.api.logging.Logger;
 import org.gradle.api.logging.Logging;
-import org.gradle.api.specs.Spec;
-import org.gradle.initialization.SessionLifecycleListener;
+import org.gradle.internal.session.BuildSessionLifecycleListener;
 import org.gradle.internal.UncheckedException;
 import org.gradle.internal.concurrent.Stoppable;
 import org.gradle.internal.event.ListenerManager;
@@ -35,12 +34,13 @@ import org.gradle.internal.logging.events.OutputEventListener;
 import org.gradle.process.internal.health.memory.MemoryManager;
 import org.gradle.process.internal.health.memory.OsMemoryInfo;
 import org.gradle.process.internal.worker.WorkerProcess;
-import org.gradle.util.CollectionUtils;
+import org.gradle.util.internal.CollectionUtils;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
+
+import static java.util.Comparator.*;
 
 public class WorkerDaemonClientsManager implements Stoppable {
 
@@ -55,7 +55,7 @@ public class WorkerDaemonClientsManager implements Stoppable {
     private final ListenerManager listenerManager;
     private final LoggingManagerInternal loggingManager;
     private final OsMemoryInfo memoryInfo;
-    private final SessionLifecycleListener stopSessionScopeWorkers;
+    private final BuildSessionLifecycleListener stopSessionScopeWorkers;
     private final OutputEventListener logLevelChangeEventListener;
     private final WorkerDaemonExpiration workerDaemonExpiration;
     private final MemoryManager memoryManager;
@@ -101,9 +101,9 @@ public class WorkerDaemonClientsManager implements Stoppable {
         }
     }
 
-    public WorkerDaemonClient reserveNewClient(Class<? extends WorkerProtocol> workerProtocolImplementationClass, DaemonForkOptions forkOptions) {
+    public WorkerDaemonClient reserveNewClient(DaemonForkOptions forkOptions) {
         //allow the daemon to be started concurrently
-        WorkerDaemonClient client = workerDaemonStarter.startDaemon(workerProtocolImplementationClass, forkOptions, workerProcessCleanupAction);
+        WorkerDaemonClient client = workerDaemonStarter.startDaemon(forkOptions, workerProcessCleanupAction);
         synchronized (lock) {
             allClients.add(client);
         }
@@ -146,13 +146,8 @@ public class WorkerDaemonClientsManager implements Stoppable {
      */
     public void selectIdleClientsToStop(Transformer<List<WorkerDaemonClient>, List<WorkerDaemonClient>> selectionFunction) {
         synchronized (lock) {
-            List<WorkerDaemonClient> sortedClients = CollectionUtils.sort(idleClients, new Comparator<WorkerDaemonClient>() {
-                @Override
-                public int compare(WorkerDaemonClient o1, WorkerDaemonClient o2) {
-                    return Integer.compare(o1.getUses(), o2.getUses());
-                }
-            });
-            List<WorkerDaemonClient> clientsToStop = selectionFunction.transform(new ArrayList<WorkerDaemonClient>(sortedClients));
+            List<WorkerDaemonClient> sortedClients = CollectionUtils.sort(idleClients, comparingInt(WorkerDaemonClient::getUses));
+            List<WorkerDaemonClient> clientsToStop = selectionFunction.transform(new ArrayList<>(sortedClients));
             if (!clientsToStop.isEmpty()) {
                 stopWorkers(clientsToStop);
             }
@@ -185,19 +180,11 @@ public class WorkerDaemonClientsManager implements Stoppable {
         }
     }
 
-    private class StopSessionScopedWorkers implements SessionLifecycleListener {
-        @Override
-        public void afterStart() { }
-
+    private class StopSessionScopedWorkers implements BuildSessionLifecycleListener {
         @Override
         public void beforeComplete() {
             synchronized (lock) {
-                List<WorkerDaemonClient> sessionScopedClients = CollectionUtils.filter(allClients, new Spec<WorkerDaemonClient>() {
-                    @Override
-                    public boolean isSatisfiedBy(WorkerDaemonClient client) {
-                        return client.getKeepAliveMode() == KeepAliveMode.SESSION;
-                    }
-                });
+                List<WorkerDaemonClient> sessionScopedClients = CollectionUtils.filter(allClients, client -> client.getKeepAliveMode() == KeepAliveMode.SESSION);
                 stopWorkers(sessionScopedClients);
             }
         }

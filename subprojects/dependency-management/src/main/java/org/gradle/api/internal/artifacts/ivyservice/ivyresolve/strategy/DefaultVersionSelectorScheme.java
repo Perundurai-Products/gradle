@@ -20,47 +20,59 @@ public class DefaultVersionSelectorScheme implements VersionSelectorScheme {
     private final VersionComparator versionComparator;
     private final VersionParser versionParser;
 
-    /**
-     * This constructor is here to maintain backwards compatibility with the nebula plugins
-     * and should be removed as soon as possible.
-     */
-    @Deprecated
-    public DefaultVersionSelectorScheme(VersionComparator versionComparator) {
-        this(versionComparator, new VersionParser());
-    }
-
     public DefaultVersionSelectorScheme(VersionComparator versionComparator, VersionParser versionParser) {
         this.versionComparator = versionComparator;
         this.versionParser = versionParser;
     }
 
+    @Override
     public VersionSelector parseSelector(String selectorString) {
         if (VersionRangeSelector.ALL_RANGE.matcher(selectorString).matches()) {
-            return new VersionRangeSelector(selectorString, versionComparator.asVersionComparator(), versionParser);
+            return maybeCreateRangeSelector(selectorString);
         }
 
-        if (selectorString.endsWith("+")) {
+        if (isSubVersion(selectorString)) {
             return new SubVersionSelector(selectorString);
         }
 
-        if (selectorString.startsWith("latest.")) {
+        if (isLatestVersion(selectorString)) {
             return new LatestVersionSelector(selectorString);
         }
 
         return new ExactVersionSelector(selectorString);
     }
 
+    private VersionSelector maybeCreateRangeSelector(String selectorString) {
+        VersionRangeSelector rangeSelector = new VersionRangeSelector(selectorString, versionComparator.asVersionComparator(), versionParser);
+        if (isSingleVersionRange(rangeSelector)) {
+            // it's a single version range, like [1.0] or [1.0, 1.0]
+            return new ExactVersionSelector(rangeSelector.getUpperBound());
+        }
+        return rangeSelector;
+    }
+
+    private static boolean isSingleVersionRange(VersionRangeSelector rangeSelector) {
+        String lowerBound = rangeSelector.getLowerBound();
+        return lowerBound != null &&
+            lowerBound.equals(rangeSelector.getUpperBound()) &&
+            rangeSelector.isLowerInclusive() && rangeSelector.isUpperInclusive();
+    }
+
+    @Override
     public String renderSelector(VersionSelector selector) {
         return selector.getSelector();
     }
 
     @Override
     public VersionSelector complementForRejection(VersionSelector selector) {
-        // TODO:DAZ We can probably now support more versions with `strictly` but we'll need more test coverage
-        if ((selector instanceof ExactVersionSelector)
-            || (selector instanceof VersionRangeSelector && ((VersionRangeSelector) selector).getUpperBound() != null)) {
-            return new InverseVersionSelector(selector);
-        }
-        throw new IllegalArgumentException("Version '" + renderSelector(selector) + "' cannot be converted to a strict version constraint.");
+        return new InverseVersionSelector(selector);
+    }
+
+    public static boolean isSubVersion(String selectorString) {
+        return selectorString.endsWith("+");
+    }
+
+    public static boolean isLatestVersion(String selectorString) {
+        return selectorString.startsWith("latest.");
     }
 }

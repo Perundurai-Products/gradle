@@ -17,30 +17,50 @@
 package org.gradle.buildinit.plugins.internal;
 
 import com.google.common.collect.Sets;
-import org.gradle.api.internal.file.FileResolver;
+import org.gradle.api.internal.DocumentationRegistry;
 import org.gradle.buildinit.plugins.internal.modifiers.BuildInitTestFramework;
+import org.gradle.buildinit.plugins.internal.modifiers.Language;
 import org.gradle.nativeplatform.platform.internal.DefaultNativePlatform;
 
+import java.util.Optional;
 import java.util.Set;
 
 import static org.gradle.buildinit.plugins.internal.NamespaceBuilder.toNamespace;
 
 public abstract class CppProjectInitDescriptor extends LanguageLibraryProjectInitDescriptor {
+    private final TemplateOperationFactory templateOperationFactory;
+    private final DocumentationRegistry documentationRegistry;
 
-    public CppProjectInitDescriptor(BuildScriptBuilderFactory scriptBuilderFactory, TemplateOperationFactory templateOperationFactory, FileResolver fileResolver, TemplateLibraryVersionProvider libraryVersionProvider) {
-        super("cpp", scriptBuilderFactory, templateOperationFactory, fileResolver, libraryVersionProvider);
+    public CppProjectInitDescriptor(TemplateOperationFactory templateOperationFactory, DocumentationRegistry documentationRegistry) {
+        this.templateOperationFactory = templateOperationFactory;
+        this.documentationRegistry = documentationRegistry;
     }
 
     @Override
-    protected void generate(InitSettings settings, BuildScriptBuilder buildScriptBuilder) {
-        buildScriptBuilder
-            .fileComment("This generated file contains a sample CPP project to get you started.");
-        configureBuildScript(settings, buildScriptBuilder);
+    public Language getLanguage() {
+        return Language.CPP;
+    }
 
+    @Override
+    public void generateProjectBuildScript(String projectName, InitSettings settings, BuildScriptBuilder buildScriptBuilder) {
+        buildScriptBuilder
+            .fileComment("This generated file contains a sample C++ project to get you started.")
+            .fileComment("For more details take a look at the Building C++ applications and libraries chapter in the Gradle")
+            .fileComment("User Manual available at " + documentationRegistry.getDocumentationFor("building_cpp_projects"));
+        configureBuildScript(settings, buildScriptBuilder);
+    }
+
+    @Override
+    public void generateConventionPluginBuildScript(String conventionPluginName, InitSettings settings, BuildScriptBuilder buildScriptBuilder) {
+    }
+
+    @Override
+    public void generateSources(InitSettings settings, TemplateFactory templateFactory) {
         TemplateOperation sourceTemplate = sourceTemplateOperation(settings);
         TemplateOperation headerTemplate = headerTemplateOperation(settings);
         TemplateOperation testSourceTemplate = testTemplateOperation(settings);
-        whenNoSourcesAvailable(sourceTemplate, headerTemplate, testSourceTemplate).generate();
+
+        templateFactory.whenNoSourcesAvailable(sourceTemplate, headerTemplate, testSourceTemplate).generate();
     }
 
     @Override
@@ -51,6 +71,11 @@ public abstract class CppProjectInitDescriptor extends LanguageLibraryProjectIni
     @Override
     public BuildInitTestFramework getDefaultTestFramework() {
         return null;
+    }
+
+    @Override
+    public Optional<String> getFurtherReading(InitSettings settings) {
+        return Optional.of(documentationRegistry.getSampleFor("building_cpp_" + getComponentType().pluralName()));
     }
 
     protected abstract TemplateOperation sourceTemplateOperation(InitSettings settings);
@@ -108,7 +133,7 @@ public abstract class CppProjectInitDescriptor extends LanguageLibraryProjectIni
 
         return templateOperationFactory.newTemplateOperation()
             .withTemplate(template)
-            .withTarget("src/" + sourceSetName + "/" + sourceDir + "/" + targetFileName)
+            .withTarget(settings.getTarget().file(settings.getSubprojects().get(0) + "/src/" + sourceSetName + "/" + sourceDir + "/" + targetFileName).getAsFile())
             .withBinding("projectName", settings.getProjectName())
             .withBinding("namespace", namespace)
             .create();

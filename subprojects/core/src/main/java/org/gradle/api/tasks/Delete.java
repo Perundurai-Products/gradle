@@ -16,16 +16,16 @@
 
 package org.gradle.api.tasks;
 
-import org.gradle.api.Action;
+import org.gradle.api.file.ConfigurableFileCollection;
 import org.gradle.api.file.DeleteSpec;
 import org.gradle.api.file.FileCollection;
 import org.gradle.api.internal.ConventionTask;
-import org.gradle.api.internal.file.FileResolver;
-import org.gradle.api.internal.file.delete.Deleter;
-import org.gradle.internal.nativeintegration.filesystem.FileSystem;
+import org.gradle.internal.file.Deleter;
+import org.gradle.work.DisableCachingByDefault;
 
 import javax.inject.Inject;
-import java.util.LinkedHashSet;
+import java.io.File;
+import java.io.IOException;
 import java.util.Set;
 
 /**
@@ -41,34 +41,19 @@ import java.util.Set;
  * {@link Delete#setFollowSymlinks(boolean)} with true. On systems that do not support symlinks,
  * this will have no effect.
  */
+@DisableCachingByDefault(because = "Deletion cannot be cached")
 public class Delete extends ConventionTask implements DeleteSpec {
-    private Set<Object> delete = new LinkedHashSet<Object>();
+    private ConfigurableFileCollection paths = getProject().getObjects().fileCollection();
 
     private boolean followSymlinks;
 
-    @Inject
-    protected FileSystem getFileSystem() {
-        // Decoration takes care of the implementation
-        throw new UnsupportedOperationException();
-    }
-
-    @Inject
-    protected FileResolver getFileResolver() {
-        // Decoration takes care of the implementation
-        throw new UnsupportedOperationException();
-    }
-
     @TaskAction
-    protected void clean() {
-        Deleter deleter = new Deleter(getFileResolver(), getFileSystem());
-        final boolean innerFollowSymLinks = followSymlinks;
-        final Object[] paths = delete.toArray();
-        setDidWork(deleter.delete(new Action<DeleteSpec>(){
-            @Override
-            public void execute(DeleteSpec deleteSpec) {
-                deleteSpec.delete(paths).setFollowSymlinks(innerFollowSymLinks);
-            }
-        }).getDidWork());
+    protected void clean() throws IOException {
+        boolean didWork = false;
+        for (File path : paths) {
+            didWork |= getDeleter().deleteRecursively(path, followSymlinks);
+        }
+        setDidWork(didWork);
     }
 
     /**
@@ -78,7 +63,7 @@ public class Delete extends ConventionTask implements DeleteSpec {
      */
     @Destroys
     public FileCollection getTargetFiles() {
-        return getProject().files(delete);
+        return paths;
     }
 
     /**
@@ -88,7 +73,7 @@ public class Delete extends ConventionTask implements DeleteSpec {
      */
     @Internal
     public Set<Object> getDelete() {
-        return delete;
+        return paths.getFrom();
     }
 
     /**
@@ -98,7 +83,7 @@ public class Delete extends ConventionTask implements DeleteSpec {
      * @since 4.0
      */
     public void setDelete(Set<Object> targets) {
-        this.delete = targets;
+        this.paths.setFrom(targets);
     }
 
     /**
@@ -107,8 +92,7 @@ public class Delete extends ConventionTask implements DeleteSpec {
      * @param target Any type of object accepted by {@link org.gradle.api.Project#files(Object...)}
      */
     public void setDelete(Object target) {
-        delete.clear();
-        this.delete.add(target);
+        this.paths.setFrom(target);
     }
 
     /**
@@ -126,6 +110,7 @@ public class Delete extends ConventionTask implements DeleteSpec {
      *
      * @param followSymlinks if symlinks should be followed.
      */
+    @Override
     public void setFollowSymlinks(boolean followSymlinks) {
         this.followSymlinks = followSymlinks;
     }
@@ -135,10 +120,14 @@ public class Delete extends ConventionTask implements DeleteSpec {
      *
      * @param targets Any type of object accepted by {@link org.gradle.api.Project#files(Object...)}
      */
+    @Override
     public Delete delete(Object... targets) {
-        for (Object target : targets) {
-            this.delete.add(target);
-        }
+        paths.from(targets);
         return this;
+    }
+
+    @Inject
+    protected Deleter getDeleter() {
+        throw new UnsupportedOperationException("Decorator injects implementation");
     }
 }

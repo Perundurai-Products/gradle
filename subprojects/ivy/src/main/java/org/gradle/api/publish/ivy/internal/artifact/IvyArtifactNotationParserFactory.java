@@ -19,6 +19,7 @@ package org.gradle.api.publish.ivy.internal.artifact;
 import org.gradle.api.artifacts.PublishArtifact;
 import org.gradle.api.internal.file.FileResolver;
 import org.gradle.api.internal.tasks.TaskDependencyContainer;
+import org.gradle.api.provider.Provider;
 import org.gradle.api.publish.ivy.IvyArtifact;
 import org.gradle.api.publish.ivy.internal.publisher.IvyPublicationIdentity;
 import org.gradle.api.tasks.bundling.AbstractArchiveTask;
@@ -47,6 +48,7 @@ public class IvyArtifactNotationParserFactory implements Factory<NotationParser<
         this.publicationIdentity = publicationIdentity;
     }
 
+    @Override
     public NotationParser<Object, IvyArtifact> create() {
         FileNotationConverter fileNotationConverter = new FileNotationConverter(fileResolver);
         ArchiveTaskNotationConverter archiveTaskNotationConverter = new ArchiveTaskNotationConverter();
@@ -99,11 +101,20 @@ public class IvyArtifactNotationParserFactory implements Factory<NotationParser<
             this.fileResolverNotationParser = fileResolver.asNotationParser();
         }
 
+        @Override
         public void convert(Object notation, NotationConvertResult<? super IvyArtifact> result) throws TypeConversionException {
             File file = fileResolverNotationParser.parseNotation(notation);
             IvyArtifact ivyArtifact = instantiator.newInstance(FileBasedIvyArtifact.class, file, publicationIdentity);
             if (notation instanceof TaskDependencyContainer) {
-                ivyArtifact.builtBy(notation);
+                TaskDependencyContainer taskDependencyContainer;
+                if (notation instanceof Provider) {
+                    // wrap to disable special handling of providers by DefaultTaskDependency in this case
+                    // (workaround for https://github.com/gradle/gradle/issues/11054)
+                    taskDependencyContainer = context -> context.add(notation);
+                } else {
+                    taskDependencyContainer = (TaskDependencyContainer) notation;
+                }
+                ivyArtifact.builtBy(taskDependencyContainer);
             }
             result.converted(ivyArtifact);
         }
@@ -114,7 +125,7 @@ public class IvyArtifactNotationParserFactory implements Factory<NotationParser<
         }
     }
 
-    private class IvyArtifactMapNotationConverter extends MapNotationConverter<IvyArtifact> {
+    private static class IvyArtifactMapNotationConverter extends MapNotationConverter<IvyArtifact> {
         private final NotationParser<Object, IvyArtifact> sourceNotationParser;
 
         private IvyArtifactMapNotationConverter(NotationParser<Object, IvyArtifact> sourceNotationParser) {

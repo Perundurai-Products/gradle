@@ -16,7 +16,6 @@
 
 package org.gradle.plugin.devel.tasks;
 
-import org.apache.commons.io.FileUtils;
 import org.gradle.api.DefaultTask;
 import org.gradle.api.UncheckedIOException;
 import org.gradle.api.file.DirectoryProperty;
@@ -25,9 +24,12 @@ import org.gradle.api.provider.ListProperty;
 import org.gradle.api.tasks.Input;
 import org.gradle.api.tasks.OutputDirectory;
 import org.gradle.api.tasks.TaskAction;
+import org.gradle.internal.file.Deleter;
 import org.gradle.internal.util.PropertiesUtils;
 import org.gradle.plugin.devel.PluginDeclaration;
+import org.gradle.work.DisableCachingByDefault;
 
+import javax.inject.Inject;
 import java.io.File;
 import java.io.IOException;
 import java.util.Properties;
@@ -35,6 +37,7 @@ import java.util.Properties;
 /**
  * Generates plugin descriptors from plugin declarations.
  */
+@DisableCachingByDefault(because = "Not worth caching")
 public class GeneratePluginDescriptors extends DefaultTask {
 
     private final ListProperty<PluginDeclaration> declarations;
@@ -68,9 +71,14 @@ public class GeneratePluginDescriptors extends DefaultTask {
         }
     }
 
+    @Inject
+    protected Deleter getDeleter() {
+        throw new UnsupportedOperationException("Decorator takes care of injection");
+    }
+
     private void clearOutputDirectory(File directoryToClear) {
         try {
-            FileUtils.cleanDirectory(directoryToClear);
+            getDeleter().ensureEmptyDirectory(directoryToClear);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

@@ -17,6 +17,7 @@
 package org.gradle.api.publish.maven
 
 import org.gradle.integtests.fixtures.publish.maven.AbstractMavenPublishIntegTest
+
 /**
  * Tests publishing of maven snapshots
  */
@@ -58,6 +59,7 @@ class MavenPublishSnapshotIntegTest extends AbstractMavenPublishIntegTest {
             groupId == "org.gradle"
             artifactId == "snapshotPublish"
             releaseVersion == null
+            latestVersion == '1.0-SNAPSHOT'
             versions == ['1.0-SNAPSHOT']
         }
 
@@ -68,9 +70,14 @@ class MavenPublishSnapshotIntegTest extends AbstractMavenPublishIntegTest {
 
             snapshotTimestamp != null
             snapshotBuildNumber == '1'
+            localSnapshot == false
             lastUpdated == snapshotTimestamp.replace('.', '')
 
             snapshotVersions == ["1.0-${snapshotTimestamp}-${snapshotBuildNumber}"]
+        }
+
+        with (module.parsedModuleMetadata) {
+            variants[0].files[0].url == "snapshotPublish-1.0-SNAPSHOT.jar"
         }
 
         when: // Publish a second time
@@ -87,36 +94,35 @@ class MavenPublishSnapshotIntegTest extends AbstractMavenPublishIntegTest {
 
         module.snapshotMetaData.snapshotVersions == [secondVersion]
 
+        with (module.parsedModuleMetadata) {
+            variants[0].files[0].url == "snapshotPublish-1.0-SNAPSHOT.jar"
+        }
+
         and:
-        resolveArtifacts(module) { expectFiles "snapshotPublish-${secondVersion}.jar" }
+        resolveArtifacts(module) {
+            withModuleMetadata {
+                expectFiles "snapshotPublish-1.0-SNAPSHOT.jar"
+            }
+            withoutModuleMetadata {
+                // This is not ideal but also does not reflect reality, will need some work to fix
+                // This is only possible because Gradle manages to return a path to the supposedly remote file
+                expectFiles "snapshotPublish-${secondVersion}.jar"
+            }
+        }
     }
 
-    def "can publish a snapshot version that was previously published with uploadArchives"() {
-        given:
-        using m2 // uploadArchives writes to .m2/repo
+    def "can install snapshot versions"() {
+        using m2
 
-        and:
-        settingsFile << 'rootProject.name = "snapshotPublish"'
+        settingsFile << 'rootProject.name = "snapshotInstall"'
         buildFile << """
     apply plugin: 'java'
-    apply plugin: 'maven'
     apply plugin: 'maven-publish'
 
     group = 'org.gradle'
     version = '1.0-SNAPSHOT'
 
-    uploadArchives {
-        repositories {
-            mavenDeployer {
-                snapshotRepository(url: "${mavenRepo.uri}")
-            }
-        }
-    }
-
     publishing {
-        repositories {
-            maven { url "${mavenRepo.uri}" }
-        }
         publications {
             pub(MavenPublication) {
                 from components.java
@@ -124,33 +130,69 @@ class MavenPublishSnapshotIntegTest extends AbstractMavenPublishIntegTest {
         }
     }
 """
-        def module = mavenRepo.module('org.gradle', 'snapshotPublish', '1.0-SNAPSHOT')
+        def module = getM2().mavenRepo().module('org.gradle', 'snapshotInstall', '1.0-SNAPSHOT')
 
         when:
-        succeeds 'uploadArchives'
+        succeeds 'publishToMavenLocal'
 
         then:
-        List<String>  initialArtifacts = ["snapshotPublish-${module.publishArtifactVersion}.jar", "snapshotPublish-${module.publishArtifactVersion}.pom"]
-        module.assertArtifactsPublished(["maven-metadata.xml"] + initialArtifacts)
+        module.assertArtifactsPublished("maven-metadata-local.xml", "snapshotInstall-1.0-SNAPSHOT.module", "snapshotInstall-1.0-SNAPSHOT.jar", "snapshotInstall-1.0-SNAPSHOT.pom")
 
         and:
         module.parsedPom.version == '1.0-SNAPSHOT'
-        module.snapshotMetaData.snapshotBuildNumber == '1'
 
+        with (module.rootMetaData) {
+            groupId == "org.gradle"
+            artifactId == "snapshotInstall"
+            releaseVersion == null
+            latestVersion == '1.0-SNAPSHOT'
+            versions == ['1.0-SNAPSHOT']
+        }
+
+        with (module.snapshotMetaData) {
+            groupId == "org.gradle"
+            artifactId == "snapshotInstall"
+            version == "1.0-SNAPSHOT"
+
+            snapshotTimestamp == null
+            snapshotBuildNumber == null
+            localSnapshot == true
+
+            lastUpdated != null
+
+            snapshotVersions == ["1.0-SNAPSHOT"]
+        }
+
+        // Install a second time
         when:
-        succeeds 'publish'
+        succeeds 'publishToMavenLocal'
 
         then:
-        def secondVersion = module.publishArtifactVersion
-        List<String> secondArtifacts = ["snapshotPublish-${secondVersion}.module", "snapshotPublish-${secondVersion}.jar", "snapshotPublish-${secondVersion}.pom"]
-        module.assertArtifactsPublished(["maven-metadata.xml"] + initialArtifacts + secondArtifacts)
+        module.assertArtifactsPublished("maven-metadata-local.xml", "snapshotInstall-1.0-SNAPSHOT.module", "snapshotInstall-1.0-SNAPSHOT.jar", "snapshotInstall-1.0-SNAPSHOT.pom")
 
         and:
         module.parsedPom.version == '1.0-SNAPSHOT'
-        module.snapshotMetaData.snapshotBuildNumber == '2'
-        module.snapshotMetaData.snapshotVersions == [secondVersion]
 
-        and:
-        resolveArtifacts(module) { expectFiles "snapshotPublish-${secondVersion}.jar" }
+        with (module.rootMetaData) {
+            groupId == "org.gradle"
+            artifactId == "snapshotInstall"
+            releaseVersion == null
+            latestVersion == '1.0-SNAPSHOT'
+            versions == ['1.0-SNAPSHOT']
+        }
+
+        with (module.snapshotMetaData) {
+            groupId == "org.gradle"
+            artifactId == "snapshotInstall"
+            version == "1.0-SNAPSHOT"
+
+            snapshotTimestamp == null
+            snapshotBuildNumber == null
+            localSnapshot == true
+
+            lastUpdated != null
+
+            snapshotVersions == ["1.0-SNAPSHOT"]
+        }
     }
 }

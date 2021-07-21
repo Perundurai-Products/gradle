@@ -24,9 +24,9 @@ import org.gradle.api.tasks.diagnostics.TaskReportTask
 import org.gradle.test.fixtures.AbstractProjectBuilderSpec
 
 import static org.gradle.api.tasks.TaskDependencyMatchers.dependsOn
-import static org.hamcrest.Matchers.instanceOf
+import static org.hamcrest.CoreMatchers.instanceOf
 
-public class ProjectReportsPluginTest extends AbstractProjectBuilderSpec {
+class ProjectReportsPluginTest extends AbstractProjectBuilderSpec {
     private final ProjectReportsPlugin plugin = new ProjectReportsPlugin()
 
     def appliesBaseReportingPluginAndAddsConventionObject() {
@@ -60,7 +60,7 @@ public class ProjectReportsPluginTest extends AbstractProjectBuilderSpec {
 
         Task htmlReport = project.tasks.getByName(ProjectReportsPlugin.HTML_DEPENDENCY_REPORT);
         htmlReport instanceOf(HtmlDependencyReportTask.class)
-        htmlReport.reports.html.destination == new File(project.buildDir, "reports/project/dependencies")
+        htmlReport.reports.html.outputLocation.get().asFile == new File(project.buildDir, "reports/project/dependencies")
         htmlReport.projects == [project] as Set
 
         Task projectReport = project.getTasks().getByName(ProjectReportsPlugin.PROJECT_REPORT);

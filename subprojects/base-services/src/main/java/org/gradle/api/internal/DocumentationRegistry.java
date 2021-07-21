@@ -29,7 +29,7 @@ public class DocumentationRegistry {
     }
 
     /**
-     * Returns the location the documentation for the given feature, referenced by id. The location may be local or remote.
+     * Returns the location of the documentation for the given feature, referenced by id. The location may be local or remote.
      */
     public String getDocumentationFor(String id) {
         return String.format("https://docs.gradle.org/%s/userguide/%s.html", gradleVersion.getVersion(), id);
@@ -42,5 +42,13 @@ public class DocumentationRegistry {
     public String getDslRefForProperty(Class<?> clazz, String property) {
         String className = clazz.getName();
         return String.format("https://docs.gradle.org/%s/dsl/%s.html#%s:%s", gradleVersion.getVersion(), className, className, property);
+    }
+
+    public String getSampleIndex() {
+        return String.format("https://docs.gradle.org/%s/samples", gradleVersion.getVersion());
+    }
+
+    public String getSampleFor(String id) {
+        return String.format("https://docs.gradle.org/%s/samples/sample_%s.html", gradleVersion.getVersion(), id);
     }
 }

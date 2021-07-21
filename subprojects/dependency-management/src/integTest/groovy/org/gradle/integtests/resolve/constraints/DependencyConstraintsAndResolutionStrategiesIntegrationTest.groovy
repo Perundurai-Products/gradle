@@ -16,6 +16,7 @@
 package org.gradle.integtests.resolve.constraints
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.integtests.fixtures.resolve.ResolveTestFixture
 
 /**
@@ -72,6 +73,7 @@ class DependencyConstraintsAndResolutionStrategiesIntegrationTest extends Abstra
         }
     }
 
+    @ToBeFixedForConfigurationCache
     void "fail-on-conflict resolution strategy is applied to dependency constraints"() {
         given:
         buildFile << """
@@ -90,9 +92,8 @@ class DependencyConstraintsAndResolutionStrategiesIntegrationTest extends Abstra
         fails 'checkDeps'
 
         then:
-        failure.assertHasCause """A conflict was found between the following modules:
-  - org:foo:1.0
-  - org:foo:1.1"""
+        failure.assertHasCause """Conflict(s) found for the following module(s):
+  - org:foo between versions 1.1 and 1.0"""
     }
 
     void "dependency substitution rules are applied to dependency constraints"() {
@@ -106,7 +107,7 @@ class DependencyConstraintsAndResolutionStrategiesIntegrationTest extends Abstra
             }
             configurations.conf.resolutionStrategy {
                 dependencySubstitution {
-                    substitute module("org:foo:1.1") with module("org:foo:1.0")
+                    substitute module("org:foo:1.1") using module("org:foo:1.0")
                 }
             }
         """

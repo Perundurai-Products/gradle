@@ -19,12 +19,12 @@ import org.gradle.api.Action
 import org.gradle.api.XmlProvider
 import org.gradle.internal.xml.XmlTransformer
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
-import org.gradle.util.TextUtil
+import org.gradle.util.internal.TextUtil
 import org.junit.Rule
 import spock.lang.Specification
 
 class XmlPersistableConfigurationObjectTest extends Specification {
-    @Rule public final TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
+    @Rule public final TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider(getClass())
     String rootElement
     final XmlPersistableConfigurationObject object = new XmlPersistableConfigurationObject(new XmlTransformer()) {
         @Override protected String getDefaultResourceName() {

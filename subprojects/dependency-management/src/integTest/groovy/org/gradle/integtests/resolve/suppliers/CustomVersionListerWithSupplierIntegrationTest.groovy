@@ -19,15 +19,10 @@ package org.gradle.integtests.resolve.suppliers
 import groovy.json.JsonBuilder
 import org.gradle.integtests.fixtures.GradleMetadataResolveRunner
 import org.gradle.integtests.fixtures.RequiredFeature
-import org.gradle.integtests.fixtures.RequiredFeatures
 import org.gradle.integtests.resolve.AbstractModuleDependencyResolveTest
 
-@RequiredFeatures([
-    // we only need to check without experimental, it doesn't depend on this flag
-    @RequiredFeature(feature = GradleMetadataResolveRunner.EXPERIMENTAL_RESOLVE_BEHAVIOR, value = "false"),
-    // we only need to check without Gradle metadata, it doesn't matter either
-    @RequiredFeature(feature = GradleMetadataResolveRunner.GRADLE_METADATA, value = "false"),
-])
+// we only need to check without Gradle metadata, it doesn't matter
+@RequiredFeature(feature = GradleMetadataResolveRunner.GRADLE_METADATA, value = "false")
 class CustomVersionListerWithSupplierIntegrationTest extends AbstractModuleDependencyResolveTest {
     private final static String TEST_A_METADATA = new JsonBuilder(
         [
@@ -66,12 +61,12 @@ class CustomVersionListerWithSupplierIntegrationTest extends AbstractModuleDepen
         }
         buildFile << """
             def customAttr = Attribute.of('custom', String)
-            
+
             dependencies {
                 conf "org:testA:latest.release"
                 conf "org:testB:latest.release"
             }
-            
+
             configurations.conf.attributes.attribute(customAttr, 'bar')
         """
 
@@ -117,12 +112,12 @@ class CustomVersionListerWithSupplierIntegrationTest extends AbstractModuleDepen
         }
         buildFile << """
             def customAttr = Attribute.of('custom', String)
-            
+
             dependencies {
                 conf "org:testA:latest.release"
                 conf "org:testB:latest.release"
             }
-            
+
             configurations.conf.attributes.attribute(customAttr, 'bar')
         """
 
@@ -162,7 +157,7 @@ class CustomVersionListerWithSupplierIntegrationTest extends AbstractModuleDepen
             class MyLister implements ComponentMetadataVersionLister {
 
                 final RepositoryResourceAccessor repositoryResourceAccessor
-            
+
                 @javax.inject.Inject
                 MyLister(RepositoryResourceAccessor accessor) { repositoryResourceAccessor = accessor }
 
@@ -177,11 +172,11 @@ class CustomVersionListerWithSupplierIntegrationTest extends AbstractModuleDepen
                     }
                 }
             }
-            
+
             class MySupplier implements ComponentMetadataSupplier {
 
                 final RepositoryResourceAccessor repositoryResourceAccessor
-            
+
                 @javax.inject.Inject
                 MySupplier(RepositoryResourceAccessor accessor) { repositoryResourceAccessor = accessor }
 
@@ -217,7 +212,7 @@ class CustomVersionListerWithSupplierIntegrationTest extends AbstractModuleDepen
             class MyLister implements ComponentMetadataVersionLister {
 
                 final RepositoryResourceAccessor repositoryResourceAccessor
-            
+
                 @javax.inject.Inject
                 MyLister(RepositoryResourceAccessor accessor) { repositoryResourceAccessor = accessor }
 
@@ -232,11 +227,11 @@ class CustomVersionListerWithSupplierIntegrationTest extends AbstractModuleDepen
                     }
                 }
             }
-            
+
             class MySupplier implements ComponentMetadataSupplier {
 
                 final RepositoryResourceAccessor repositoryResourceAccessor
-            
+
                 @javax.inject.Inject
                 MySupplier(RepositoryResourceAccessor accessor) { repositoryResourceAccessor = accessor }
 

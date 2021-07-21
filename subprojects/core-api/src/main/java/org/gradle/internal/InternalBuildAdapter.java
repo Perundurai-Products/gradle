@@ -18,5 +18,5 @@ package org.gradle.internal;
 
 import org.gradle.BuildAdapter;
 
-public class InternalBuildAdapter extends BuildAdapter implements InternalListener {
+public class InternalBuildAdapter extends BuildAdapter implements InternalBuildListener {
 }

@@ -16,8 +16,6 @@
 
 package org.gradle.api.file;
 
-import org.gradle.api.Incubating;
-
 /**
  * Strategies for dealing with the potential creation of duplicate files for or archive entries.
  */
@@ -40,7 +38,7 @@ public enum DuplicatesStrategy {
     EXCLUDE,
 
     /**
-     * Do not attempt to prevent duplicates, but log a warning message when multiple items 
+     * Do not attempt to prevent duplicates, but log a warning message when multiple items
      * are to be created at the same path.
      * <p>
      * This behaves exactly as INCLUDE otherwise.
@@ -49,7 +47,7 @@ public enum DuplicatesStrategy {
 
     /**
      * Throw a {@link DuplicateFileCopyingException} when subsequent items are to be created at the same path.
-     * <p> 
+     * <p>
      * Use this strategy when duplicates are an error condition that should cause the build to fail.
      */
     FAIL,
@@ -60,6 +58,5 @@ public enum DuplicatesStrategy {
      *
      * @since 5.0
      */
-    @Incubating
     INHERIT
 }

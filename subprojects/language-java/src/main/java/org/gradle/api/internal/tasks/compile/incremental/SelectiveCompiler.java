@@ -19,47 +19,68 @@ package org.gradle.api.internal.tasks.compile.incremental;
 import com.google.common.collect.Iterables;
 import org.gradle.api.internal.tasks.compile.CleaningJavaCompiler;
 import org.gradle.api.internal.tasks.compile.JavaCompileSpec;
-import org.gradle.api.internal.tasks.compile.incremental.classpath.ClasspathSnapshotProvider;
 import org.gradle.api.internal.tasks.compile.incremental.recomp.CurrentCompilation;
+import org.gradle.api.internal.tasks.compile.incremental.recomp.CurrentCompilationAccess;
 import org.gradle.api.internal.tasks.compile.incremental.recomp.PreviousCompilation;
+import org.gradle.api.internal.tasks.compile.incremental.recomp.PreviousCompilationAccess;
+import org.gradle.api.internal.tasks.compile.incremental.recomp.PreviousCompilationData;
 import org.gradle.api.internal.tasks.compile.incremental.recomp.RecompilationSpec;
 import org.gradle.api.internal.tasks.compile.incremental.recomp.RecompilationSpecProvider;
-import org.gradle.api.logging.Logger;
-import org.gradle.api.logging.Logging;
 import org.gradle.api.tasks.WorkResult;
-import org.gradle.api.tasks.incremental.IncrementalTaskInputs;
+import org.gradle.api.tasks.WorkResults;
 import org.gradle.internal.time.Time;
 import org.gradle.internal.time.Timer;
 import org.gradle.language.base.internal.compile.Compiler;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import java.io.File;
 import java.util.Collection;
+import java.util.Objects;
 
-class SelectiveCompiler implements org.gradle.language.base.internal.compile.Compiler<JavaCompileSpec> {
-    private static final Logger LOG = Logging.getLogger(SelectiveCompiler.class);
-    private final IncrementalTaskInputs inputs;
-    private final PreviousCompilation previousCompilation;
-    private final CleaningJavaCompiler cleaningCompiler;
-    private final Compiler<JavaCompileSpec> rebuildAllCompiler;
+class SelectiveCompiler<T extends JavaCompileSpec> implements org.gradle.language.base.internal.compile.Compiler<T> {
+    private static final Logger LOG = LoggerFactory.getLogger(SelectiveCompiler.class);
+    private final CleaningJavaCompiler<T> cleaningCompiler;
+    private final Compiler<T> rebuildAllCompiler;
     private final RecompilationSpecProvider recompilationSpecProvider;
-    private final IncrementalCompilationInitializer incrementalCompilationInitializer;
-    private final ClasspathSnapshotProvider classpathSnapshotProvider;
+    private final CurrentCompilationAccess classpathSnapshotter;
+    private final PreviousCompilationAccess previousCompilationAccess;
 
-    public SelectiveCompiler(IncrementalTaskInputs inputs, PreviousCompilation previousCompilation, CleaningJavaCompiler cleaningCompiler,
-                             Compiler<JavaCompileSpec> rebuildAllCompiler, RecompilationSpecProvider recompilationSpecProvider, IncrementalCompilationInitializer compilationInitializer, ClasspathSnapshotProvider classpathSnapshotProvider) {
-        this.inputs = inputs;
-        this.previousCompilation = previousCompilation;
-        this.cleaningCompiler = cleaningCompiler;
+    public SelectiveCompiler(
+        CleaningJavaCompiler<T> cleaningJavaCompiler,
+        Compiler<T> rebuildAllCompiler,
+        RecompilationSpecProvider recompilationSpecProvider,
+        CurrentCompilationAccess classpathSnapshotter,
+        PreviousCompilationAccess previousCompilationAccess
+    ) {
+        this.cleaningCompiler = cleaningJavaCompiler;
         this.rebuildAllCompiler = rebuildAllCompiler;
         this.recompilationSpecProvider = recompilationSpecProvider;
-        this.incrementalCompilationInitializer = compilationInitializer;
-        this.classpathSnapshotProvider = classpathSnapshotProvider;
+        this.classpathSnapshotter = classpathSnapshotter;
+        this.previousCompilationAccess = previousCompilationAccess;
     }
 
     @Override
-    public WorkResult execute(JavaCompileSpec spec) {
-        Timer clock = Time.startTimer();
-        CurrentCompilation currentCompilation = new CurrentCompilation(inputs, spec, classpathSnapshotProvider);
+    public WorkResult execute(T spec) {
+        if (!recompilationSpecProvider.isIncremental()) {
+            LOG.info("Full recompilation is required because no incremental change information is available. This is usually caused by clean builds or changing compiler arguments.");
+            return rebuildAllCompiler.execute(spec);
+        }
+        File previousCompilationDataFile = Objects.requireNonNull(spec.getCompileOptions().getPreviousCompilationDataFile());
+        if (!previousCompilationDataFile.exists()) {
+            LOG.info("Full recompilation is required because no previous compilation result is available.");
+            return rebuildAllCompiler.execute(spec);
+        }
+        if (spec.getSourceRoots().isEmpty()) {
+            LOG.info("Full recompilation is required because the source roots could not be inferred.");
+            return rebuildAllCompiler.execute(spec);
+        }
 
+        Timer clock = Time.startTimer();
+        CurrentCompilation currentCompilation = new CurrentCompilation(spec, classpathSnapshotter);
+
+        PreviousCompilationData previousCompilationData = previousCompilationAccess.readPreviousCompilationData(previousCompilationDataFile);
+        PreviousCompilation previousCompilation = new PreviousCompilation(previousCompilationData);
         RecompilationSpec recompilationSpec = recompilationSpecProvider.provideRecompilationSpec(currentCompilation, previousCompilation);
 
         if (recompilationSpec.isFullRebuildNeeded()) {
@@ -67,15 +88,16 @@ class SelectiveCompiler implements org.gradle.language.base.internal.compile.Com
             return rebuildAllCompiler.execute(spec);
         }
 
-        incrementalCompilationInitializer.initializeCompilation(spec, recompilationSpec);
+        boolean cleanedOutput = recompilationSpecProvider.initializeCompilation(spec, recompilationSpec);
 
         if (Iterables.isEmpty(spec.getSourceFiles()) && spec.getClasses().isEmpty()) {
             LOG.info("None of the classes needs to be compiled! Analysis took {}. ", clock.getElapsed());
-            return new RecompilationNotNecessary();
+            return new RecompilationNotNecessary(previousCompilationData, recompilationSpec);
         }
 
         try {
-            return cleaningCompiler.getCompiler().execute(spec);
+            WorkResult result = recompilationSpecProvider.decorateResult(recompilationSpec, previousCompilationData, cleaningCompiler.getCompiler().execute(spec));
+            return result.or(WorkResults.didWork(cleanedOutput));
         } finally {
             Collection<String> classesToCompile = recompilationSpec.getClassesToCompile();
             LOG.info("Incremental compilation of {} classes completed in {}.", classesToCompile.size(), clock.getElapsed());

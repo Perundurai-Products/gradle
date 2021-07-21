@@ -17,24 +17,40 @@
 package org.gradle.performance.regression.nativeplatform
 
 import org.gradle.performance.AbstractCrossVersionPerformanceTest
-import org.gradle.performance.categories.PerformanceExperiment
-import org.junit.experimental.categories.Category
-import spock.lang.Unroll
+import org.gradle.performance.annotations.RunFor
+import org.gradle.performance.annotations.Scenario
 
-@Category(PerformanceExperiment)
+import static org.gradle.performance.annotations.ScenarioType.PER_DAY
+import static org.gradle.performance.results.OperatingSystem.LINUX
+
 class NativeCleanBuildPerformanceTest extends AbstractCrossVersionPerformanceTest {
     def setup() {
-        runner.minimumVersion = '4.1' // minimum version that contains new C++ plugins
-        runner.targetVersions = ["5.2-20181218000039+0000"]
+        runner.minimumBaseVersion = '4.1' // minimum version that contains new C++ plugins
+        runner.targetVersions = ["7.2-20210713113638+0000"]
     }
 
-    @Unroll
-    def "clean assemble on #testProject"() {
+    @RunFor([
+        @Scenario(type = PER_DAY, operatingSystems = [LINUX],
+            testProjects =  [
+                'smallNative',
+                'mediumNative',
+                'bigNative',
+                'multiNative',
+                'smallCppApp',
+                'mediumCppApp',
+                'mediumCppAppWithMacroIncludes',
+                'bigCppApp',
+                'smallCppMulti',
+                'mediumCppMulti',
+                'mediumCppMultiWithMacroIncludes',
+                'bigCppMulti'
+            ])
+    ])
+    def "clean assemble (native)"() {
         given:
-        runner.testProject = testProject
+        def iterations = runner.testProject in ['smallNative', 'smallCppApp', 'smallCppMulti'] ? 40 : null
         runner.tasksToRun = ["assemble"]
         runner.cleanTasks = ["clean"]
-        runner.gradleOpts = ["-Xms$maxMemory", "-Xmx$maxMemory"]
         runner.runs = iterations
         runner.warmUpRuns = iterations
 
@@ -43,26 +59,13 @@ class NativeCleanBuildPerformanceTest extends AbstractCrossVersionPerformanceTes
 
         then:
         result.assertCurrentVersionHasNotRegressed()
-
-        where:
-        testProject                       | maxMemory | iterations
-        "smallNative"                     | '256m'    | 40
-        "mediumNative"                    | '256m'    | null
-        "bigNative"                       | '1g'      | null
-        "multiNative"                     | '256m'    | null
-        "smallCppApp"                     | '256m'    | 40
-        "mediumCppApp"                    | '256m'    | null
-        "mediumCppAppWithMacroIncludes"   | '256m'    | null
-        "bigCppApp"                       | '256m'    | null
-        "smallCppMulti"                   | '256m'    | 40
-        "mediumCppMulti"                  | '256m'    | null
-        "mediumCppMultiWithMacroIncludes" | '256m'    | null
-        "bigCppMulti"                     | '1g'      | null
     }
 
-    def "clean assemble on manyProjectsNative"() {
+    @RunFor([
+        @Scenario(type = PER_DAY, operatingSystems = [LINUX], testProjects =  ['manyProjectsNative'])
+    ])
+    def "clean assemble (native, parallel)"() {
         given:
-        runner.testProject = "manyProjectsNative"
         runner.tasksToRun = ["assemble"]
         runner.cleanTasks = ["clean"]
         runner.args = ["--parallel", "--max-workers=12"]

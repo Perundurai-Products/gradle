@@ -21,13 +21,13 @@ import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.junit.Rule
 import spock.lang.Specification
 
-import static org.gradle.util.TextUtil.normaliseFileSeparators
+import static org.gradle.util.internal.TextUtil.normaliseFileSeparators
 
 class RelativeFileNameTransformerTest extends Specification {
     static rootDir = new File("root")
 
     @Rule
-    TestNameTestDirectoryProvider testDir = new TestNameTestDirectoryProvider()
+    TestNameTestDirectoryProvider testDir = new TestNameTestDirectoryProvider(getClass())
 
     def "returns canonical path where file outside of root"() {
         expect:

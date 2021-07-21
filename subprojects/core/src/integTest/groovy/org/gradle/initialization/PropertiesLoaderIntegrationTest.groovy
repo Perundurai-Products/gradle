@@ -17,8 +17,12 @@
 package org.gradle.initialization
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
 import org.gradle.util.SetSystemProperties
 import org.junit.Rule
+import spock.lang.IgnoreIf
+import spock.lang.Issue
+import spock.lang.Unroll
 
 class PropertiesLoaderIntegrationTest extends AbstractIntegrationSpec {
     @Rule SetSystemProperties systemProperties = new SetSystemProperties()
@@ -78,9 +82,9 @@ task printSystemProp {
         outputContains('mySystemProp=commandline')
     }
 
+    @IgnoreIf({ GradleContextualExecuter.embedded }) // needs to run Gradle from command line
     def "build property set on command line takes precedence over jvm args"() {
         when:
-        executer.requireGradleDistribution()
         executer.withEnvironmentVars 'GRADLE_OPTS': '-Dorg.gradle.configureondemand=true'
 
         buildFile << """
@@ -107,9 +111,9 @@ task assertCodDisabled {
         succeeds ':assertCodDisabled'
     }
 
+    @IgnoreIf({ GradleContextualExecuter.embedded }) // needs to run Gradle from command line
     def "system property set on command line takes precedence over jvm args"() {
         given:
-        executer.requireGradleDistribution()
         executer.withEnvironmentVars 'GRADLE_OPTS': '-DmySystemProp=jvmarg'
 
         buildFile << """
@@ -146,8 +150,9 @@ task printSystemProp {
         given:
         buildFile << """
             task printProperty() {
+                def myProp = providers.gradleProperty('myProp')
                 doLast {
-                    println "myProp=\${project.ext.myProp}"
+                    println "myProp=\${myProp.get()}"
                 }
             }
         """
@@ -169,5 +174,43 @@ task printSystemProp {
 
         and:
         outputContains("myProp=fromEnv2")
+    }
+
+    @IgnoreIf({ GradleContextualExecuter.embedded })
+    def "properties can be distributed as part of a custom Gradle installation"() {
+        given:
+        requireIsolatedGradleDistribution()
+
+        when:
+        distribution.gradleHomeDir.file('gradle.properties') << 'systemProp.mySystemProp=properties file'
+        buildFile << """
+            task printSystemProp {
+                doLast {
+                    println "mySystemProp=\${System.getProperty('mySystemProp')}"
+                }
+            }
+        """
+        succeeds ':printSystemProp'
+
+        then:
+        outputContains('mySystemProp=properties file')
+
+        cleanup:
+        executer.withArguments("--stop", "--info").run()
+    }
+
+    @Unroll
+    @Issue("https://github.com/gradle/gradle/issues/12122")
+    def "build property with invalid property name ('#property') does not fail the build"() {
+        given:
+        file('gradle.properties') << """
+${property}
+"""
+
+        expect:
+        succeeds 'help'
+
+        where:
+        property << ["=", "==", "===", ":", "::", ":::", ":=:", "=:="]
     }
 }

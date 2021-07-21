@@ -17,11 +17,15 @@
 package org.gradle.api.internal.artifacts.ivyservice.resolveengine.artifact;
 
 import org.gradle.api.Action;
+import org.gradle.api.internal.file.FileCollectionInternal;
+import org.gradle.api.internal.file.FileCollectionStructureVisitor;
+import org.gradle.internal.operations.BuildOperationConstraint;
 import org.gradle.internal.operations.BuildOperationExecutor;
 import org.gradle.internal.operations.BuildOperationQueue;
 import org.gradle.internal.operations.RunnableBuildOperation;
 
-import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * A wrapper that prepares artifacts in parallel when visiting the delegate.
@@ -55,54 +59,46 @@ public abstract class ParallelResolveArtifactSet {
             this.buildOperationProcessor = buildOperationProcessor;
         }
 
-        public void visit(final ArtifactVisitor visitor) {
+        @Override
+        public void visit(ArtifactVisitor visitor) {
             // Start preparing the result
             StartVisitAction visitAction = new StartVisitAction(visitor);
-            buildOperationProcessor.runAll(visitAction);
+            buildOperationProcessor.runAll(visitAction, BuildOperationConstraint.UNCONSTRAINED);
 
             // Now visit the result in order
-            visitAction.result.visit(visitor);
+            visitAction.visitResults();
         }
 
-        private static class AsyncArtifactListenerAdapter implements ResolvedArtifactSet.AsyncArtifactListener {
+        private class StartVisitAction implements Action<BuildOperationQueue<RunnableBuildOperation>>, ResolvedArtifactSet.Visitor {
             private final ArtifactVisitor visitor;
-
-            AsyncArtifactListenerAdapter(ArtifactVisitor visitor) {
-                this.visitor = visitor;
-            }
-
-            @Override
-            public void artifactAvailable(ResolvableArtifact artifact) {
-                // Don't care, collect the artifacts later (in the correct order)
-            }
-
-            @Override
-            public boolean requireArtifactFiles() {
-                return visitor.requireArtifactFiles();
-            }
-
-            @Override
-            public boolean includeFileDependencies() {
-                return visitor.includeFiles();
-            }
-
-            @Override
-            public void fileAvailable(File file) {
-                // Don't care, collect the files later (in the correct order)
-            }
-        }
-
-        private class StartVisitAction implements Action<BuildOperationQueue<RunnableBuildOperation>> {
-            private final ArtifactVisitor visitor;
-            ResolvedArtifactSet.Completion result;
+            private final List<ResolvedArtifactSet.Artifacts> results = new ArrayList<>();
+            private BuildOperationQueue<RunnableBuildOperation> queue;
 
             StartVisitAction(ArtifactVisitor visitor) {
                 this.visitor = visitor;
             }
 
             @Override
+            public FileCollectionStructureVisitor.VisitType prepareForVisit(FileCollectionInternal.Source source) {
+                return visitor.prepareForVisit(source);
+            }
+
+            @Override
+            public void visitArtifacts(ResolvedArtifactSet.Artifacts artifacts) {
+                artifacts.startFinalization(queue, visitor.requireArtifactFiles());
+                results.add(artifacts);
+            }
+
+            @Override
             public void execute(BuildOperationQueue<RunnableBuildOperation> buildOperationQueue) {
-                result = artifacts.startVisit(buildOperationQueue, new AsyncArtifactListenerAdapter(visitor));
+                this.queue = buildOperationQueue;
+                artifacts.visit(this);
+            }
+
+            public void visitResults() {
+                for (ResolvedArtifactSet.Artifacts result : results) {
+                    result.visit(visitor);
+                }
             }
         }
     }

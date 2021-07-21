@@ -17,18 +17,18 @@ package org.gradle.integtests.resolve.rules
 
 import org.gradle.integtests.fixtures.GradleMetadataResolveRunner
 import org.gradle.integtests.fixtures.RequiredFeature
-import org.gradle.integtests.fixtures.RequiredFeatures
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.integtests.resolve.AbstractModuleDependencyResolveTest
 import spock.lang.Issue
 
 class ComponentMetadataRulesIntegrationTest extends AbstractModuleDependencyResolveTest implements ComponentMetadataRulesSupport {
     String getDefaultStatus() {
-        GradleMetadataResolveRunner.useIvy()?'integration':'release'
+        GradleMetadataResolveRunner.useIvy() ? 'integration' : 'release'
     }
 
     def setup() {
         buildFile <<
-"""
+            """
 dependencies {
     conf 'org.test:projectA:1.0'
 }
@@ -81,13 +81,111 @@ dependencies {
         succeeds 'resolve'
     }
 
+    def "rule can use artifactSelector to check sourced metadata"() {
+        repository {
+            'org.test:projectA:1.0' {
+                dependsOn group: 'org.test', artifact: 'projectB', version: '1.0', 'classifier': 'classy'
+            }
+            'org.test:projectB:1.0' {
+                withModule {
+                    undeclaredArtifact(type: 'jar', classifier: 'classy')
+                }
+            }
+        }
+        buildFile << """
+
+class AssertingRule implements ComponentMetadataRule {
+
+    void execute(ComponentMetadataContext context) {
+        context.details.allVariants {
+            withDependencies {
+                it.each { dep ->
+                    println "selectorSize:" + dep.artifactSelectors.size
+                    println "classifier:" + dep.artifactSelectors[0]?.classifier
+                    println "type:" + dep.artifactSelectors[0]?.type
+                }
+            }
+        }
+    }
+}
+
+dependencies {
+    components {
+        all(AssertingRule)
+    }
+}
+"""
+
+        when:
+        repositoryInteractions {
+            'org.test:projectA:1.0' {
+                allowAll()
+            }
+            'org.test:projectB:1.0' {
+                allowAll()
+            }
+        }
+
+        then:
+        succeeds 'resolve'
+        outputContains("selectorSize:1")
+        outputContains("classifier:classy")
+        outputContains("type:jar")
+    }
+
+    def "added dependency has no artifact selectors"() {
+        repository {
+            'org.test:projectA:1.0' {
+            }
+            'org.test:projectB:1.0' {
+                withModule {
+                    undeclaredArtifact(type: 'jar', classifier: 'classy')
+                }
+            }
+        }
+        buildFile << """
+
+class AssertingRule implements ComponentMetadataRule {
+
+    void execute(ComponentMetadataContext context) {
+        context.details.allVariants {
+            withDependencies {
+                add("org.test:projectB:1.0") {
+                    artifactSelectors == []
+                }
+            }
+        }
+    }
+}
+
+dependencies {
+    components {
+        all(AssertingRule)
+    }
+}
+"""
+
+        when:
+        repositoryInteractions {
+            'org.test:projectA:1.0' {
+                allowAll()
+            }
+            'org.test:projectB:1.0' {
+                allowAll()
+            }
+        }
+
+        then:
+        succeeds 'resolve'
+    }
+
     def "changes made by a rule are visible to subsequent rules"() {
         repository {
             'org.test:projectA:1.0'()
         }
 
         buildFile <<
-                """
+            """
 class UpdatingRule implements ComponentMetadataRule {
     public void execute(ComponentMetadataContext context) {
             context.details.status "integration.changed" // verify that 'details' is enhanced
@@ -123,13 +221,14 @@ dependencies {
         succeeds 'resolve'
     }
 
+    @ToBeFixedForConfigurationCache
     def "changes made by a rule are not cached"() {
         repository {
             'org.test:projectA:1.0'()
         }
 
         buildFile <<
-                """
+            """
 class UpdatingRule implements ComponentMetadataRule {
     public void execute(ComponentMetadataContext context) {
             assert !context.details.changing
@@ -161,7 +260,7 @@ dependencies {
         succeeds 'resolve'
     }
 
-    def "can apply all rule types to all modules" () {
+    def "can apply all rule types to all modules"() {
         repository {
             'org.test:projectA:1.0'()
         }
@@ -170,7 +269,7 @@ dependencies {
 
             class VerifyingRule implements ComponentMetadataRule {
                 static boolean ruleInvoked
-                
+
                 public void execute(ComponentMetadataContext context) {
                     ruleInvoked = true
                 }
@@ -210,9 +309,9 @@ dependencies {
                 }
             }
 
-            resolve.doLast { 
+            resolve.doLast {
                 assert rulesInvoked == [ '1.0', '1.0', '1.0', '1.0', '1.0' ]
-                assert VerifyingRule.ruleInvoked 
+                assert VerifyingRule.ruleInvoked
             }
         """
 
@@ -227,7 +326,7 @@ dependencies {
         succeeds 'resolve'
     }
 
-    def "can apply all rule types by module" () {
+    def "can apply all rule types by module"() {
         repository {
             'org.test:projectA:1.0'()
         }
@@ -237,7 +336,7 @@ dependencies {
 
             class InvokedRule implements ComponentMetadataRule {
                 static boolean ruleInvoked
-                
+
                 public void execute(ComponentMetadataContext context) {
                     ruleInvoked = true
                 }
@@ -245,7 +344,7 @@ dependencies {
 
             class NotInvokedRule implements ComponentMetadataRule {
                 static boolean ruleInvoked
-                
+
                 public void execute(ComponentMetadataContext context) {
                     ruleInvoked = true
                 }
@@ -332,9 +431,8 @@ dependencies {
 - Method doSomething(java.lang.String) is not a valid rule method: First parameter of a rule method must be of type org.gradle.api.artifacts.ComponentMetadataDetails""")
     }
 
-    @RequiredFeatures(
-        @RequiredFeature(feature=GradleMetadataResolveRunner.REPOSITORY_TYPE, value="maven")
-    )
+    @RequiredFeature(feature = GradleMetadataResolveRunner.REPOSITORY_TYPE, value = "maven")
+    @ToBeFixedForConfigurationCache
     def "rule that accepts IvyModuleDescriptor isn't invoked for Maven component"() {
         given:
         repository {
@@ -345,6 +443,7 @@ dependencies {
             """
 def plainRuleInvoked = false
 def ivyRuleInvoked = false
+def mavenRuleInvoked = false
 
 dependencies {
     components {
@@ -354,11 +453,15 @@ dependencies {
         all { ComponentMetadataDetails details, IvyModuleDescriptor descriptor ->
             ivyRuleInvoked = true
         }
+        all { ComponentMetadataDetails details, PomModuleDescriptor descriptor ->
+            mavenRuleInvoked = true
+        }
     }
 }
 
 resolve.doLast {
     assert plainRuleInvoked
+    assert mavenRuleInvoked
     assert !ivyRuleInvoked
 }
 """
@@ -381,16 +484,50 @@ resolve.doLast {
             'org.test:projectA:1.0'()
         }
 
+        when:
+        repositoryInteractions {
+            'org.test:projectA:1.0' {
+                expectResolve()
+            }
+        }
         buildFile << """
 class IvyRule implements ComponentMetadataRule {
     public void execute(ComponentMetadataContext context) {
-        assert context.getDescriptor(IvyModuleDescriptor) ${GradleMetadataResolveRunner.useIvy()? '!=' : '=='} null
+        assert context.getDescriptor(IvyModuleDescriptor) ${GradleMetadataResolveRunner.useIvy() ? '!=' : '=='} null
     }
 }
 
 dependencies {
     components {
         all(IvyRule)
+    }
+}
+"""
+
+        then:
+        succeeds 'resolve'
+    }
+
+    @ToBeFixedForConfigurationCache
+    @RequiredFeature(feature = GradleMetadataResolveRunner.REPOSITORY_TYPE, value = "maven")
+    def 'rule can access PomModuleDescriptor for Maven component'() {
+        given:
+        repository {
+            'org.test:projectA:1.0'()
+        }
+
+        buildFile << """
+class PomRule implements ComponentMetadataRule {
+    public void execute(ComponentMetadataContext context) {
+        println(context)
+        assert context.getDescriptor(PomModuleDescriptor) != null
+        assert context.getDescriptor(PomModuleDescriptor).packaging == "jar"
+    }
+}
+
+dependencies {
+    components {
+        all(PomRule)
     }
 }
 """
@@ -402,6 +539,7 @@ dependencies {
         }
 
         then:
+        succeeds 'resolve'
         succeeds 'resolve'
     }
 
@@ -445,7 +583,7 @@ project (':sub') {
     }
     task res {
         doLast {
-            // If we resolve twice the modified component metadata for 'projectA' must not be cached in-memory 
+            // If we resolve twice the modified component metadata for 'projectA' must not be cached in-memory
             println configurations.conf.collect { it.name }
             println configurations.other.collect { it.name }
         }
@@ -473,5 +611,92 @@ task res {
 
         then:
         succeeds ':sub:res', ':res'
+    }
+
+    def "dependency injection works if class-based and inline rules are combined"() {
+        repository {
+            'org.test:projectA:1.0'()
+        }
+
+        when:
+        buildFile << """
+            class ClassBasedRule implements ComponentMetadataRule {
+                @javax.inject.Inject
+                ObjectFactory getObjects() { }
+                void execute(ComponentMetadataContext context) { getObjects() }
+            }
+            dependencies {
+                conf 'org.test:projectA:1.0'
+                components {
+                    all(ClassBasedRule)
+                    all {}
+                }
+            }
+        """
+        repositoryInteractions {
+            'org.test:projectA:1.0' {
+                expectResolve()
+            }
+        }
+
+        then:
+        succeeds 'resolve'
+    }
+
+    // In theory we shouldn't allow this because it can lead to inconsistent dependency
+    // resolution: it means that two strictly equivalent configurations, with the same
+    // dependencies, could resolve differently in the same project, after some rules
+    // have been added. However, the Nebula Resolution Rules plugin depends on this
+    // behavior, because it downloads rules in a JSON format and applies them to the
+    // current project.
+    @Issue("https://github.com/gradle/gradle/issues/15312")
+    def "rules can be added after a first resolution happened in the project"() {
+        repository {
+            'org.test:projectA:1.0'()
+        }
+        buildFile << """
+
+class LoggingRule implements ComponentMetadataRule {
+    public void execute(ComponentMetadataContext context) {
+            println "I am executed on \${context.details.id}"
+    }
+}
+
+configurations {
+    ruleDownloader.incoming.afterResolve {
+        println "Adding rules"
+        dependencies {
+            components {
+                all(LoggingRule)
+            }
+        }
+    }
+}
+
+dependencies {
+    ruleDownloader files('rules.json')
+    conf 'org.test:projectA:1.0'
+}
+
+resolve {
+    doFirst {
+        configurations.ruleDownloader.resolve() // trigger resolution before rules are added
+    }
+}
+
+"""
+
+        when:
+        repositoryInteractions {
+            'org.test:projectA:1.0' {
+                allowAll()
+            }
+        }
+
+        then:
+        succeeds 'resolve'
+
+        and:
+        outputContains "I am executed on org.test:projectA:1.0"
     }
 }

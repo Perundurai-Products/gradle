@@ -21,8 +21,10 @@ import groovy.transform.stc.SimpleType
 import org.apache.ivy.core.settings.IvySettings
 import org.cyberneko.html.xercesbridge.XercesBridge
 import org.gradle.api.Action
-import org.gradle.api.internal.file.collections.DefaultDirectoryFileTreeFactory
+import org.gradle.api.internal.file.TestFiles
 import org.gradle.internal.IoActions
+import org.gradle.internal.classpath.ClasspathBuilder
+import org.gradle.internal.classpath.ClasspathWalker
 import org.gradle.internal.installation.GradleRuntimeShadedJarDetector
 import org.gradle.internal.logging.progress.ProgressLoggerFactory
 import org.gradle.test.fixtures.file.CleanupTestDirectory
@@ -35,6 +37,7 @@ import org.objectweb.asm.ClassWriter
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.tree.ClassNode
 import org.objectweb.asm.util.TraceClassVisitor
+import spock.lang.Issue
 import spock.lang.Specification
 
 import java.util.jar.JarEntry
@@ -45,14 +48,19 @@ import java.util.jar.JarFile
 class RuntimeShadedJarCreatorTest extends Specification {
 
     @Rule
-    TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
+    TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider(getClass())
 
     def progressLoggerFactory = Stub(ProgressLoggerFactory)
     def relocatedJarCreator
     def outputJar = tmpDir.testDirectory.file('gradle-api.jar')
 
     def setup() {
-        relocatedJarCreator = new RuntimeShadedJarCreator(progressLoggerFactory, new ImplementationDependencyRelocator(RuntimeShadedJarType.API), new DefaultDirectoryFileTreeFactory())
+        relocatedJarCreator = new RuntimeShadedJarCreator(
+            progressLoggerFactory,
+            new ImplementationDependencyRelocator(RuntimeShadedJarType.API),
+            new ClasspathWalker(TestFiles.fileSystem()),
+            new ClasspathBuilder(TestFiles.tmpDirTemporaryFileProvider(tmpDir.root))
+        )
     }
 
     def "creates JAR file for input directory"() {
@@ -108,7 +116,6 @@ org.gradle.api.internal.tasks.CompileServices
         createJarFileWithResources(jarFile5, [
             'org/gradle/reporting/report.js',
             'net/rubygrapefruit/platform/osx-i386/libnative-platform.dylib',
-            'aQute/libg/tuple/packageinfo',
             'org/joda/time/tz/data/Africa/Abidjan'])
         def jarFile6 = inputFilesDir.file('lib6.jar')
         createJarFileWithProviderConfigurationFile(jarFile6, 'org.gradle.internal.other.Service', 'org.gradle.internal.other.ServiceImpl')
@@ -128,22 +135,33 @@ org.gradle.api.internal.tasks.CompileServices
         handleAsJarFile(outputJar) { JarFile file ->
             List<JarEntry> entries = file.entries() as List
             assert entries*.name == [
+                'org/',
+                'org/gradle/',
                 'org/gradle/MyClass.class',
                 'org/gradle/MySecondClass.class',
-                'aQute/libg/tuple/packageinfo',
-                'org/gradle/internal/impldep/aQute/libg/tuple/packageinfo',
+                'net/',
+                'net/rubygrapefruit/',
+                'net/rubygrapefruit/platform/',
+                'net/rubygrapefruit/platform/osx-i386/',
                 'net/rubygrapefruit/platform/osx-i386/libnative-platform.dylib',
+                'org/gradle/reporting/',
                 'org/gradle/reporting/report.js',
+                'org/joda/',
+                'org/joda/time/',
+                'org/joda/time/tz/',
+                'org/joda/time/tz/data/',
+                'org/joda/time/tz/data/Africa/',
                 'org/joda/time/tz/data/Africa/Abidjan',
-                'org/gradle/internal/impldep/org/joda/time/tz/data/Africa/Abidjan',
                 'org/gradle/MyAClass.class',
                 'org/gradle/MyBClass.class',
                 'org/gradle/MyFirstClass.class',
+                'META-INF/',
+                'META-INF/services/',
                 'META-INF/services/org.gradle.internal.service.scopes.PluginServiceRegistry',
                 'META-INF/services/org.gradle.internal.other.Service',
                 'META-INF/.gradle-runtime-shaded']
         }
-        outputJar.md5Hash == "8eb7b9c992e83362a1445585b00a4fd0"
+        outputJar.md5Hash == "55b2497496d71392a4fa9010352aaf38"
     }
 
     def "excludes module-info.class from jar"() {
@@ -168,9 +186,12 @@ org.gradle.api.internal.tasks.CompileServices
         handleAsJarFile(outputJar) { JarFile file ->
             List<JarEntry> entries = file.entries() as List
             assert entries*.name == [
+                'org/',
+                'org/gradle/',
                 'org/gradle/MyClass.class',
                 'org/gradle/MySecondClass.class',
                 'org/gradle/MyFirstClass.class',
+                'META-INF/',
                 'META-INF/.gradle-runtime-shaded']
         }
     }
@@ -319,8 +340,8 @@ org.gradle.api.internal.tasks.CompileServices"""
 
         then:
         def bytecode = writer.toString()
-        !bytecode.contains('LDC "org/mozilla/javascript/Context"')
-        bytecode.contains('LDC "org/gradle/internal/impldep/org/mozilla/javascript/Context"')
+        !bytecode.contains('LDC "com/google/common/base/Joiner"')
+        bytecode.contains('LDC "org/gradle/internal/impldep/com/google/common/base/Joiner"')
     }
 
     def "ignores slf4j logger bindings"() {
@@ -341,12 +362,24 @@ org.gradle.api.internal.tasks.CompileServices"""
     def "remaps resources"() {
         given:
         def noRelocationResources = ['org/gradle/reporting/report.js',
-                                     'net/rubygrapefruit/platform/osx-i386/libnative-platform.dylib']
-        def duplicateResources = ['aQute/libg/tuple/packageinfo',
-                                  'org/joda/time/tz/data/Africa/Abidjan']
+                                     'net/rubygrapefruit/platform/osx-i386/libnative-platform.dylib',
+                                     'org/joda/time/tz/data/Africa/Abidjan']
         def onlyRelocatedResources = [] // None
         def generatedFiles = [GradleRuntimeShadedJarDetector.MARKER_FILENAME]
-        def resources = noRelocationResources + duplicateResources + onlyRelocatedResources
+        def resources = noRelocationResources + onlyRelocatedResources
+        def directories = ['net/',
+                           'net/rubygrapefruit/',
+                           'net/rubygrapefruit/platform/',
+                           'net/rubygrapefruit/platform/osx-i386/',
+                           'org/',
+                           'org/gradle/',
+                           'org/gradle/reporting/',
+                           'org/joda/',
+                           'org/joda/time/',
+                           'org/joda/time/tz/',
+                           'org/joda/time/tz/data/',
+                           'org/joda/time/tz/data/Africa/',
+                           'META-INF/']
         def inputFilesDir = tmpDir.createDir('inputFiles')
         def jarFile = inputFilesDir.file('lib.jar')
         createJarFileWithResources(jarFile, resources)
@@ -363,15 +396,11 @@ org.gradle.api.internal.tasks.CompileServices"""
         handleAsJarFile(relocatedJar) { JarFile jar ->
             assert jar.entries().toList().size() ==
                 noRelocationResources.size() +
-                duplicateResources.size() * 2 +
                 onlyRelocatedResources.size() +
-                generatedFiles.size()
+                generatedFiles.size() +
+                directories.size()
             noRelocationResources.each { resourceName ->
                 assert jar.getEntry(resourceName)
-            }
-            duplicateResources.each { resourceName ->
-                assert jar.getEntry(resourceName)
-                assert jar.getEntry("org/gradle/internal/impldep/$resourceName")
             }
             onlyRelocatedResources.each { resourceName ->
                 assert jar.getEntry("org/gradle/internal/impldep/$resourceName")
@@ -379,6 +408,34 @@ org.gradle.api.internal.tasks.CompileServices"""
             generatedFiles.each { resourceName ->
                 assert jar.getEntry(resourceName)
             }
+        }
+    }
+
+    @Issue("https://github.com/gradle/gradle/issues/11027")
+    def "relocates multiple third-party impl dependency service providers in the same provider-configuration file"() {
+        given:
+        def inputFilesDir = tmpDir.createDir('inputFiles')
+        def serviceType = 'java.util.spi.ToolProvider'
+        def jarFile = inputFilesDir.file('lib1.jar')
+        def multiLineProviders = 'org.junit.JarToolProvider\norg.jetbrains.ide.JavadocToolProvider\nbsh.Main'
+        createJarFileWithProviderConfigurationFile(jarFile, serviceType, multiLineProviders)
+
+        when:
+        relocatedJarCreator.create(outputJar, [jarFile])
+
+        then:
+        TestFile[] contents = tmpDir.testDirectory.listFiles().findAll { it.isFile() }
+        contents.length == 1
+        def relocatedJar = contents[0]
+        relocatedJar == outputJar
+
+        handleAsJarFile(relocatedJar) { JarFile jar ->
+            JarEntry providerConfigJarEntry = jar.getJarEntry("META-INF/services/$serviceType")
+            IoActions.withResource(jar.getInputStream(providerConfigJarEntry), new Action<InputStream>() {
+                void execute(InputStream inputStream) {
+                    assert inputStream.text == "org.gradle.internal.impldep.org.junit.JarToolProvider\norg.gradle.internal.impldep.org.jetbrains.ide.JavadocToolProvider\norg.gradle.internal.impldep.bsh.Main"
+                }
+            })
         }
     }
 
@@ -395,7 +452,7 @@ org.gradle.api.internal.tasks.CompileServices"""
     private static void writeClass(TestFile outputDir, String className) {
         TestFile classFile = outputDir.createFile("${className}.class")
         ClassNode classNode = new ClassNode()
-        classNode.version = className=='module-info'?Opcodes.V9:Opcodes.V1_6
+        classNode.version = className == 'module-info' ? Opcodes.V9 : Opcodes.V1_6
         classNode.access = Opcodes.ACC_PUBLIC
         classNode.name = className
         classNode.superName = 'java/lang/Object'
@@ -428,9 +485,9 @@ org.gradle.api.internal.tasks.CompileServices"""
 
     static class JavaAdapter {
         // emulates what is found in org.mozilla.javascript.JavaAdapter
-        // (we can't use it directly because not found on test classpath)
+        // (we don't use it directly because we run this test against the 'core' distribution)
         void foo() {
-            String[] classes = ['org/mozilla/javascript/Context']
+            String[] classes = ['com/google/common/base/Joiner']
         }
     }
 }

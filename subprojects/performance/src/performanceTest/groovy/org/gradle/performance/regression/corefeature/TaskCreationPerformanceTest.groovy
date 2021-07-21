@@ -17,15 +17,21 @@
 package org.gradle.performance.regression.corefeature
 
 import org.gradle.performance.AbstractCrossVersionPerformanceTest
+import org.gradle.performance.annotations.RunFor
+import org.gradle.performance.annotations.Scenario
 
+import static org.gradle.performance.annotations.ScenarioType.PER_COMMIT
+import static org.gradle.performance.results.OperatingSystem.LINUX
+
+@RunFor(
+    @Scenario(type = PER_COMMIT, operatingSystems = [LINUX], testProjects = ["createLotsOfTasks"])
+)
 class TaskCreationPerformanceTest extends AbstractCrossVersionPerformanceTest {
 
     def "create many tasks"() {
         given:
-        runner.testProject = "createLotsOfTasks"
         runner.tasksToRun = ['help']
-        runner.gradleOpts = ["-Xms1g", "-Xmx1g"]
-        runner.targetVersions = ["5.2-20181218000039+0000"]
+        runner.targetVersions = ["7.2-20210713113638+0000"]
         runner.runs = 60
 
         when:

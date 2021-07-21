@@ -17,12 +17,9 @@ package org.gradle.api.plugins.quality.checkstyle
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 import org.gradle.test.fixtures.file.TestFile
-import org.gradle.util.Requires
-import org.gradle.util.TestPrecondition
 
-import static org.gradle.util.TextUtil.getPlatformLineSeparator
+import static org.gradle.util.internal.TextUtil.getPlatformLineSeparator
 
-@Requires(TestPrecondition.JDK8_OR_LATER)
 class CheckstylePluginMultiProjectTest extends AbstractIntegrationSpec {
 
     def "configures checkstyle extension to read config from root project in a single project build"() {
@@ -91,7 +88,7 @@ class CheckstylePluginMultiProjectTest extends AbstractIntegrationSpec {
         file('child/build.gradle') << javaProjectUsingCheckstyle()
         file('child/build.gradle') << """
             checkstyle {
-                configDir = file('config/checkstyle')
+                configDirectory = file('config/checkstyle')
             }
         """
         file('child/src/main/java/Dummy.java') << javaClassWithNewLineAtEnd()

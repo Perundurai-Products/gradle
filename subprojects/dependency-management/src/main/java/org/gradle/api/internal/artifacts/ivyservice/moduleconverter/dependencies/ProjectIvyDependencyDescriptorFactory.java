@@ -28,6 +28,7 @@ import org.gradle.internal.component.model.ExcludeMetadata;
 import org.gradle.internal.component.model.LocalComponentDependencyMetadata;
 import org.gradle.internal.component.model.LocalOriginDependencyMetadata;
 
+import javax.annotation.Nullable;
 import java.util.List;
 
 public class ProjectIvyDependencyDescriptorFactory extends AbstractIvyDependencyDescriptorFactory {
@@ -36,12 +37,15 @@ public class ProjectIvyDependencyDescriptorFactory extends AbstractIvyDependency
         super(excludeRuleConverter);
     }
 
-    public LocalOriginDependencyMetadata createDependencyDescriptor(ComponentIdentifier componentId, String clientConfiguration, AttributeContainer clientAttributes, ModuleDependency dependency) {
+    @Override
+    public LocalOriginDependencyMetadata createDependencyDescriptor(ComponentIdentifier componentId, @Nullable String clientConfiguration, AttributeContainer clientAttributes, ModuleDependency dependency) {
         ProjectDependencyInternal projectDependency = (ProjectDependencyInternal) dependency;
         projectDependency.beforeResolved();
-        ComponentSelector selector = DefaultProjectComponentSelector.newSelector(projectDependency.getDependencyProject(), ((AttributeContainerInternal)projectDependency.getAttributes()).asImmutable());
+        ComponentSelector selector = DefaultProjectComponentSelector.newSelector(projectDependency.getDependencyProject(),
+                ((AttributeContainerInternal)projectDependency.getAttributes()).asImmutable(),
+                projectDependency.getRequestedCapabilities());
 
-        List<ExcludeMetadata> excludes = convertExcludeRules(clientConfiguration, dependency.getExcludeRules());
+        List<ExcludeMetadata> excludes = convertExcludeRules(dependency.getExcludeRules());
         LocalComponentDependencyMetadata dependencyMetaData = new LocalComponentDependencyMetadata(
             componentId,
             selector,
@@ -51,10 +55,11 @@ public class ProjectIvyDependencyDescriptorFactory extends AbstractIvyDependency
             projectDependency.getTargetConfiguration(),
             convertArtifacts(dependency.getArtifacts()),
             excludes,
-            false, false, dependency.isTransitive(), false, dependency.getReason());
+            false, false, dependency.isTransitive(), false, dependency.isEndorsingStrictVersions(), dependency.getReason());
         return new DslOriginDependencyMetadataWrapper(dependencyMetaData, dependency);
     }
 
+    @Override
     public boolean canConvert(ModuleDependency dependency) {
         return dependency instanceof ProjectDependency;
     }

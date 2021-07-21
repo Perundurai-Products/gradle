@@ -17,13 +17,11 @@
 package org.gradle.api.tasks.compile;
 
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
-import org.gradle.api.Incubating;
 import org.gradle.api.file.DirectoryProperty;
 import org.gradle.api.file.FileCollection;
-import org.gradle.api.file.ProjectLayout;
 import org.gradle.api.model.ObjectFactory;
+import org.gradle.api.model.ReplacedBy;
 import org.gradle.api.provider.Property;
 import org.gradle.api.provider.Provider;
 import org.gradle.api.tasks.Classpath;
@@ -37,8 +35,9 @@ import org.gradle.api.tasks.Optional;
 import org.gradle.api.tasks.OutputDirectory;
 import org.gradle.api.tasks.PathSensitive;
 import org.gradle.api.tasks.PathSensitivity;
+import org.gradle.internal.deprecation.DeprecationLogger;
 import org.gradle.process.CommandLineArgumentProvider;
-import org.gradle.util.CollectionUtils;
+import org.gradle.util.internal.CollectionUtils;
 
 import javax.annotation.Nullable;
 import javax.inject.Inject;
@@ -51,9 +50,6 @@ import java.util.Map;
  */
 public class CompileOptions extends AbstractOptions {
     private static final long serialVersionUID = 0;
-
-    private static final ImmutableSet<String> EXCLUDE_FROM_ANT_PROPERTIES =
-            ImmutableSet.of("debugOptions", "forkOptions", "compilerArgs", "incremental", "allCompilerArgs", "compilerArgumentProviders");
 
     private boolean failOnError = true;
 
@@ -80,7 +76,7 @@ public class CompileOptions extends AbstractOptions {
     private String extensionDirs;
 
     private List<String> compilerArgs = Lists.newArrayList();
-    private List<CommandLineArgumentProvider> compilerArgumentProviders = Lists.newArrayList();
+    private final List<CommandLineArgumentProvider> compilerArgumentProviders = Lists.newArrayList();
 
     private boolean incremental = true;
 
@@ -88,14 +84,21 @@ public class CompileOptions extends AbstractOptions {
 
     private FileCollection annotationProcessorPath;
 
-    private final Property<File> annotationProcessorGeneratedSourcesDirectory;
+    private final Property<String> javaModuleVersion;
+    private final Property<String> javaModuleMainClass;
+    private final Property<Integer> release;
 
-    private DirectoryProperty headerOutputDirectory;
+    private final DirectoryProperty generatedSourceOutputDirectory;
+
+    private final DirectoryProperty headerOutputDirectory;
 
     @Inject
-    public CompileOptions(ProjectLayout projectLayout, ObjectFactory objectFactory) {
-        this.annotationProcessorGeneratedSourcesDirectory = objectFactory.property(File.class);
+    public CompileOptions(ObjectFactory objectFactory) {
+        this.javaModuleVersion = objectFactory.property(String.class);
+        this.javaModuleMainClass = objectFactory.property(String.class);
+        this.generatedSourceOutputDirectory = objectFactory.directoryProperty();
         this.headerOutputDirectory = objectFactory.directoryProperty();
+        this.release = objectFactory.property(Integer.class);
     }
 
     /**
@@ -317,7 +320,6 @@ public class CompileOptions extends AbstractOptions {
      *
      * @since 4.5
      */
-    @Incubating
     @Internal
     public List<String> getAllCompilerArgs() {
         ImmutableList.Builder<String> builder = ImmutableList.builder();
@@ -334,7 +336,6 @@ public class CompileOptions extends AbstractOptions {
      * @since 4.5
      */
     @Nested
-    @Incubating
     public List<CommandLineArgumentProvider> getCompilerArgumentProviders() {
         return compilerArgumentProviders;
     }
@@ -373,41 +374,6 @@ public class CompileOptions extends AbstractOptions {
     public CompileOptions setIncremental(boolean incremental) {
         this.incremental = incremental;
         return this;
-    }
-
-    /**
-     * Internal method.
-     */
-    @Override
-    public Map<String, Object> optionMap() {
-        Map<String, Object> map = super.optionMap();
-        map.putAll(debugOptions.optionMap());
-        map.putAll(forkOptions.optionMap());
-        return map;
-    }
-
-    @Override
-    protected boolean excludeFromAntProperties(String fieldName) {
-        return EXCLUDE_FROM_ANT_PROPERTIES.contains(fieldName);
-    }
-
-    @Override
-    protected String getAntPropertyName(String fieldName) {
-        if (fieldName.equals("warnings")) {
-            return "nowarn";
-        }
-        if (fieldName.equals("extensionDirs")) {
-            return "extdirs";
-        }
-        return fieldName;
-    }
-
-    @Override
-    protected Object getAntPropertyValue(String fieldName, Object value) {
-        if (fieldName.equals("warnings")) {
-            return !warnings;
-        }
-        return value;
     }
 
     /**
@@ -475,26 +441,91 @@ public class CompileOptions extends AbstractOptions {
     }
 
     /**
+     * Configures the Java language version for this compile task ({@code --release} compiler flag).
+     * <p>
+     * If set, it will take precedences over the {@link AbstractCompile#getSourceCompatibility()} and {@link AbstractCompile#getTargetCompatibility()} settings.
+     * <p>
+     * This option is only taken into account by the {@link JavaCompile} task.
+     *
+     * @since 6.6
+     */
+    @Input
+    @Optional
+    public Property<Integer> getRelease() {
+        return release;
+    }
+
+
+    /**
+     * Set the version of the Java module - defaults to {@link org.gradle.api.Project#getVersion()}.
+     *
+     * @since 6.4
+     */
+    @Optional
+    @Input
+    public Property<String> getJavaModuleVersion() {
+        return javaModuleVersion;
+    }
+
+    /**
+     * Set the main class of the Java module, if the module is supposed to be executable.
+     *
+     * @since 6.4
+     */
+    @Optional
+    @Input
+    public Property<String> getJavaModuleMainClass() {
+        return javaModuleMainClass;
+    }
+
+    /**
+     * Returns the directory to place source files generated by annotation processors.
+     *
+     * @since 6.3
+     */
+    @Optional
+    @OutputDirectory
+    public DirectoryProperty getGeneratedSourceOutputDirectory() {
+        return generatedSourceOutputDirectory;
+    }
+
+    /**
      * Returns the directory to place source files generated by annotation processors.
      *
      * @since 4.3
+     *
+     * @deprecated Use {@link #getGeneratedSourceOutputDirectory()} instead. This method will be removed in Gradle 8.0.
      */
-    @Incubating
     @Nullable
-    @Optional
-    @OutputDirectory
+    @Deprecated
+    @ReplacedBy("generatedSourceOutputDirectory")
     public File getAnnotationProcessorGeneratedSourcesDirectory() {
-        return annotationProcessorGeneratedSourcesDirectory.getOrNull();
+        DeprecationLogger.deprecateProperty(CompileOptions.class, "annotationProcessorGeneratedSourcesDirectory")
+            .replaceWith("generatedSourceOutputDirectory")
+            .willBeRemovedInGradle8()
+            .withDslReference()
+            .nagUser();
+
+        return generatedSourceOutputDirectory.getAsFile().getOrNull();
     }
 
     /**
      * Sets the directory to place source files generated by annotation processors.
      *
      * @since 4.3
+     *
+     * @deprecated Use {@link #getGeneratedSourceOutputDirectory()}.set() instead. This method will be removed in Gradle 8.0.
      */
-    @Incubating
+    @Deprecated
     public void setAnnotationProcessorGeneratedSourcesDirectory(@Nullable File file) {
-        this.annotationProcessorGeneratedSourcesDirectory.set(file);
+        // Used by Android plugin. Followup with https://github.com/gradle/gradle/issues/16782
+        /*DeprecationLogger.deprecateProperty(CompileOptions.class, "annotationProcessorGeneratedSourcesDirectory")
+            .replaceWith("generatedSourceOutputDirectory")
+            .willBeRemovedInGradle8()
+            .withDslReference()
+            .nagUser();*/
+
+        this.generatedSourceOutputDirectory.set(file);
     }
 
     /**
@@ -502,9 +533,8 @@ public class CompileOptions extends AbstractOptions {
      *
      * @since 4.3
      */
-    @Incubating
     public void setAnnotationProcessorGeneratedSourcesDirectory(Provider<File> file) {
-        this.annotationProcessorGeneratedSourcesDirectory.set(file);
+        this.generatedSourceOutputDirectory.fileProvider(file);
     }
 
     /**
@@ -512,7 +542,6 @@ public class CompileOptions extends AbstractOptions {
      *
      * @since 4.10
      */
-    @Incubating
     @Optional
     @OutputDirectory
     public DirectoryProperty getHeaderOutputDirectory() {

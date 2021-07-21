@@ -17,35 +17,31 @@
 package org.gradle.internal.snapshot.impl;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
-import com.google.common.base.Predicate;
-import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Interner;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
-import org.gradle.api.GradleException;
-import org.gradle.api.file.FileTreeElement;
-import org.gradle.api.file.RelativePath;
-import org.gradle.api.internal.cache.StringInterner;
-import org.gradle.api.specs.Spec;
-import org.gradle.api.tasks.util.PatternSet;
-import org.gradle.internal.MutableBoolean;
-import org.gradle.internal.UncheckedException;
-import org.gradle.internal.file.FileType;
+import org.gradle.internal.file.FileMetadata;
+import org.gradle.internal.file.FileMetadata.AccessType;
+import org.gradle.internal.file.impl.DefaultFileMetadata;
 import org.gradle.internal.hash.FileHasher;
 import org.gradle.internal.hash.HashCode;
-import org.gradle.internal.nativeintegration.filesystem.DefaultFileMetadata;
-import org.gradle.internal.nativeintegration.filesystem.FileSystem;
-import org.gradle.internal.nativeintegration.filesystem.Stat;
+import org.gradle.internal.snapshot.DirectorySnapshot;
+import org.gradle.internal.snapshot.FileSystemLeafSnapshot;
 import org.gradle.internal.snapshot.FileSystemLocationSnapshot;
 import org.gradle.internal.snapshot.MerkleDirectorySnapshotBuilder;
+import org.gradle.internal.snapshot.MissingFileSnapshot;
 import org.gradle.internal.snapshot.RegularFileSnapshot;
+import org.gradle.internal.snapshot.RelativePathTracker;
+import org.gradle.internal.snapshot.SnapshottingFilter;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import javax.annotation.CheckReturnValue;
 import javax.annotation.Nullable;
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
+import java.io.UncheckedIOException;
 import java.nio.file.FileSystemLoopException;
 import java.nio.file.FileVisitOption;
 import java.nio.file.FileVisitResult;
@@ -53,117 +49,102 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.util.ArrayDeque;
+import java.util.Collection;
+import java.util.Deque;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Predicate;
+
+import static org.gradle.internal.snapshot.MerkleDirectorySnapshotBuilder.EmptyDirectoryHandlingStrategy.INCLUDE_EMPTY_DIRS;
 
 public class DirectorySnapshotter {
-    private final FileHasher hasher;
-    private final FileSystem fileSystem;
-    private final StringInterner stringInterner;
-    private final DefaultExcludes defaultExcludes;
+    private static final Logger LOGGER = LoggerFactory.getLogger(DirectorySnapshotter.class);
+    private static final EnumSet<FileVisitOption> DONT_FOLLOW_SYMLINKS = EnumSet.noneOf(FileVisitOption.class);
+    private static final SymbolicLinkMapping EMPTY_SYMBOLIC_LINK_MAPPING = new SymbolicLinkMapping() {
 
-    public DirectorySnapshotter(FileHasher hasher, FileSystem fileSystem, StringInterner stringInterner, String... defaultExcludes) {
+        @Override
+        public String remapAbsolutePath(Path path) {
+            return path.toString();
+        }
+
+        @Override
+        public SymbolicLinkMapping withNewMapping(String source, String target, RelativePathTracker currentPathTracker) {
+            return new DefaultSymbolicLinkMapping(source, target, currentPathTracker.getSegments());
+        }
+
+        @Override
+        public Iterable<String> getRemappedSegments(Iterable<String> segments) {
+            return segments;
+        }
+    };
+
+    private final FileHasher hasher;
+    private final Interner<String> stringInterner;
+    private final DefaultExcludes defaultExcludes;
+    private final DirectorySnapshotterStatistics.Collector collector;
+
+    public DirectorySnapshotter(FileHasher hasher, Interner<String> stringInterner, Collection<String> defaultExcludes, DirectorySnapshotterStatistics.Collector collector) {
         this.hasher = hasher;
-        this.fileSystem = fileSystem;
         this.stringInterner = stringInterner;
         this.defaultExcludes = new DefaultExcludes(defaultExcludes);
+        this.collector = collector;
     }
 
-    public FileSystemLocationSnapshot snapshot(String absolutePath, @Nullable PatternSet patterns, final MutableBoolean hasBeenFiltered) {
-        Path rootPath = Paths.get(absolutePath);
-        final Spec<FileTreeElement> spec = (patterns == null || patterns.isEmpty()) ? null : patterns.getAsSpec();
-        final MerkleDirectorySnapshotBuilder builder = MerkleDirectorySnapshotBuilder.sortingRequired();
-
+    public FileSystemLocationSnapshot snapshot(String absolutePath, @Nullable SnapshottingFilter.DirectoryWalkerPredicate predicate, final AtomicBoolean hasBeenFiltered) {
         try {
-            Files.walkFileTree(rootPath, EnumSet.of(FileVisitOption.FOLLOW_LINKS), Integer.MAX_VALUE, new java.nio.file.FileVisitor<Path>() {
-                @Override
-                public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
-                    String name = stringInterner.intern(dir.getFileName().toString());
-                    if (builder.isRoot() || isAllowed(dir, name, true, attrs, builder.getRelativePath())) {
-                        builder.preVisitDirectory(internedAbsolutePath(dir), name);
-                        return FileVisitResult.CONTINUE;
-                    } else {
-                        return FileVisitResult.SKIP_SUBTREE;
-                    }
-                }
-
-                @Override
-                public FileVisitResult visitFile(Path file, @Nullable BasicFileAttributes attrs) {
-                    String name = stringInterner.intern(file.getFileName().toString());
-                    if (isAllowed(file, name, false, attrs, builder.getRelativePath())) {
-                        if (attrs == null) {
-                            throw new GradleException(String.format("Cannot read file '%s': not authorized.", file));
-                        }
-                        if (attrs.isSymbolicLink()) {
-                            // when FileVisitOption.FOLLOW_LINKS, we only get here when link couldn't be followed
-                            throw new GradleException(String.format("Could not list contents of '%s'. Couldn't follow symbolic link.", file));
-                        }
-                        addFileSnapshot(file, name, attrs);
-                    }
-                    return FileVisitResult.CONTINUE;
-                }
-
-                @Override
-                public FileVisitResult visitFileFailed(Path file, IOException exc) {
-                    // File loop exceptions are ignored. When we encounter a loop (via symbolic links), we continue
-                    // so we include all the other files apart from the loop.
-                    // This way, we include each file only once.
-                    if (isNotFileSystemLoopException(exc) && isAllowed(file, file.getFileName().toString(), false, null, builder.getRelativePath())) {
-                        throw new GradleException(String.format("Could not read path '%s'.", file), exc);
-                    }
-                    return FileVisitResult.CONTINUE;
-                }
-
-                @Override
-                public FileVisitResult postVisitDirectory(Path dir, @Nullable IOException exc) {
-                    // File loop exceptions are ignored. When we encounter a loop (via symbolic links), we continue
-                    // so we include all the other files apart from the loop.
-                    // This way, we include each file only once.
-                    if (isNotFileSystemLoopException(exc)) {
-                        throw new GradleException(String.format("Could not read directory path '%s'.", dir), exc);
-                    }
-                    builder.postVisitDirectory();
-                    return FileVisitResult.CONTINUE;
-                }
-
-                private boolean isNotFileSystemLoopException(@Nullable IOException e) {
-                    return e != null && !(e instanceof FileSystemLoopException);
-                }
-
-                private void addFileSnapshot(Path file, String name, BasicFileAttributes attrs) {
-                    Preconditions.checkNotNull(attrs, "Unauthorized access to %", file);
-                    DefaultFileMetadata metadata = new DefaultFileMetadata(FileType.RegularFile, attrs.lastModifiedTime().toMillis(), attrs.size());
-                    HashCode hash = hasher.hash(file.toFile(), metadata);
-                    RegularFileSnapshot fileSnapshot = new RegularFileSnapshot(internedAbsolutePath(file), name, hash, metadata.getLastModified());
-                    builder.visit(fileSnapshot);
-                }
-
-                private String internedAbsolutePath(Path file) {
-                    return stringInterner.intern(file.toString());
-                }
-
-                private boolean isAllowed(Path path, String name, boolean isDirectory, @Nullable BasicFileAttributes attrs, Iterable<String> relativePath) {
-                    if (isDirectory) {
-                        if (defaultExcludes.excludeDir(name)) {
-                            return false;
-                        }
-                    } else if (defaultExcludes.excludeFile(name)) {
-                        return false;
-                    }
-                    if (spec == null) {
-                        return true;
-                    }
-                    boolean allowed = spec.isSatisfiedBy(new PathBackedFileTreeElement(path, name, isDirectory, attrs, relativePath, fileSystem));
-                    if (!allowed) {
-                        hasBeenFiltered.set(true);
-                    }
-                    return allowed;
-                }
-            });
+            Path rootPath = Paths.get(absolutePath);
+            PathVisitor visitor = new PathVisitor(predicate, hasBeenFiltered, hasher, stringInterner, defaultExcludes, collector, EMPTY_SYMBOLIC_LINK_MAPPING);
+            Files.walkFileTree(rootPath, DONT_FOLLOW_SYMLINKS, Integer.MAX_VALUE, visitor);
+            return visitor.getResult();
         } catch (IOException e) {
-            throw new GradleException(String.format("Could not list contents of directory '%s'.", rootPath), e);
+            throw new UncheckedIOException(String.format("Could not list contents of directory '%s'.", absolutePath), e);
         }
-        return builder.getResult();
+    }
+
+    private interface SymbolicLinkMapping {
+        String remapAbsolutePath(Path path);
+        @CheckReturnValue
+        SymbolicLinkMapping withNewMapping(String source, String target, RelativePathTracker currentPathTracker);
+        Iterable<String> getRemappedSegments(Iterable<String> segments);
+    }
+
+    private static class DefaultSymbolicLinkMapping implements SymbolicLinkMapping {
+        private final String sourcePath;
+        private final String targetPath;
+        private final Iterable<String> prefixRelativePath;
+
+        public DefaultSymbolicLinkMapping(String sourcePath, String targetPath, Iterable<String> prefixRelativePath) {
+            this.sourcePath = sourcePath;
+            this.targetPath = targetPath;
+            this.prefixRelativePath = prefixRelativePath;
+        }
+
+        @Override
+        public String remapAbsolutePath(Path dir) {
+            return remapAbsolutePath(dir.toString());
+        }
+
+        public String remapAbsolutePath(String absolutePath) {
+            if (absolutePath.equals(targetPath)) {
+                return sourcePath;
+            }
+            if (absolutePath.startsWith(targetPath) && absolutePath.charAt(targetPath.length()) == File.separatorChar) {
+                return sourcePath + File.separatorChar + absolutePath.substring(targetPath.length() + 1);
+            }
+            throw new IllegalArgumentException("Cannot remap path '" + absolutePath + "' which does not have '" + targetPath + "' as a prefix");
+        }
+
+        @Override
+        public SymbolicLinkMapping withNewMapping(String source, String target, RelativePathTracker currentPathTracker) {
+            return new DefaultSymbolicLinkMapping(remapAbsolutePath(source), target, getRemappedSegments(currentPathTracker.getSegments()));
+        }
+
+        @Override
+        public Iterable<String> getRemappedSegments(Iterable<String> segments) {
+            return Iterables.concat(prefixRelativePath, segments);
+        }
     }
 
     @VisibleForTesting
@@ -172,7 +153,7 @@ public class DirectorySnapshotter {
         private final ImmutableSet<String> excludedDirNames;
         private final Predicate<String> excludedFileNameSpec;
 
-        public DefaultExcludes(String[] defaultExcludes) {
+        public DefaultExcludes(Collection<String> defaultExcludes) {
             final List<String> excludeFiles = Lists.newArrayList();
             final List<String> excludeDirs = Lists.newArrayList();
             final List<Predicate<String>> excludeFileSpecs = Lists.newArrayList();
@@ -188,15 +169,19 @@ public class DirectorySnapshotter {
                     if (firstStar == -1) {
                         excludeFiles.add(defaultExclude);
                     } else {
-                        Predicate<String> start = firstStar == 0 ? Predicates.<String>alwaysTrue() : new StartMatcher(defaultExclude.substring(0, firstStar));
-                        Predicate<String> end = firstStar == length - 1 ? Predicates.<String>alwaysTrue() : new EndMatcher(defaultExclude.substring(firstStar + 1, length));
-                        excludeFileSpecs.add(Predicates.and(start, end));
+                        Predicate<String> start = firstStar == 0
+                            ? it -> true
+                            : new StartMatcher(defaultExclude.substring(0, firstStar));
+                        Predicate<String> end = firstStar == length - 1
+                            ? it -> true
+                            : new EndMatcher(defaultExclude.substring(firstStar + 1, length));
+                        excludeFileSpecs.add(start.and(end));
                     }
                 }
             }
 
             this.excludeFileNames = ImmutableSet.copyOf(excludeFiles);
-            this.excludedFileNameSpec = Predicates.or(excludeFileSpecs);
+            this.excludedFileNameSpec = excludeFileSpecs.stream().reduce(it -> false, Predicate::or);
             this.excludedDirNames = ImmutableSet.copyOf(excludeDirs);
         }
 
@@ -205,7 +190,7 @@ public class DirectorySnapshotter {
         }
 
         public boolean excludeFile(String name) {
-            return excludeFileNames.contains(name) || excludedFileNameSpec.apply(name);
+            return excludeFileNames.contains(name) || excludedFileNameSpec.test(name);
         }
 
         private static class EndMatcher implements Predicate<String> {
@@ -216,7 +201,7 @@ public class DirectorySnapshotter {
             }
 
             @Override
-            public boolean apply(String element) {
+            public boolean test(String element) {
                 return element.endsWith(end);
             }
         }
@@ -229,97 +214,218 @@ public class DirectorySnapshotter {
             }
 
             @Override
-            public boolean apply(String element) {
+            public boolean test(String element) {
                 return element.startsWith(start);
             }
         }
     }
 
-    private static class PathBackedFileTreeElement implements FileTreeElement {
-        private final Path path;
-        private final String name;
-        private final boolean isDirectory;
-        private final BasicFileAttributes attrs;
-        private final Iterable<String> relativePath;
-        private final Stat stat;
+    private static class PathVisitor extends DirectorySnapshotterStatistics.CollectingFileVisitor {
+        private final RelativePathTracker pathTracker = new RelativePathTracker();
+        private final MerkleDirectorySnapshotBuilder builder;
+        private final SnapshottingFilter.DirectoryWalkerPredicate predicate;
+        private final AtomicBoolean hasBeenFiltered;
+        private final FileHasher hasher;
+        private final Interner<String> stringInterner;
+        private final DefaultExcludes defaultExcludes;
+        private final SymbolicLinkMapping symbolicLinkMapping;
+        private final Deque<String> parentDirectories = new ArrayDeque<>();
 
-        public PathBackedFileTreeElement(Path path, String name, boolean isDirectory, @Nullable BasicFileAttributes attrs, Iterable<String> relativePath, Stat stat) {
-            this.path = path;
-            this.name = name;
-            this.isDirectory = isDirectory;
-            this.attrs = attrs;
-            this.relativePath = relativePath;
-            this.stat = stat;
+        public PathVisitor(
+            @Nullable SnapshottingFilter.DirectoryWalkerPredicate predicate,
+            AtomicBoolean hasBeenFiltered,
+            FileHasher hasher,
+            Interner<String> stringInterner,
+            DefaultExcludes defaultExcludes,
+            DirectorySnapshotterStatistics.Collector statisticsCollector,
+            SymbolicLinkMapping symbolicLinkMapping
+        ) {
+            super(statisticsCollector);
+            this.builder = MerkleDirectorySnapshotBuilder.sortingRequired();
+            this.predicate = predicate;
+            this.hasBeenFiltered = hasBeenFiltered;
+            this.hasher = hasher;
+            this.stringInterner = stringInterner;
+            this.defaultExcludes = defaultExcludes;
+            this.symbolicLinkMapping = symbolicLinkMapping;
         }
 
         @Override
-        public File getFile() {
-            return path.toFile();
+        protected FileVisitResult doPreVisitDirectory(Path dir, BasicFileAttributes attrs) {
+            String fileName = getInternedFileName(dir);
+            pathTracker.enter(fileName);
+            if (pathTracker.isRoot() || shouldVisit(dir, fileName, true, pathTracker.getSegments())) {
+                builder.enterDirectory(AccessType.DIRECT, intern(symbolicLinkMapping.remapAbsolutePath(dir)), fileName, INCLUDE_EMPTY_DIRS);
+                parentDirectories.addFirst(dir.toString());
+                return FileVisitResult.CONTINUE;
+            } else {
+                pathTracker.leave();
+                return FileVisitResult.SKIP_SUBTREE;
+            }
         }
 
         @Override
-        public boolean isDirectory() {
-            return isDirectory;
-        }
-
-        @Override
-        public long getLastModified() {
-            return getAttributes().lastModifiedTime().toMillis();
-        }
-
-        @Override
-        public long getSize() {
-            return getAttributes().size();
-        }
-
-        private BasicFileAttributes getAttributes() {
-            return Preconditions.checkNotNull(attrs, "Cannot read file attributes of %s", path);
-        }
-
-        @Override
-        public InputStream open() {
+        protected FileVisitResult doVisitFile(Path file, BasicFileAttributes attrs) {
+            String internedFileName = getInternedFileName(file);
+            pathTracker.enter(internedFileName);
             try {
-                return Files.newInputStream(path);
-            } catch (IOException e) {
-                throw UncheckedException.throwAsUncheckedException(e);
+                if (attrs.isSymbolicLink()) {
+                    BasicFileAttributes targetAttributes = readAttributesOfSymlinkTarget(file, attrs);
+                    if (targetAttributes.isDirectory()) {
+                        try {
+                            Path targetDir = file.toRealPath();
+                            String targetDirString = targetDir.toString();
+                            if (introducesCycle(targetDirString)) {
+                                return FileVisitResult.CONTINUE;
+                            }
+                            if (pathTracker.isRoot() || shouldVisit(targetDir, internedFileName, true, pathTracker.getSegments())) {
+                                PathVisitor subtreeVisitor = new PathVisitor(
+                                    predicate,
+                                    hasBeenFiltered,
+                                    hasher,
+                                    stringInterner,
+                                    defaultExcludes,
+                                    collector,
+                                    symbolicLinkMapping.withNewMapping(file.toString(), targetDirString, pathTracker)
+                                );
+                                Files.walkFileTree(targetDir, EnumSet.noneOf(FileVisitOption.class), Integer.MAX_VALUE, subtreeVisitor);
+                                DirectorySnapshot result = (DirectorySnapshot) subtreeVisitor.getResult();
+                                builder.visitDirectory(new DirectorySnapshot(
+                                    result.getAbsolutePath(),
+                                    internedFileName,
+                                    AccessType.VIA_SYMLINK,
+                                    result.getHash(),
+                                    result.getChildren()
+                                ));
+                            }
+                        } catch (IOException e) {
+                            throw new UncheckedIOException(String.format("Could not list contents of directory '%s'.", file), e);
+                        }
+                    } else {
+                        visitResolvedFile(file, targetAttributes, AccessType.VIA_SYMLINK);
+                    }
+                } else {
+                    visitResolvedFile(file, attrs, AccessType.DIRECT);
+                }
+                return FileVisitResult.CONTINUE;
+            } finally {
+                pathTracker.leave();
+            }
+        }
+
+        private boolean introducesCycle(String targetDirString) {
+            return parentDirectories.contains(targetDirString);
+        }
+
+        private void visitResolvedFile(Path file, BasicFileAttributes targetAttributes, AccessType accessType) {
+            String internedName = intern(file.getFileName().toString());
+            if (shouldVisit(file, internedName, false, pathTracker.getSegments())) {
+                builder.visitLeafElement(snapshotFile(file, internedName, targetAttributes, accessType));
+            }
+        }
+
+        private BasicFileAttributes readAttributesOfSymlinkTarget(Path symlink, BasicFileAttributes symlinkAttributes) {
+            try {
+                return Files.readAttributes(symlink, BasicFileAttributes.class);
+            } catch (IOException ioe) {
+                // We emulate the behavior of `Files.walkFileTree(Path, EnumSet.of(FileVisitOption.FOLLOW_LINKS), PathVisitor)`,
+                // and return the attributes of the symlink if we can't read the attributes of the target of the symlink.
+                return symlinkAttributes;
+            }
+        }
+
+        private FileSystemLeafSnapshot snapshotFile(Path absoluteFilePath, String internedName, BasicFileAttributes attrs, AccessType accessType) {
+            String internedRemappedAbsoluteFilePath = intern(symbolicLinkMapping.remapAbsolutePath(absoluteFilePath));
+            if (attrs.isRegularFile()) {
+                try {
+                    long lastModified = attrs.lastModifiedTime().toMillis();
+                    long fileLength = attrs.size();
+                    FileMetadata metadata = DefaultFileMetadata.file(lastModified, fileLength, accessType);
+                    HashCode hash = hasher.hash(absoluteFilePath.toFile(), fileLength, lastModified);
+                    return new RegularFileSnapshot(internedRemappedAbsoluteFilePath, internedName, hash, metadata);
+                } catch (UncheckedIOException e) {
+                    LOGGER.info("Could not read file path '{}'.", absoluteFilePath, e);
+                }
+            }
+            return new MissingFileSnapshot(internedRemappedAbsoluteFilePath, internedName, accessType);
+        }
+
+        /** unlistable directories (and maybe some locked files) will stop here */
+        @Override
+        protected FileVisitResult doVisitFileFailed(Path file, IOException exc) {
+            String internedFileName = getInternedFileName(file);
+            pathTracker.enter(internedFileName);
+            try {
+                // File loop exceptions are ignored. When we encounter a loop (via symbolic links), we continue
+                // so we include all the other files apart from the loop.
+                // This way, we include each file only once.
+                if (isNotFileSystemLoopException(exc)) {
+                    boolean isDirectory = Files.isDirectory(file);
+                    if (shouldVisit(file, internedFileName, isDirectory, pathTracker.getSegments())) {
+                        LOGGER.info("Could not read file path '{}'.", file);
+                        String internedAbsolutePath = intern(file.toString());
+                        builder.visitLeafElement(new MissingFileSnapshot(internedAbsolutePath, internedFileName, AccessType.DIRECT));
+                    }
+                }
+                return FileVisitResult.CONTINUE;
+            } finally {
+                pathTracker.leave();
             }
         }
 
         @Override
-        public void copyTo(OutputStream output) {
-            throw new UnsupportedOperationException("Copy to not supported for filters");
-        }
-
-        @Override
-        public boolean copyTo(File target) {
-            throw new UnsupportedOperationException("Copy to not supported for filters");
-        }
-
-        @Override
-        public String getName() {
-            return name;
-        }
-
-        @Override
-        public String getPath() {
-            return getRelativePath().getPathString();
-        }
-
-        @Override
-        public RelativePath getRelativePath() {
-            String[] segments = new String[Iterables.size(relativePath) + 1];
-            int i = 0;
-            for (String segment : relativePath) {
-                segments[i] = segment;
-                i++;
+        protected FileVisitResult doPostVisitDirectory(Path dir, IOException exc) {
+            pathTracker.leave();
+            // File loop exceptions are ignored. When we encounter a loop (via symbolic links), we continue
+            // so we include all the other files apart from the loop.
+            // This way, we include each file only once.
+            if (isNotFileSystemLoopException(exc)) {
+                throw new UncheckedIOException(String.format("Could not read directory path '%s'.", dir), exc);
             }
-            segments[i] = name;
-            return new RelativePath(!isDirectory, segments);
+            builder.leaveDirectory();
+            parentDirectories.removeFirst();
+            return FileVisitResult.CONTINUE;
         }
 
-        @Override
-        public int getMode() {
-            return stat.getUnixMode(path.toFile());
+        private boolean isNotFileSystemLoopException(@Nullable IOException e) {
+            return e != null && !(e instanceof FileSystemLoopException);
+        }
+
+        private String intern(String string) {
+            return stringInterner.intern(string);
+        }
+
+        /**
+         * Returns whether we want to visit the given path during our walk, or ignore it completely,
+         * based on the directory/file excludes or the provided filtering predicate.
+         * Excludes won't mark this walk as `filtered`, only if the `predicate` rejects any entry.
+         **/
+        private boolean shouldVisit(Path path, String internedName, boolean isDirectory, Iterable<String> relativePath) {
+            if (isDirectory) {
+                if (defaultExcludes.excludeDir(internedName)) {
+                    return false;
+                }
+            } else if (defaultExcludes.excludeFile(internedName)) {
+                return false;
+            }
+
+            if (predicate == null) {
+                return true;
+            }
+            boolean allowed = predicate.test(path, internedName, isDirectory, symbolicLinkMapping.getRemappedSegments(relativePath));
+            if (!allowed) {
+                hasBeenFiltered.set(true);
+            }
+            return allowed;
+        }
+
+        private String getInternedFileName(Path dir) {
+            Path fileName = dir.getFileName();
+            return fileName == null ? "" : intern(fileName.toString());
+        }
+
+        public FileSystemLocationSnapshot getResult() {
+            return builder.getResult();
         }
     }
 }

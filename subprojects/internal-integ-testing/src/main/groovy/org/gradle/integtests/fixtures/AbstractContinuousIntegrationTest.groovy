@@ -32,13 +32,14 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 import static org.gradle.integtests.fixtures.RetryConditions.onBuildTimeout
-import static org.gradle.util.TestPrecondition.PULL_REQUEST_BUILD
+import static org.gradle.integtests.fixtures.WaitAtEndOfBuildFixture.buildLogicForEndOfBuildWait
+import static org.gradle.integtests.fixtures.WaitAtEndOfBuildFixture.buildLogicForMinimumBuildTime
 import static spock.lang.Retry.Mode.SETUP_FEATURE_CLEANUP
 
 @Retry(condition = { onBuildTimeout(instance, failure) }, mode = SETUP_FEATURE_CLEANUP, count = 2)
 abstract class AbstractContinuousIntegrationTest extends AbstractIntegrationSpec {
 
-    private static final int WAIT_FOR_WATCHING_TIMEOUT_SECONDS = PULL_REQUEST_BUILD.fulfilled ? 60 : 30
+    private static final int WAIT_FOR_WATCHING_TIMEOUT_SECONDS = 60
     private static final int WAIT_FOR_SHUTDOWN_TIMEOUT_SECONDS = 20
     private static final boolean OS_IS_WINDOWS = OperatingSystem.current().isWindows()
     private static final String CHANGE_DETECTED_OUTPUT = "Change detected, executing build..."
@@ -56,7 +57,7 @@ abstract class AbstractContinuousIntegrationTest extends AbstractIntegrationSpec
     boolean withoutContinuousArg
     List<ExecutionResult> results = []
 
-    public void turnOnDebug() {
+    void turnOnDebug() {
         executer.startBuildProcessInDebugger(true)
         executer.withArgument("--no-daemon")
         buildTimeout *= 100
@@ -72,19 +73,9 @@ abstract class AbstractContinuousIntegrationTest extends AbstractIntegrationSpec
     }
 
     def setup() {
-        // this is here to ensure that the lastModified() timestamps actually change in between builds.
-        // if the build is very fast, the timestamp of the file will not change and the JDK file watch service won't see the change.
         executer.beforeExecute {
             def initScript = file("init.gradle")
-            initScript.text = """
-                def startAt = System.nanoTime()
-                gradle.buildFinished {
-                    long sinceStart = (System.nanoTime() - startAt) / 1000000L
-                    if (sinceStart > 0 && sinceStart < $minimumBuildTimeMillis) {
-                      Thread.sleep(($minimumBuildTimeMillis - sinceStart) as Long)
-                    }
-                }
-            """
+            initScript.text = buildLogicForMinimumBuildTime(minimumBuildTimeMillis)
             withArgument("-I").withArgument(initScript.absolutePath)
         }
     }
@@ -101,11 +92,7 @@ abstract class AbstractContinuousIntegrationTest extends AbstractIntegrationSpec
         // Make sure the build lasts long enough for events to propagate
         // Needs to be longer than the quiet period configured
         int sleepPeriod = quietPeriodMillis * 2
-        buildFile << """
-            gradle.buildFinished {
-                Thread.sleep(${sleepPeriod})
-            }
-        """
+        buildFile << buildLogicForEndOfBuildWait(sleepPeriod)
     }
 
     @Override

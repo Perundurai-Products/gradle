@@ -25,11 +25,12 @@ public class RequestStopIfSingleUsedDaemon implements DaemonCommandAction {
 
     private static final Logger LOGGER = Logging.getLogger(RequestStopIfSingleUsedDaemon.class);
 
+    @Override
     public void execute(DaemonCommandExecution execution) {
         if (execution.isSingleUseDaemon()) {
             LOGGER.debug("Requesting daemon stop after processing {}", execution.getCommand());
             // Does not take effect until after execution has completed
-            execution.getDaemonStateControl().requestStop("stopping after processing");
+            execution.getDaemonStateControl().requestStop("");
         }
         execution.proceed();
     }

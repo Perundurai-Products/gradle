@@ -16,11 +16,13 @@
 
 package org.gradle.api.reporting.components
 
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.nativeplatform.fixtures.RequiresInstalledToolChain
 
 class DiagnosticsComponentReportIntegrationTest extends AbstractNativeComponentReportIntegrationTest {
 
     @RequiresInstalledToolChain
+    @ToBeFixedForConfigurationCache(because = ":components")
     def "informs the user when project has no components defined"() {
         when:
         succeeds "components"
@@ -32,12 +34,11 @@ No components defined for this project.
     }
 
     @RequiresInstalledToolChain
+    @ToBeFixedForConfigurationCache(because = ":components")
     def "shows details of multiple components"() {
         given:
         buildFile << """
 plugins {
-    id 'jvm-component'
-    id 'java-lang'
     id 'cpp'
     id 'c'
 }
@@ -47,9 +48,6 @@ model {
         ${toolChain.buildScriptConfig}
     }
     components {
-        jvmLib(JvmLibrarySpec) {
-            targetPlatform "$currentJavaName"
-        }
         nativeLib(NativeLibrarySpec)
     }
 }
@@ -59,25 +57,6 @@ model {
 
         then:
         outputMatches """
-JVM library 'jvmLib'
---------------------
-
-Source sets
-    Java source 'jvmLib:java'
-        srcDir: src/jvmLib/java
-    JVM resources 'jvmLib:resources'
-        srcDir: src/jvmLib/resources
-
-Binaries
-    Jar 'jvmLib:jar'
-        build using task: :jvmLibJar
-        target platform: $currentJava
-        tool chain: $currentJdk
-        classes dir: build/classes/jvmLib/jar
-        resources dir: build/resources/jvmLib/jar
-        API Jar file: build/jars/jvmLib/jar/api/jvmLib.jar
-        Jar file: build/jars/jvmLib/jar/jvmLib.jar
-
 Native library 'nativeLib'
 --------------------------
 
@@ -105,50 +84,4 @@ Binaries
 """
     }
 
-    def "shows an error when targeting a native platform from a jvm component"() {
-        given:
-        buildFile << """
-    apply plugin: 'jvm-component'
-    apply plugin: 'native-component'
-    apply plugin: 'java-lang'
-
-    model {
-        platforms {
-            i386 { architecture 'i386' }
-        }
-        components {
-            myLib(JvmLibrarySpec) {
-                targetPlatform "i386"
-            }
-        }
-    }
-"""
-        when:
-        fails "components"
-
-        then:
-        failure.assertHasCause("Invalid JavaPlatform: i386")
-    }
-
-    def "shows an error when targeting a jvm platform from a native component"() {
-        given:
-        buildFile << """
-    apply plugin: 'jvm-component'
-    apply plugin: 'native-component'
-    apply plugin: 'java-lang'
-
-    model {
-        components {
-            myLib(NativeLibrarySpec) {
-                targetPlatform "java8"
-            }
-        }
-    }
-"""
-        when:
-        fails "components"
-
-        then:
-        failure.assertHasCause("Invalid NativePlatform: java8")
-    }
 }

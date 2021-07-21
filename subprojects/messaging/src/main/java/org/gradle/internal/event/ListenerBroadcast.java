@@ -136,8 +136,13 @@ public class ListenerBroadcast<T> implements Dispatch<MethodInvocation> {
      *
      * @param event The event
      */
+    @Override
     public void dispatch(MethodInvocation event) {
         broadcast.dispatch(event);
+    }
+
+    public void visitListeners(Action<T> visitor) {
+        broadcast.visitListeners(visitor);
     }
 
     /**

@@ -43,7 +43,7 @@ import static groovy.lang.Closure.DELEGATE_FIRST;
  * please use {@link #getArtifacts()} or {@link #getAllArtifacts()}.
  * Read more about declaring artifacts in the configuration in docs for {@link org.gradle.api.artifacts.dsl.ArtifactHandler}
  *
- * Please see the <a href="https://docs.gradle.org/current/userguide/managing_dependency_configurations.html" target="_top">Managing Dependency Configurations</a> User Manual chapter for more information.
+ * Please see the <a href="https://docs.gradle.org/current/userguide/declaring_dependencies.html" target="_top">Declaring Dependencies</a> User Manual chapter for more information.
  */
 @HasInternalProtocol
 public interface Configuration extends FileCollection, HasConfigurableAttributes<Configuration> {
@@ -103,6 +103,7 @@ public interface Configuration extends FileCollection, HasConfigurableAttributes
      * A {@link org.gradle.api.Namer} namer for configurations that returns {@link #getName()}.
      */
     class Namer implements org.gradle.api.Namer<Configuration> {
+        @Override
         public String determineName(Configuration c) {
             return c.getName();
         }
@@ -271,6 +272,7 @@ public interface Configuration extends FileCollection, HasConfigurableAttributes
      * @return The name of the associated upload task
      * @see org.gradle.api.tasks.Upload
      */
+    @Deprecated
     String getUploadTaskName();
 
     /**
@@ -279,6 +281,7 @@ public interface Configuration extends FileCollection, HasConfigurableAttributes
      *
      * @return a TaskDependency object
      */
+    @Override
     TaskDependency getBuildDependencies();
 
     /**
@@ -326,7 +329,6 @@ public interface Configuration extends FileCollection, HasConfigurableAttributes
      *
      * @since 4.6
      */
-    @Incubating
     DependencyConstraintSet getDependencyConstraints();
 
     /**
@@ -337,7 +339,6 @@ public interface Configuration extends FileCollection, HasConfigurableAttributes
      *
      * @since 4.6
      */
-    @Incubating
     DependencyConstraintSet getAllDependencyConstraints();
 
     /**
@@ -427,7 +428,6 @@ public interface Configuration extends FileCollection, HasConfigurableAttributes
      * @param action a dependency action to execute before the configuration is used.
      * @return this
      */
-    @Incubating
     Configuration withDependencies(Action<? super DependencySet> action);
 
     /**
@@ -541,4 +541,25 @@ public interface Configuration extends FileCollection, HasConfigurableAttributes
      */
     boolean isCanBeResolved();
 
+    /**
+     * Tells that this configuration, when resolved, should resolve versions consistently
+     * from the resolution result of another resolvable configuration. For example, it's
+     * expected that the versions of the runtime classpath are the same as the versions
+     * from the compile classpath.
+     *
+     * @param versionsSource another resolvable configuration to use as reference for versions
+     * @return this configuration
+     *
+     * @since 6.8
+     */
+    @Incubating
+    Configuration shouldResolveConsistentlyWith(Configuration versionsSource);
+
+    /**
+     * Disables consistent resolution for this configuration
+     *
+     * @since 6.8
+     */
+    @Incubating
+    Configuration disableConsistentResolution();
 }

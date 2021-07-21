@@ -18,6 +18,7 @@ package org.gradle.test.fixtures.gradle
 
 import groovy.transform.CompileStatic
 import groovy.transform.EqualsAndHashCode
+import org.gradle.api.attributes.Category
 
 @CompileStatic
 @EqualsAndHashCode
@@ -29,10 +30,13 @@ class DependencySpec {
     String strictVersion
     List<String> rejects
     List<ExcludeSpec> exclusions = []
+    boolean endorseStrictVersions
     String reason
-    Map<String, ?> attributes
+    Map<String, Object> attributes
+    List<CapabilitySpec> requestedCapabilities = []
+    ArtifactSelectorSpec artifactSelector
 
-    DependencySpec(String g, String m, String v, String preferredVersion, String strictVersion, List<String> rejects, Collection<Map> excludes, String reason, Map<String, ?> attributes) {
+    DependencySpec(String g, String m, String v, String preferredVersion, String strictVersion, List<String> rejects, Collection<Map> excludes, Boolean endorseStrictVersions, String reason, Map<String, Object> attributes, ArtifactSelectorSpec artifactSelector, String requestedCapability) {
         group = g
         module = m
         version = v
@@ -46,12 +50,51 @@ class DependencySpec {
                 new ExcludeSpec(group, module)
             }
         }
+        this.endorseStrictVersions = endorseStrictVersions
         this.reason = reason
         this.attributes = attributes
+        this.artifactSelector = artifactSelector
+        if (requestedCapability) {
+            def parts = requestedCapability.split(':')
+            this.requestedCapabilities << new CapabilitySpec(parts[0], parts[1], parts.size() > 2 ? parts[2] : null)
+        }
+    }
+
+    DependencySpec(String g, String m, String v, String reason, Map<String, Object> attributes) {
+        group = g
+        module = m
+        version = v
+        this.reason = reason
+        this.attributes = attributes
+        if (!attributes?.isEmpty()) {
+            def category = attributes[Category.CATEGORY_ATTRIBUTE.name]
+            if (category == Category.REGULAR_PLATFORM || category == Category.ENFORCED_PLATFORM) {
+                this.endorseStrictVersions = true
+            }
+        }
+        rejects = []
+    }
+
+    DependencySpec(String g, String m, String v) {
+        group = g
+        module = m
+        version = v
+        attributes = [:]
+        rejects = []
     }
 
     DependencySpec attribute(String name, Object value) {
         attributes[name] = value
+        this
+    }
+
+    DependencySpec exclude(String group, String module) {
+        exclusions << new ExcludeSpec(group, module)
+        this
+    }
+
+    DependencySpec requestedCapability(String group, String name, String version) {
+        requestedCapabilities << new CapabilitySpec(group, name, version)
         this
     }
 }

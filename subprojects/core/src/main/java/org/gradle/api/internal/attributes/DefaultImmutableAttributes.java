@@ -19,6 +19,7 @@ package org.gradle.api.internal.attributes;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Maps;
+import org.gradle.api.Named;
 import org.gradle.api.attributes.Attribute;
 import org.gradle.api.attributes.AttributeContainer;
 import org.gradle.internal.Cast;
@@ -30,12 +31,7 @@ import java.util.Map;
 import java.util.TreeMap;
 
 final class DefaultImmutableAttributes implements ImmutableAttributes, AttributeValue<Object> {
-    private static final Comparator<Attribute<?>> ATTRIBUTE_NAME_COMPARATOR = new Comparator<Attribute<?>>() {
-        @Override
-        public int compare(Attribute<?> o1, Attribute<?> o2) {
-            return o1.getName().compareTo(o2.getName());
-        }
-    };
+    private static final Comparator<Attribute<?>> ATTRIBUTE_NAME_COMPARATOR = Comparator.comparing(Attribute::getName);
     // Coercion is an expensive process, so we cache the result of coercing to other attribute types.
     // We can afford using a hashmap here because attributes are interned, and their lifetime doesn't
     // exceed a build
@@ -130,23 +126,27 @@ final class DefaultImmutableAttributes implements ImmutableAttributes, Attribute
         return isolatable == null ? null : isolatable.isolate();
     }
 
+    @Nullable
     protected <T> Isolatable<T> getIsolatableAttribute(Attribute<T> key) {
         DefaultImmutableAttributes attributes = hierarchy.get(key);
-        return (Isolatable<T>) (attributes == null ? null : attributes.value);
+        return Cast.uncheckedCast(attributes == null ? null : attributes.value);
     }
 
     /**
      * Locates the entry for the given attribute. Returns a 'missing' value when not present.
      */
+    @Override
     public <T> AttributeValue<T> findEntry(Attribute<T> key) {
         DefaultImmutableAttributes attributes = hierarchy.get(key);
-        return (AttributeValue<T>) (attributes == null ? MISSING : attributes);
+        return Cast.uncheckedNonnullCast(attributes == null ? MISSING : attributes);
     }
 
     /**
      * Locates the entry for the attribute with the given name. Returns a 'missing' value when not present.
      */
+    @Override
     public AttributeValue<?> findEntry(String key) {
+        //noinspection StringEquality
         if (singleEntryName == key) {
             // The identity check is intentional here, do not replace with .equals()
             return singleEntryValue;
@@ -161,12 +161,23 @@ final class DefaultImmutableAttributes implements ImmutableAttributes, Attribute
     }
 
     @Nullable
+    private String desugar() {
+        // We support desugaring for all non-primitive types supported in GradleModuleMetadataWriter.writeAttributes(), which are:
+        // - Named
+        // - Enum
+        if (Named.class.isAssignableFrom(attribute.getType())) {
+            return ((Named) get()).getName();
+        }
+        if (Enum.class.isAssignableFrom(attribute.getType())) {
+            return ((Enum<?>) get()).name();
+        }
+        return null;
+    }
+
+    @Nullable
     private <S> S coerce(Class<S> type) {
         if (value != null) {
-            Isolatable<S> converted = value.coerce(type);
-            if (converted != null) {
-                return converted.isolate();
-            }
+            return value.coerce(type);
         }
         return null;
     }
@@ -182,20 +193,32 @@ final class DefaultImmutableAttributes implements ImmutableAttributes, Attribute
     }
 
     private <S> S uncachedCoerce(Attribute<S> otherAttribute) {
-        Class<S> attributeType = otherAttribute.getType();
-        if (attributeType.isAssignableFrom(attribute.getType())) {
-            return (S) get();
+        Class<S> otherAttributeType = otherAttribute.getType();
+        // If attribute types are already compatible, go with it. There are two cases covered here:
+        // 1) Both attributes are strongly typed and match, usually the case if both are sourced from the local build
+        // 2) Both attributes are desugared, usually the case if both are sourced from published metadata
+        if (otherAttributeType.isAssignableFrom(attribute.getType())) {
+            return Cast.uncheckedCast(get());
         }
 
-        S converted = coerce(attributeType);
+        // Attempt to coerce myself into the other attribute's type
+        // - I am desugared and the other attribute is strongly typed, usually the case if I am sourced from published metadata and the other from the local build
+        S converted = coerce(otherAttributeType);
         if (converted != null) {
             return converted;
+        } else if (otherAttributeType.isAssignableFrom(String.class)) {
+            // Attempt to desugar myself
+            // - I am strongly typed and the other is desugared, usually the case if I am sourced from the local build and the other is sourced from published metadata
+            converted = Cast.uncheckedCast(desugar());
+            if (converted != null) {
+                return converted;
+            }
         }
         String foundType = get().getClass().getName();
-        if (foundType.equals(attributeType.getName())) {
+        if (foundType.equals(otherAttributeType.getName())) {
             foundType += " with a different ClassLoader";
         }
-        throw new IllegalArgumentException(String.format("Unexpected type for attribute '%s' provided. Expected a value of type %s but found a value of type %s.", attribute.getName(), attributeType.getName(), foundType));
+        throw new IllegalArgumentException(String.format("Unexpected type for attribute '%s' provided. Expected a value of type %s but found a value of type %s.", attribute.getName(), otherAttributeType.getName(), foundType));
     }
 
     @Override
@@ -219,13 +242,22 @@ final class DefaultImmutableAttributes implements ImmutableAttributes, Attribute
     }
 
     @Override
+    public Map<Attribute<?>, ?> asMap() {
+        ImmutableMap.Builder<Attribute<?>, ?> builder = ImmutableMap.builder();
+        for (Attribute<?> attribute : keySet()) {
+            builder.put(attribute, Cast.uncheckedCast(getAttribute(attribute)));
+        }
+        return builder.build();
+    }
+
+    @Override
     public AttributeContainer getAttributes() {
         return this;
     }
 
     @Override
     public String toString() {
-        Map<Attribute<?>, Object> sorted = new TreeMap<Attribute<?>, Object>(ATTRIBUTE_NAME_COMPARATOR);
+        Map<Attribute<?>, Object> sorted = new TreeMap<>(ATTRIBUTE_NAME_COMPARATOR);
         for (Map.Entry<Attribute<?>, DefaultImmutableAttributes> entry : hierarchy.entrySet()) {
             sorted.put(entry.getKey(), entry.getValue().value.isolate());
         }

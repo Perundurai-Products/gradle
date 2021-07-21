@@ -18,17 +18,20 @@ package org.gradle.api.internal.artifacts.ivyservice.resolveengine.artifact
 
 import org.gradle.api.artifacts.component.ComponentIdentifier
 import org.gradle.api.attributes.Attribute
-import org.gradle.api.file.FileCollection
+import org.gradle.api.attributes.AttributeContainer
 import org.gradle.api.internal.artifacts.transform.VariantSelector
 import org.gradle.api.internal.artifacts.type.ArtifactTypeRegistry
+import org.gradle.api.internal.file.FileCollectionInternal
+import org.gradle.api.internal.file.FileCollectionStructureVisitor
 import org.gradle.api.internal.tasks.TaskDependencyResolveContext
 import org.gradle.api.specs.Spec
 import org.gradle.api.tasks.TaskDependency
+import org.gradle.internal.DisplayName
 import org.gradle.internal.component.local.model.ComponentFileArtifactIdentifier
 import org.gradle.internal.component.local.model.LocalFileDependencyMetadata
 import org.gradle.internal.component.local.model.OpaqueComponentArtifactIdentifier
-import org.gradle.internal.operations.BuildOperationQueue
 import org.gradle.util.AttributeTestUtil
+import org.gradle.util.TestUtil
 import spock.lang.Specification
 
 class LocalFileDependencyBackedArtifactSetTest extends Specification {
@@ -37,11 +40,11 @@ class LocalFileDependencyBackedArtifactSetTest extends Specification {
     def filter = Mock(Spec)
     def selector = Mock(VariantSelector)
     def artifactTypeRegistry = Mock(ArtifactTypeRegistry)
-    def set = new LocalFileDependencyBackedArtifactSet(dep, filter, selector, artifactTypeRegistry)
+    def set = new LocalFileDependencyBackedArtifactSet(dep, filter, selector, artifactTypeRegistry, TestUtil.calculatedValueContainerFactory())
 
     def "has build dependencies"() {
         def fileBuildDependencies = Stub(TaskDependency)
-        def files = Stub(FileCollection)
+        def files = Stub(FileCollectionInternal)
         def visitor = Mock(TaskDependencyResolveContext)
 
         given:
@@ -57,48 +60,45 @@ class LocalFileDependencyBackedArtifactSetTest extends Specification {
     }
 
     def "does not visit files when visitor does not require them"() {
-        def listener = Mock(ResolvedArtifactSet.AsyncArtifactListener)
-        def visitor = Mock(ArtifactVisitor)
+        def listener = Mock(ResolvedArtifactSet.Visitor)
+        def artifactVisitor = Mock(ArtifactVisitor)
 
         when:
-        set.startVisit(Stub(BuildOperationQueue), listener).visit(visitor)
+        set.visit(listener)
 
         then:
-        1 * listener.includeFileDependencies() >> false
+        1 * listener.prepareForVisit(_) >> FileCollectionStructureVisitor.VisitType.NoContents
+        1 * listener.visitArtifacts(_) >> { ResolvedArtifactSet.Artifacts artifacts -> artifacts.visit(artifactVisitor) }
+        1 * artifactVisitor.endVisitCollection(_)
         0 * _
     }
 
     def "does not visit files when filtered"() {
         def id = Stub(ComponentIdentifier)
-        def listener = Mock(ResolvedArtifactSet.AsyncArtifactListener)
-        def visitor = Mock(ArtifactVisitor)
+        def visitor = Mock(ResolvedArtifactSet.Visitor)
+        def artifactVisitor = Mock(ArtifactVisitor)
 
         when:
-        def result = set.startVisit(Stub(BuildOperationQueue), listener)
-        result.visit(visitor)
+        set.visit(visitor)
 
         then:
         _ * dep.componentId >> id
-        _ * listener.includeFileDependencies() >> true
+        1 * visitor.prepareForVisit(_) >> FileCollectionStructureVisitor.VisitType.Visit
         1 * filter.isSatisfiedBy(id) >> false
-        0 * _
-
-        when:
-        result.visit(visitor)
-
-        then:
+        1 * visitor.visitArtifacts(_) >> { ResolvedArtifactSet.Artifacts artifacts -> artifacts.visit(artifactVisitor) }
+        1 * artifactVisitor.endVisitCollection(_)
         0 * _
     }
 
     def "does not visit files when no id provided and assigned id is filtered"() {
         def f1 = new File("a.jar")
         def f2 = new File("a.dll")
-        def listener = Mock(ResolvedArtifactSet.AsyncArtifactListener)
+        def listener = Mock(ResolvedArtifactSet.Visitor)
         def visitor = Mock(ArtifactVisitor)
-        def files = Mock(FileCollection)
+        def files = Mock(FileCollectionInternal)
 
         when:
-        set.startVisit(Stub(BuildOperationQueue), listener).visit(visitor)
+        set.visit(listener)
 
         then:
         _ * dep.componentId >> null
@@ -113,94 +113,93 @@ class LocalFileDependencyBackedArtifactSetTest extends Specification {
         def f1 = new File("a.jar")
         def f2 = new File("a.dll")
         def id = Stub(ComponentIdentifier)
-        def listener = Mock(ResolvedArtifactSet.AsyncArtifactListener)
-        def visitor = Mock(ArtifactVisitor)
-        def files = Mock(FileCollection)
+        def visitor = Mock(ResolvedArtifactSet.Visitor)
+        def artifactVisitor = Mock(ArtifactVisitor)
+        def files = Mock(FileCollectionInternal)
         def attrs1 = attributesFactory.of(Attribute.of('attr', String), 'value1')
         def attrs2 = attributesFactory.of(Attribute.of('attr', String), 'value2')
 
         when:
-        def result = set.startVisit(Stub(BuildOperationQueue), listener)
+        set.visit(visitor)
 
         then:
         _ * dep.componentId >> id
         _ * dep.files >> files
-        _ * listener.includeFileDependencies() >> true
+        _ * visitor.prepareForVisit(_) >> FileCollectionStructureVisitor.VisitType.Visit
         _ * filter.isSatisfiedBy(_) >> true
         1 * files.files >> ([f1, f2] as Set)
-        2 * selector.select(_) >> { ResolvedVariantSet variants -> variants.variants.first() }
-        1 * listener.fileAvailable(f1)
-        1 * listener.fileAvailable(f2)
+        2 * selector.select(_, _) >> { ResolvedVariantSet variants, f -> variants.variants.first() }
         1 * artifactTypeRegistry.mapAttributesFor(f1) >> attrs1
         1 * artifactTypeRegistry.mapAttributesFor(f2) >> attrs2
-        0 * _
-
-        when:
-        result.visit(visitor)
 
         then:
-        1 * visitor.visitFile(new ComponentFileArtifactIdentifier(id, f1.name), { it.displayName == 'local file' }, attrs1, f1)
-        1 * visitor.visitFile(new ComponentFileArtifactIdentifier(id, f2.name), { it.displayName == 'local file' }, attrs2, f2)
-        0 * _
-
-        when:
-        result.visit(visitor)
+        1 * visitor.visitArtifacts(_) >> { ResolvedArtifactSet.Artifacts artifacts -> artifacts.visit(artifactVisitor) }
+        1 * artifactVisitor.visitArtifact(_, attrs1, { it.file == f1 }) >> { DisplayName displayName, AttributeContainer attrs, ResolvableArtifact artifact ->
+            assert displayName.displayName == 'local file'
+            assert artifact.id == new ComponentFileArtifactIdentifier(id, f1.name)
+        }
+        1 * artifactVisitor.endVisitCollection(FileCollectionInternal.OTHER) // each file is treated as a separate collection, could potentially be treated as a single collection
 
         then:
-        1 * visitor.visitFile(new ComponentFileArtifactIdentifier(id, f1.name), { it.displayName == 'local file' }, attrs1, f1)
-        1 * visitor.visitFile(new ComponentFileArtifactIdentifier(id, f2.name), { it.displayName == 'local file' }, attrs2, f2)
+        1 * visitor.visitArtifacts(_) >> { ResolvedArtifactSet.Artifacts artifacts -> artifacts.visit(artifactVisitor) }
+        1 * artifactVisitor.visitArtifact(_, attrs2, { it.file == f2 }) >> { DisplayName displayName, AttributeContainer attrs, ResolvableArtifact artifact ->
+            assert displayName.displayName == 'local file'
+            assert artifact.id == new ComponentFileArtifactIdentifier(id, f2.name)
+        }
+        1 * artifactVisitor.endVisitCollection(FileCollectionInternal.OTHER) // each file is treated as a separate collection, could potentially be treated as a single collection
         0 * _
     }
 
     def "assigns an id when none provided"() {
         def f1 = new File("a.jar")
         def f2 = new File("a.dll")
-        def listener = Mock(ResolvedArtifactSet.AsyncArtifactListener)
-        def visitor = Mock(ArtifactVisitor)
-        def files = Mock(FileCollection)
+        def visitor = Mock(ResolvedArtifactSet.Visitor)
+        def artifactVisitor = Mock(ArtifactVisitor)
+        def files = Mock(FileCollectionInternal)
         def attrs1 = attributesFactory.of(Attribute.of('attr', String), 'value1')
         def attrs2 = attributesFactory.of(Attribute.of('attr', String), 'value2')
 
         when:
-        set.startVisit(Stub(BuildOperationQueue), listener).visit(visitor)
+        set.visit(visitor)
 
         then:
         _ * dep.componentId >> null
         _ * dep.files >> files
         _ * filter.isSatisfiedBy(_) >> true
-        _ * listener.includeFileDependencies() >> true
+        _ * visitor.includeFileDependencies() >> true
         1 * artifactTypeRegistry.mapAttributesFor(f1) >> attrs1
         1 * artifactTypeRegistry.mapAttributesFor(f2) >> attrs2
         1 * files.files >> ([f1, f2] as Set)
-        2 * selector.select(_) >> { ResolvedVariantSet variants -> variants.variants.first() }
-        1 * visitor.visitFile(new OpaqueComponentArtifactIdentifier(f1), { it.displayName == 'local file' }, attrs1, f1)
-        1 * visitor.visitFile(new OpaqueComponentArtifactIdentifier(f2), { it.displayName == 'local file' }, attrs2, f2)
-        0 * visitor._
+        2 * selector.select(_, _) >> { ResolvedVariantSet variants, f -> variants.variants.first() }
+        2 * visitor.visitArtifacts(_) >> { ResolvedArtifactSet.Artifacts artifacts -> artifacts.visit(artifactVisitor) }
+        1 * artifactVisitor.visitArtifact(_, attrs1, { it.file == f1 }) >> { DisplayName displayName, AttributeContainer attrs, ResolvableArtifact artifact ->
+            assert displayName.displayName == 'local file'
+            assert artifact.id == new OpaqueComponentArtifactIdentifier(f1)
+        }
+        1 * artifactVisitor.visitArtifact(_, attrs2, { it.file == f2 }) >> { DisplayName displayName, AttributeContainer attrs, ResolvableArtifact artifact ->
+            assert displayName.displayName == 'local file'
+            assert artifact.id == new OpaqueComponentArtifactIdentifier(f2)
+        }
+        2 * artifactVisitor.endVisitCollection(FileCollectionInternal.OTHER) // each file is treated as a separate collection, could potentially be treated as a single collection
+        0 * artifactVisitor._
     }
 
     def "reports failure to list files"() {
-        def listener = Mock(ResolvedArtifactSet.AsyncArtifactListener)
-        def visitor = Mock(ArtifactVisitor)
-        def files = Mock(FileCollection)
+        def visitor = Mock(ResolvedArtifactSet.Visitor)
+        def artifactVisitor = Mock(ArtifactVisitor)
+        def files = Mock(FileCollectionInternal)
         def failure = new RuntimeException()
 
         when:
-        def result = set.startVisit(Stub(BuildOperationQueue), listener)
-        result.visit(visitor)
+        set.visit(visitor)
 
         then:
+        _ * dep.componentId >> null
         _ * dep.files >> files
-        _ * listener.includeFileDependencies() >> true
+        _ * visitor.prepareForVisit(_) >> FileCollectionStructureVisitor.VisitType.Visit
         1 * files.files >> { throw failure }
-        1 * visitor.visitFailure(failure)
-        0 * visitor._
-        0 * listener._
-
-        when:
-        result.visit(visitor)
-
-        then:
-        1 * visitor.visitFailure(failure)
+        1 * visitor.visitArtifacts(_) >> { ResolvedArtifactSet.Artifacts artifacts -> artifacts.visit(artifactVisitor) }
+        1 * artifactVisitor.visitFailure(failure)
         0 * _
     }
 }

@@ -17,6 +17,8 @@
 package org.gradle.api.internal.tasks.testing.junit;
 
 import java.io.Serializable;
+import java.util.Collections;
+import java.util.List;
 
 import org.gradle.api.Action;
 import org.gradle.api.internal.tasks.testing.TestClassProcessor;
@@ -28,10 +30,12 @@ import org.gradle.api.tasks.testing.Test;
 import org.gradle.api.tasks.testing.junit.JUnitOptions;
 import org.gradle.internal.actor.ActorFactory;
 import org.gradle.internal.id.IdGenerator;
+import org.gradle.internal.scan.UsedByScanPlugin;
 import org.gradle.internal.service.ServiceRegistry;
 import org.gradle.internal.time.Clock;
 import org.gradle.process.internal.worker.WorkerProcessBuilder;
 
+@UsedByScanPlugin("test-retry")
 public class JUnitTestFramework implements TestFramework {
     private JUnitOptions options;
     private final JUnitDetector detector;
@@ -54,12 +58,18 @@ public class JUnitTestFramework implements TestFramework {
     @Override
     public Action<WorkerProcessBuilder> getWorkerConfigurationAction() {
         return new Action<WorkerProcessBuilder>() {
+            @Override
             public void execute(WorkerProcessBuilder workerProcessBuilder) {
                 workerProcessBuilder.sharedPackages("junit.framework");
                 workerProcessBuilder.sharedPackages("junit.extensions");
                 workerProcessBuilder.sharedPackages("org.junit");
             }
         };
+    }
+
+    @Override
+    public List<String> getTestWorkerImplementationModules() {
+        return Collections.emptyList();
     }
 
     @Override

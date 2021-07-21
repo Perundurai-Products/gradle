@@ -41,18 +41,18 @@ public class DefaultMutableVersionConstraint extends AbstractVersionConstraint i
         this(null, version, null);
     }
 
-    private DefaultMutableVersionConstraint(String preferredVersion, String requiredVersion, String strictVersion) {
-        this(preferredVersion, requiredVersion, strictVersion, Collections.<String>emptyList());
+    private DefaultMutableVersionConstraint(@Nullable String preferredVersion, String requiredVersion, @Nullable String strictVersion) {
+        this(preferredVersion, requiredVersion, strictVersion, Collections.emptyList());
     }
 
-    private DefaultMutableVersionConstraint(String preferredVersion, String requiredVersion, String strictVersion, List<String> rejects) {
+    private DefaultMutableVersionConstraint(@Nullable String preferredVersion, String requiredVersion, @Nullable String strictVersion, List<String> rejects) {
         updateVersions(preferredVersion, requiredVersion, strictVersion);
         for (String reject : rejects) {
             this.rejectedVersions.add(nullToEmpty(reject));
         }
     }
 
-    private void updateVersions(String preferredVersion, String requiredVersion, String strictVersion) {
+    private void updateVersions(@Nullable String preferredVersion, @Nullable String requiredVersion, @Nullable String strictVersion) {
         this.preferredVersion = nullToEmpty(preferredVersion);
         this.requiredVersion = nullToEmpty(requiredVersion);
         this.strictVersion = nullToEmpty(strictVersion);
@@ -79,7 +79,7 @@ public class DefaultMutableVersionConstraint extends AbstractVersionConstraint i
     }
 
     @Override
-    public void setBranch(String branch) {
+    public void setBranch(@Nullable String branch) {
         this.branch = branch;
     }
 
@@ -110,7 +110,7 @@ public class DefaultMutableVersionConstraint extends AbstractVersionConstraint i
 
     @Override
     public void strictly(String version) {
-        updateVersions(null, version, version);
+        updateVersions(preferredVersion, version, version);
     }
 
     @Override
@@ -132,5 +132,45 @@ public class DefaultMutableVersionConstraint extends AbstractVersionConstraint i
 
     public String getVersion() {
         return requiredVersion.isEmpty() ? preferredVersion : requiredVersion;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        if (!super.equals(o)) {
+            return false;
+        }
+
+        DefaultMutableVersionConstraint that = (DefaultMutableVersionConstraint) o;
+
+        if (requiredVersion != null ? !requiredVersion.equals(that.requiredVersion) : that.requiredVersion != null) {
+            return false;
+        }
+        if (preferredVersion != null ? !preferredVersion.equals(that.preferredVersion) : that.preferredVersion != null) {
+            return false;
+        }
+        if (strictVersion != null ? !strictVersion.equals(that.strictVersion) : that.strictVersion != null) {
+            return false;
+        }
+        if (branch != null ? !branch.equals(that.branch) : that.branch != null) {
+            return false;
+        }
+        return rejectedVersions.equals(that.rejectedVersions);
+    }
+
+    @Override
+    public int hashCode() {
+        int result = super.hashCode();
+        result = 31 * result + (requiredVersion != null ? requiredVersion.hashCode() : 0);
+        result = 31 * result + (preferredVersion != null ? preferredVersion.hashCode() : 0);
+        result = 31 * result + (strictVersion != null ? strictVersion.hashCode() : 0);
+        result = 31 * result + (branch != null ? branch.hashCode() : 0);
+        result = 31 * result + rejectedVersions.hashCode();
+        return result;
     }
 }

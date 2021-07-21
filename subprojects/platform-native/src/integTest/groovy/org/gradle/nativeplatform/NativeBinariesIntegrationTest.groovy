@@ -16,13 +16,13 @@
 package org.gradle.nativeplatform
 
 import org.gradle.api.reporting.model.ModelReportOutput
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.nativeplatform.fixtures.AbstractInstalledToolChainIntegrationSpec
 import org.gradle.nativeplatform.fixtures.NativePlatformsTestFixture
 import org.gradle.nativeplatform.fixtures.app.CHelloWorldApp
 import org.gradle.nativeplatform.fixtures.app.CppCallingCHelloWorldApp
 import org.gradle.util.Requires
 import org.gradle.util.TestPrecondition
-import spock.lang.Ignore
 
 import static org.gradle.util.Matchers.containsText
 
@@ -51,6 +51,7 @@ model {
         executable("build/binaries/mainExecutable/main").assertDoesNotExist()
     }
 
+    @ToBeFixedForConfigurationCache
     def "assemble task constructs all buildable binaries"() {
         given:
         new CHelloWorldApp().writeSources(file("src/main"))
@@ -89,7 +90,8 @@ model {
         executable("build/exe/main/unknown/main").assertDoesNotExist()
     }
 
-    def "assemble task produces sensible error when there are no buildable binaries" () {
+    @ToBeFixedForConfigurationCache
+    def "assemble task produces sensible error when there are no buildable binaries"() {
         buildFile << """
 apply plugin: 'c'
 
@@ -136,6 +138,7 @@ model {
               - Don't know how to build for platform 'unknown'.""")
     }
 
+    @ToBeFixedForConfigurationCache
     def "assemble executable from component with multiple language source sets"() {
         given:
         useMixedSources()
@@ -170,6 +173,7 @@ model {
         executable("build/exe/main/main").exec().out == helloWorldApp.englishOutput
     }
 
+    @ToBeFixedForConfigurationCache
     def "assemble executable binary directly from language source sets"() {
         given:
         useMixedSources()
@@ -209,44 +213,11 @@ model {
         executable("build/exe/main/main").exec().out == helloWorldApp.englishOutput
     }
 
-    @Ignore("this test no longer covers the intended case, which is to fail when there is an input to a binary for which there is no _transformation_ available")
-    def "cannot add java sources to native binary"() {
-        given:
-        useMixedSources()
-        file("src/test/java/HelloWorld.java") << """
-    This would not compile
-"""
-
-        when:
-        buildFile << """
-apply plugin: "c"
-apply plugin: "cpp"
-apply plugin: "java-lang"
-
-model {
-    components {
-        main(NativeExecutableSpec) {
-            sources {
-                java(JavaSourceSet) {
-                    source.srcDir "src/test/java"
-                }
-            }
-        }
-    }
-}
-"""
-
-        then:
-        fails "mainExecutable"
-        failure.assertHasCause("Exception thrown while executing model rule: main(org.gradle.nativeplatform.NativeExecutableSpec) { ... } @ build.gradle line 8, column 9");
-        failure.assertHasCause("Cannot create a 'org.gradle.language.java.JavaSourceSet' because this type is not known to sourceSets. " +
-                "Known types are: org.gradle.language.c.CSourceSet, org.gradle.language.cpp.CppSourceSet")
-    }
-
     private def useMixedSources() {
         helloWorldApp.writeSources(file("src/test"))
     }
 
+    @ToBeFixedForConfigurationCache
     def "build fails when link executable fails"() {
         given:
         buildFile << """
@@ -271,6 +242,7 @@ model {
         failure.assertThatCause(containsText("Linker failed while linking ${exeName}"))
     }
 
+    @ToBeFixedForConfigurationCache
     def "build fails when link library fails"() {
         given:
         buildFile << """
@@ -304,6 +276,7 @@ model {
         failure.assertThatCause(containsText("Linker failed while linking ${libName}"))
     }
 
+    @ToBeFixedForConfigurationCache
     def "build fails when create static library fails"() {
         given:
         buildFile << """
@@ -338,6 +311,7 @@ model {
     }
 
     @Requires(TestPrecondition.CAN_INSTALL_EXECUTABLE)
+    @ToBeFixedForConfigurationCache
     def "installed executable receives command-line parameters"() {
         buildFile << """
 apply plugin: 'c'
@@ -373,6 +347,7 @@ int main (int argc, char *argv[]) {
         installation.exec("foo", "bar").out == "[foo] [bar] \n"
     }
 
+    @ToBeFixedForConfigurationCache(because = ":model")
     def "model report should display configured components"() {
         given:
         buildFile << """

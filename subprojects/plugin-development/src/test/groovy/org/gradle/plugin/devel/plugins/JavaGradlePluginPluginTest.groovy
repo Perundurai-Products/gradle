@@ -22,7 +22,9 @@ import org.gradle.api.file.FileCopyDetails
 import org.gradle.api.file.RelativePath
 import org.gradle.api.internal.artifacts.ivyservice.projectmodule.ProjectPublicationRegistry
 import org.gradle.api.internal.plugins.PluginDescriptor
+import org.gradle.api.plugins.JavaLibraryPlugin
 import org.gradle.api.plugins.JavaPlugin
+import org.gradle.api.provider.Provider
 import org.gradle.internal.logging.ConfigureLogging
 import org.gradle.internal.logging.events.LogEvent
 import org.gradle.internal.logging.events.OutputEvent
@@ -83,7 +85,7 @@ class JavaGradlePluginPluginTest extends AbstractProjectBuilderSpec {
 
     def "PluginValidationAction finds fully qualified class"() {
         setup:
-        Action<Task> pluginValidationAction = new JavaGradlePluginPlugin.PluginValidationAction([], [], classList as Set<String>)
+        Action<Task> pluginValidationAction = new JavaGradlePluginPlugin.PluginValidationAction(null, [], classList as Set<String>)
 
         expect:
         pluginValidationAction.hasFullyQualifiedClass(fqClass) == expectedValue
@@ -99,6 +101,9 @@ class JavaGradlePluginPluginTest extends AbstractProjectBuilderSpec {
     def "PluginValidationAction logs correct warning messages for broken plugins"(String impl, String implFile, String expectedMessage) {
         setup:
         Task stubTask = Stub(Task)
+        def declarations = Mock(Provider) {
+            get() >> []
+        }
         List<PluginDescriptor> descriptors = []
         if (impl != null) {
             descriptors.add(Stub(PluginDescriptor) {
@@ -110,7 +115,7 @@ class JavaGradlePluginPluginTest extends AbstractProjectBuilderSpec {
         if (implFile) {
             classes.add(implFile)
         }
-        Action<Task> pluginValidationAction = new JavaGradlePluginPlugin.PluginValidationAction([], descriptors, classes)
+        Action<Task> pluginValidationAction = new JavaGradlePluginPlugin.PluginValidationAction(declarations, descriptors, classes)
         outputEventListener.reset()
 
         expect:
@@ -142,7 +147,10 @@ class JavaGradlePluginPluginTest extends AbstractProjectBuilderSpec {
                 getId() >> id
             }
         }
-        Action<Task> pluginValidationAction = new JavaGradlePluginPlugin.PluginValidationAction(declarations, descriptors, [] as Set)
+        Provider<Collection<PluginDeclaration>> declarationsProvider = Mock(Provider) {
+            get() >> declarations
+        }
+        Action<Task> pluginValidationAction = new JavaGradlePluginPlugin.PluginValidationAction(declarationsProvider, descriptors, [] as Set)
         outputEventListener.reset()
 
         expect:
@@ -156,21 +164,22 @@ class JavaGradlePluginPluginTest extends AbstractProjectBuilderSpec {
         null    | 'x.y.z'   | null
     }
 
-    def "apply adds java plugin"() {
+    def "apply adds java-library plugin"() {
         when:
         project.pluginManager.apply(JavaGradlePluginPlugin)
 
         then:
+        project.plugins.findPlugin(JavaLibraryPlugin)
         project.plugins.findPlugin(JavaPlugin)
     }
 
-    def "apply adds gradleApi dependency to compile"() {
+    def "apply adds gradleApi dependency to api"() {
         when:
         project.pluginManager.apply(JavaGradlePluginPlugin)
 
         then:
         project.configurations
-            .getByName(JavaGradlePluginPlugin.COMPILE_CONFIGURATION)
+            .getByName(JavaGradlePluginPlugin.API_CONFIGURATION)
             .dependencies.find {
             it.files == project.dependencies.gradleApi().files
         }
@@ -189,9 +198,9 @@ class JavaGradlePluginPluginTest extends AbstractProjectBuilderSpec {
         pluginDescriptors.group == JavaGradlePluginPlugin.PLUGIN_DEVELOPMENT_GROUP
         pluginDescriptors.description == JavaGradlePluginPlugin.GENERATE_PLUGIN_DESCRIPTORS_TASK_DESCRIPTION
 
-        def validateTaskProperties = project.tasks.getByName(JavaGradlePluginPlugin.VALIDATE_TASK_PROPERTIES_TASK_NAME)
-        validateTaskProperties.group == JavaGradlePluginPlugin.PLUGIN_DEVELOPMENT_GROUP
-        validateTaskProperties.description == JavaGradlePluginPlugin.VALIDATE_TASK_PROPERTIES_TASK_DESCRIPTION
+        def validateTask = project.tasks.getByName(JavaGradlePluginPlugin.VALIDATE_PLUGINS_TASK_NAME)
+        validateTask.group == JavaGradlePluginPlugin.PLUGIN_DEVELOPMENT_GROUP
+        validateTask.description == JavaGradlePluginPlugin.VALIDATE_PLUGIN_TASK_DESCRIPTION
     }
 
     def "registers local publication for each plugin"() {

@@ -51,7 +51,7 @@ public class BuildStatusRenderer implements OutputEventListener {
     private final ConsoleMetaData consoleMetaData;
     private OperationIdentifier buildProgressOperationId;
     private Phase currentPhase;
-    private Set<OperationIdentifier> currentPhaseChildren = new HashSet<OperationIdentifier>();
+    private final Set<OperationIdentifier> currentPhaseChildren = new HashSet<OperationIdentifier>();
     private long currentTimePeriod;
 
     // What actually shows up on the console
@@ -88,8 +88,7 @@ public class BuildStatusRenderer implements OutputEventListener {
                 } else if (startEvent.getBuildOperationCategory() == BuildOperationCategory.CONFIGURE_PROJECT && currentPhase == Phase.Configuring) {
                     // Any configuring event received from nested or buildSrc builds before the root build starts configuring is ignored
                     currentPhaseChildren.add(startEvent.getProgressOperationId());
-                } else if (startEvent.getBuildOperationCategory() == BuildOperationCategory.RUN_WORK_ROOT_BUILD) {
-                    // Once the root build starts executing work, we are in Executing phase
+                } else if (startEvent.getBuildOperationCategory() == BuildOperationCategory.RUN_MAIN_TASKS) {
                     phaseStarted(startEvent, Phase.Executing);
                 } else if (startEvent.getBuildOperationCategory() == BuildOperationCategory.RUN_WORK && currentPhase == Phase.Executing) {
                     // Any work execution happening in nested or buildSrc builds before the root build has started executing work is ignored
@@ -120,7 +119,7 @@ public class BuildStatusRenderer implements OutputEventListener {
 
     private void renderNow(long now) {
         if (progressBar != null) {
-            buildStatusLabel.setText(progressBar.formatProgress(consoleMetaData.getCols(), timerEnabled, now - buildStartTimestamp));
+            buildStatusLabel.setText(progressBar.formatProgress(timerEnabled, now - buildStartTimestamp));
         }
         console.flush();
     }
@@ -152,7 +151,8 @@ public class BuildStatusRenderer implements OutputEventListener {
 
     @VisibleForTesting
     public ProgressBar newProgressBar(String initialSuffix, int initialProgress, int totalProgress) {
-        return new ProgressBar(PROGRESS_BAR_PREFIX,
+        return new ProgressBar(consoleMetaData,
+            PROGRESS_BAR_PREFIX,
             PROGRESS_BAR_WIDTH,
             PROGRESS_BAR_SUFFIX,
             PROGRESS_BAR_COMPLETE_CHAR,

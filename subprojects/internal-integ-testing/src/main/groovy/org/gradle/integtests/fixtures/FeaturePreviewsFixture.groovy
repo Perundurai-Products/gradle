@@ -16,29 +16,23 @@
 
 package org.gradle.integtests.fixtures
 
-import org.gradle.api.internal.FeaturePreviews.Feature
-
 class FeaturePreviewsFixture {
 
-    static def activeFeatures() {
-        EnumSet.of(Feature.GRADLE_METADATA, Feature.INCREMENTAL_ARTIFACT_TRANSFORMATIONS)
-    }
-
-    static def inactiveFeatures() {
-        def features = EnumSet.allOf(Feature.class)
-        features.removeAll(activeFeatures())
-        features
-    }
-
-    static void enableGradleMetadata(File settings) {
+    static void enableGroovyCompilationAvoidance(File settings) {
         settings << """
-enableFeaturePreview("GRADLE_METADATA")
+enableFeaturePreview('GROOVY_COMPILATION_AVOIDANCE')
 """
     }
 
-    static void enableIncrementalArtifactTransformations(File settings) {
+    static void enableTypeSafeProjectAccessors(File settings) {
         settings << """
-enableFeaturePreview("INCREMENTAL_ARTIFACT_TRANSFORMATIONS")
+            enableFeaturePreview('TYPESAFE_PROJECT_ACCESSORS')
 """
+    }
+
+    static void enableVersionCatalog(File settings) {
+        settings << """
+            enableFeaturePreview("VERSION_CATALOGS")
+        """
     }
 }

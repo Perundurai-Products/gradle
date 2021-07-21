@@ -17,8 +17,11 @@
 package org.gradle.ide.xcode
 
 import org.gradle.ide.xcode.fixtures.AbstractXcodeIntegrationSpec
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 
 class XcodeSingleProjectIntegrationTest extends AbstractXcodeIntegrationSpec {
+
+    @ToBeFixedForConfigurationCache
     def "create xcode workspace when no language plugins are applied"() {
         when:
         succeeds("xcode")
@@ -34,26 +37,7 @@ class XcodeSingleProjectIntegrationTest extends AbstractXcodeIntegrationSpec {
         project.assertNoTargets()
     }
 
-    def "create empty xcode project when component does not target current OS"() {
-        buildFile << """
-            apply plugin: 'cpp-application'
-            
-            application {
-                targetMachines = [machines.os('os-family')]
-            }
-        """
-
-        when:
-        succeeds("xcode")
-
-        then:
-        executedAndNotSkipped(":xcodeProject", ":xcodeProjectWorkspaceSettings", ":xcode")
-
-        def project = rootXcodeProject.projectFile
-        project.mainGroup.assertHasChildren(['build.gradle'])
-        project.assertNoTargets()
-    }
-
+    @ToBeFixedForConfigurationCache
     def "cleanXcode remove all XCode generated project files"() {
         requireSwiftToolChain()
 

@@ -17,12 +17,12 @@
 package org.gradle.internal.resource.cached
 
 import org.gradle.api.internal.artifacts.ivyservice.ArtifactCacheLockingManagerStub
-import org.gradle.internal.hash.HashValue
-import org.gradle.internal.resource.local.FileAccessTracker
+import org.gradle.internal.file.FileAccessTracker
+import org.gradle.internal.hash.HashCode
 import org.gradle.internal.resource.metadata.DefaultExternalResourceMetaData
 import org.gradle.internal.serialize.BaseSerializerFactory
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
-import org.gradle.util.BuildCommencedTimeProvider
+import org.gradle.util.internal.BuildCommencedTimeProvider
 import org.junit.Rule
 import spock.lang.Specification
 import spock.lang.Unroll
@@ -30,7 +30,7 @@ import spock.lang.Unroll
 class DefaultArtifactResolutionCacheTest extends Specification {
 
     @Rule
-    TestNameTestDirectoryProvider tmp = new TestNameTestDirectoryProvider()
+    TestNameTestDirectoryProvider tmp = new TestNameTestDirectoryProvider(getClass())
 
     BuildCommencedTimeProvider timeProvider = Stub(BuildCommencedTimeProvider) {
         getCurrentTime() >> 1234L
@@ -42,7 +42,7 @@ class DefaultArtifactResolutionCacheTest extends Specification {
     DefaultCachedExternalResourceIndex<String> index
 
     def setup() {
-        index = new DefaultCachedExternalResourceIndex("index", BaseSerializerFactory.STRING_SERIALIZER, timeProvider, cacheLockingManager, fileAccessTracker)
+        index = new DefaultCachedExternalResourceIndex("index", BaseSerializerFactory.STRING_SERIALIZER, timeProvider, cacheLockingManager, fileAccessTracker, tmp.testDirectory.toPath())
     }
 
     @Unroll
@@ -70,7 +70,7 @@ class DefaultArtifactResolutionCacheTest extends Specification {
 
         where:
         lastModified | contentType | etag   | sha1
-        new Date()   | "something" | "etag" | new HashValue("1234")
+        new Date()   | "something" | "etag" | HashCode.fromInt(123456)
         null         | null        | null   | null
     }
 

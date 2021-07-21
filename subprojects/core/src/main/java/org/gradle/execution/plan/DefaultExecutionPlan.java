@@ -17,50 +17,30 @@
 package org.gradle.execution.plan;
 
 import com.google.common.base.Function;
-import com.google.common.base.Predicate;
 import com.google.common.collect.HashMultimap;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
-import org.gradle.api.Action;
 import org.gradle.api.BuildCancelledException;
 import org.gradle.api.CircularReferenceException;
 import org.gradle.api.GradleException;
 import org.gradle.api.NonNullApi;
-import org.gradle.api.Project;
 import org.gradle.api.Task;
-import org.gradle.api.Transformer;
-import org.gradle.api.UncheckedIOException;
-import org.gradle.api.file.FileCollection;
-import org.gradle.api.internal.GradleInternal;
-import org.gradle.api.internal.TaskInternal;
-import org.gradle.api.internal.project.ProjectInternal;
-import org.gradle.api.internal.tasks.execution.DefaultTaskProperties;
-import org.gradle.api.internal.tasks.execution.TaskProperties;
-import org.gradle.api.internal.tasks.properties.PropertyWalker;
 import org.gradle.api.specs.Spec;
 import org.gradle.api.specs.Specs;
 import org.gradle.internal.Pair;
-import org.gradle.internal.file.PathToFileResolver;
 import org.gradle.internal.graph.CachingDirectedGraphWalker;
-import org.gradle.internal.graph.DirectedGraph;
 import org.gradle.internal.graph.DirectedGraphRenderer;
-import org.gradle.internal.graph.GraphNodeRenderer;
 import org.gradle.internal.logging.text.StyledTextOutput;
-import org.gradle.internal.resources.ResourceDeadlockException;
 import org.gradle.internal.resources.ResourceLock;
 import org.gradle.internal.resources.ResourceLockState;
-import org.gradle.internal.service.ServiceRegistry;
 import org.gradle.internal.work.WorkerLeaseRegistry;
-import org.gradle.internal.work.WorkerLeaseService;
-import org.gradle.util.CollectionUtils;
-import org.gradle.util.Path;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
-import java.io.File;
-import java.io.IOException;
 import java.io.StringWriter;
 import java.util.AbstractCollection;
 import java.util.ArrayDeque;
@@ -68,54 +48,70 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Deque;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Stream;
+
+import static com.google.common.collect.Lists.newLinkedList;
+import static com.google.common.collect.Sets.newIdentityHashSet;
 
 /**
  * A reusable implementation of ExecutionPlan. The {@link #addEntryTasks(java.util.Collection)} and {@link #clear()} methods are NOT threadsafe, and callers must synchronize access to these methods.
  */
 @NonNullApi
 public class DefaultExecutionPlan implements ExecutionPlan {
-    private final Set<Node> nodesInUnknownState = Sets.newLinkedHashSet();
-    private final Set<TaskNode> entryTasks = new LinkedHashSet<TaskNode>();
+    private static final Logger LOGGER = LoggerFactory.getLogger(DefaultExecutionPlan.class);
+
+    private final Set<Node> entryNodes = new LinkedHashSet<>();
     private final NodeMapping nodeMapping = new NodeMapping();
-    private final List<Node> executionQueue = Lists.newLinkedList();
-    private final Map<Project, ResourceLock> projectLocks = Maps.newHashMap();
+    private final List<Node> executionQueue = new LinkedList<>();
+    private final Set<ResourceLock> projectLocks = new HashSet<>();
     private final FailureCollector failureCollector = new FailureCollector();
+    private final String displayName;
     private final TaskNodeFactory taskNodeFactory;
     private final TaskDependencyResolver dependencyResolver;
+    private final NodeValidator nodeValidator;
+    private final ExecutionNodeAccessHierarchy outputHierarchy;
+    private final ExecutionNodeAccessHierarchy destroyableHierarchy;
     private Spec<? super Task> filter = Specs.satisfyAll();
 
+    private boolean invalidNodeRunning;
     private boolean continueOnFailure;
 
-    private final Set<Node> runningNodes = Sets.newIdentityHashSet();
-    private final Set<Node> filteredNodes = Sets.newIdentityHashSet();
-    private final Map<Node, MutationInfo> mutations = Maps.newIdentityHashMap();
-    private final Map<File, String> canonicalizedFileCache = Maps.newIdentityHashMap();
-    private final Map<Pair<Node, Node>, Boolean> reachableCache = Maps.newHashMap();
-    private final Set<Node> dependenciesCompleteCache = Sets.newHashSet();
-    private final WorkerLeaseService workerLeaseService;
-    private final GradleInternal gradle;
+    private final Set<Node> runningNodes = newIdentityHashSet();
+    private final Set<Node> filteredNodes = newIdentityHashSet();
+    private final Set<Node> producedButNotYetConsumed = newIdentityHashSet();
+    private final Map<Pair<Node, Node>, Boolean> reachableCache = new HashMap<>();
+    private final List<Node> dependenciesWhichRequireMonitoring = new ArrayList<>();
+    private boolean maybeNodesReady;
 
     private boolean buildCancelled;
 
-    public DefaultExecutionPlan(WorkerLeaseService workerLeaseService, GradleInternal gradle, TaskNodeFactory taskNodeFactory, TaskDependencyResolver dependencyResolver) {
-        this.workerLeaseService = workerLeaseService;
-        this.gradle = gradle;
+    public DefaultExecutionPlan(
+        String displayName,
+        TaskNodeFactory taskNodeFactory,
+        TaskDependencyResolver dependencyResolver,
+        NodeValidator nodeValidator,
+        ExecutionNodeAccessHierarchy outputHierarchy,
+        ExecutionNodeAccessHierarchy destroyableHierarchy
+    ) {
+        this.displayName = displayName;
         this.taskNodeFactory = taskNodeFactory;
         this.dependencyResolver = dependencyResolver;
+        this.nodeValidator = nodeValidator;
+        this.outputHierarchy = outputHierarchy;
+        this.destroyableHierarchy = destroyableHierarchy;
     }
 
     @Override
     public String getDisplayName() {
-        Path path = gradle.findIdentityPath();
-        if (path == null) {
-            return "gradle";
-        }
-        return path.toString();
+        return displayName;
     }
 
     @Override
@@ -123,23 +119,46 @@ public class DefaultExecutionPlan implements ExecutionPlan {
         return nodeMapping.get(task);
     }
 
-    public void addEntryTasks(Collection<? extends Task> tasks) {
-        final Deque<Node> queue = new ArrayDeque<Node>();
+    @Override
+    public void addNodes(Collection<? extends Node> nodes) {
+        Deque<Node> queue = new ArrayDeque<>(nodes);
+        for (Node node : nodes) {
+            assert node.getDependenciesProcessed() || node instanceof TaskInAnotherBuild;
+            assert node.isInKnownState();
+            if (node.isRequired()) {
+                entryNodes.add(node);
+            }
+        }
+        doAddNodes(queue);
+    }
 
-        List<Task> sortedTasks = new ArrayList<Task>(tasks);
-        Collections.sort(sortedTasks);
-        for (Task task : sortedTasks) {
+    @Override
+    public void addEntryTasks(Collection<? extends Task> tasks) {
+        final Deque<Node> queue = new ArrayDeque<>();
+
+        for (Task task : sorted(tasks)) {
             TaskNode node = taskNodeFactory.getOrCreateNode(task);
             if (node.isMustNotRun()) {
                 requireWithDependencies(node);
             } else if (filter.isSatisfiedBy(task)) {
                 node.require();
             }
-            entryTasks.add(node);
+            entryNodes.add(node);
             queue.add(node);
         }
 
-        final Set<Node> visiting = Sets.newHashSet();
+        doAddNodes(queue);
+    }
+
+    private List<Task> sorted(Collection<? extends Task> tasks) {
+        List<Task> sortedTasks = new ArrayList<>(tasks);
+        Collections.sort(sortedTasks);
+        return sortedTasks;
+    }
+
+    private void doAddNodes(Deque<Node> queue) {
+        Set<Node> nodesInUnknownState = Sets.newLinkedHashSet();
+        final Set<Node> visiting = new HashSet<>();
 
         while (!queue.isEmpty()) {
             Node node = queue.getFirst();
@@ -164,12 +183,9 @@ public class DefaultExecutionPlan implements ExecutionPlan {
                 // node in the queue
                 // Make sure it has been configured
                 node.prepareForExecution();
-                node.resolveDependencies(dependencyResolver, new Action<Node>() {
-                    @Override
-                    public void execute(Node targetNode) {
-                        if (!visiting.contains(targetNode)) {
-                            queue.addFirst(targetNode);
-                        }
+                node.resolveDependencies(dependencyResolver, targetNode -> {
+                    if (!visiting.contains(targetNode)) {
+                        queue.addFirst(targetNode);
                     }
                 });
                 if (node.isRequired()) {
@@ -188,7 +204,7 @@ public class DefaultExecutionPlan implements ExecutionPlan {
                 node.dependenciesProcessed();
             }
         }
-        resolveNodesInUnknownState();
+        resolveNodesInUnknownState(nodesInUnknownState);
     }
 
     private boolean nodeSatisfiesTaskFilter(Node successor) {
@@ -198,25 +214,25 @@ public class DefaultExecutionPlan implements ExecutionPlan {
         return true;
     }
 
-    private void resolveNodesInUnknownState() {
-        List<Node> queue = Lists.newArrayList(nodesInUnknownState);
-        Set<Node> visiting = Sets.newHashSet();
+    private void resolveNodesInUnknownState(Set<Node> nodesInUnknownState) {
+        Deque<Node> queue = new ArrayDeque<>(nodesInUnknownState);
+        Set<Node> visiting = new HashSet<>();
 
         while (!queue.isEmpty()) {
-            Node node = queue.get(0);
+            Node node = queue.peekFirst();
             if (node.isInKnownState()) {
-                queue.remove(0);
+                queue.removeFirst();
                 continue;
             }
 
             if (visiting.add(node)) {
                 for (Node hardPredecessor : node.getDependencyPredecessors()) {
                     if (!visiting.contains(hardPredecessor)) {
-                        queue.add(0, hardPredecessor);
+                        queue.addFirst(hardPredecessor);
                     }
                 }
             } else {
-                queue.remove(0);
+                queue.removeFirst();
                 visiting.remove(node);
                 node.mustNotRun();
                 for (Node predecessor : node.getDependencyPredecessors()) {
@@ -239,32 +255,39 @@ public class DefaultExecutionPlan implements ExecutionPlan {
         }
     }
 
+    @Override
     public void determineExecutionPlan() {
-        List<NodeInVisitingSegment> nodeQueue = Lists.newArrayList(Iterables.transform(entryTasks, new Function<TaskNode, NodeInVisitingSegment>() {
-            private int index;
+        LinkedList<NodeInVisitingSegment> nodeQueue = newLinkedList(
+            Iterables.transform(entryNodes, new Function<Node, NodeInVisitingSegment>() {
+                private int index;
 
-            @Override
-            @SuppressWarnings("NullableProblems")
-            public NodeInVisitingSegment apply(TaskNode taskNode) {
-                return new NodeInVisitingSegment(taskNode, index++);
-            }
-        }));
+                @Override
+                @SuppressWarnings("NullableProblems")
+                public NodeInVisitingSegment apply(Node node) {
+                    return new NodeInVisitingSegment(node, index++);
+                }
+            })
+        );
         int visitingSegmentCounter = nodeQueue.size();
+        Set<Node> dependenciesWhichRequireMonitoring = new HashSet<>();
 
         HashMultimap<Node, Integer> visitingNodes = HashMultimap.create();
-        Deque<GraphEdge> walkedShouldRunAfterEdges = new ArrayDeque<GraphEdge>();
-        Deque<Node> path = new ArrayDeque<Node>();
-        Map<Node, Integer> planBeforeVisiting = Maps.newHashMap();
+        Deque<GraphEdge> walkedShouldRunAfterEdges = new ArrayDeque<>();
+        Deque<Node> path = new ArrayDeque<>();
+        Map<Node, Integer> planBeforeVisiting = new HashMap<>();
 
         while (!nodeQueue.isEmpty()) {
-            NodeInVisitingSegment nodeInVisitingSegment = nodeQueue.get(0);
+            NodeInVisitingSegment nodeInVisitingSegment = nodeQueue.peekFirst();
             int currentSegment = nodeInVisitingSegment.visitingSegment;
             Node node = nodeInVisitingSegment.node;
 
-            if (node.isIncludeInGraph() || nodeMapping.contains(node)) {
-                nodeQueue.remove(0);
+            if (!node.isIncludeInGraph() || nodeMapping.contains(node)) {
+                nodeQueue.removeFirst();
                 visitingNodes.remove(node, currentSegment);
                 maybeRemoveProcessedShouldRunAfterEdge(walkedShouldRunAfterEdges, node);
+                if (node.requiresMonitoring()) {
+                    dependenciesWhichRequireMonitoring.add(node);
+                }
                 continue;
             }
 
@@ -295,47 +318,46 @@ public class DefaultExecutionPlan implements ExecutionPlan {
                             onOrderingCycle(successor, node);
                         }
                     }
-                    nodeQueue.add(0, new NodeInVisitingSegment(successor, currentSegment));
+                    nodeQueue.addFirst(new NodeInVisitingSegment(successor, currentSegment));
                 }
                 path.push(node);
             } else {
                 // Have visited this node's dependencies - add it to the end of the plan
-                nodeQueue.remove(0);
+                nodeQueue.removeFirst();
                 maybeRemoveProcessedShouldRunAfterEdge(walkedShouldRunAfterEdges, node);
                 visitingNodes.remove(node, currentSegment);
                 path.pop();
                 nodeMapping.add(node);
-
-                MutationInfo mutations = getOrCreateMutationsOf(node);
-                for (Node dependency : node.getDependencySuccessors()) {
-                    getOrCreateMutationsOf(dependency).consumingNodes.add(node);
-                    mutations.producingNodes.add(dependency);
+                if (node.requiresMonitoring()) {
+                    dependenciesWhichRequireMonitoring.add(node);
                 }
 
-                Project project = node.getProject();
-                if (project != null) {
-                    projectLocks.put(project, getOrCreateProjectLock(project));
+                for (Node dependency : node.getDependencySuccessors()) {
+                    dependency.getMutationInfo().consumingNodes.add(node);
+                }
+
+                ResourceLock projectLock = node.getProjectToLock();
+                if (projectLock != null) {
+                    projectLocks.add(projectLock);
                 }
 
                 // Add any finalizers to the queue
                 for (Node finalizer : node.getFinalizers()) {
                     if (!visitingNodes.containsKey(finalizer)) {
-                        nodeQueue.add(finalizerTaskPosition(finalizer, nodeQueue), new NodeInVisitingSegment(finalizer, visitingSegmentCounter++));
+                        int position = finalizerTaskPosition(finalizer, nodeQueue);
+                        nodeQueue.add(position, new NodeInVisitingSegment(finalizer, visitingSegmentCounter++));
                     }
                 }
             }
         }
         executionQueue.clear();
-        Iterables.addAll(executionQueue, nodeMapping);
-    }
-
-    private MutationInfo getOrCreateMutationsOf(Node node) {
-        MutationInfo mutations = this.mutations.get(node);
-        if (mutations == null) {
-            mutations = new MutationInfo(node);
-            this.mutations.put(node, mutations);
+        dependencyResolver.clear();
+        nodeMapping.removeIf(Node::requiresMonitoring);
+        executionQueue.addAll(nodeMapping);
+        for (Node node : executionQueue) {
+            maybeNodesReady |= node.updateAllDependenciesComplete() && node.isReady();
         }
-        return mutations;
+        this.dependenciesWhichRequireMonitoring.addAll(dependenciesWhichRequireMonitoring);
     }
 
     private void maybeRemoveProcessedShouldRunAfterEdge(Deque<GraphEdge> walkedShouldRunAfterEdges, Node node) {
@@ -350,13 +372,13 @@ public class DefaultExecutionPlan implements ExecutionPlan {
         nodeMapping.retainFirst(count);
     }
 
-    private void restoreQueue(List<NodeInVisitingSegment> nodeQueue, HashMultimap<Node, Integer> visitingNodes, GraphEdge toBeRemoved) {
+    private void restoreQueue(Deque<NodeInVisitingSegment> nodeQueue, HashMultimap<Node, Integer> visitingNodes, GraphEdge toBeRemoved) {
         NodeInVisitingSegment nextInQueue = null;
         while (nextInQueue == null || !toBeRemoved.from.equals(nextInQueue.node)) {
-            nextInQueue = nodeQueue.get(0);
+            nextInQueue = nodeQueue.peekFirst();
             visitingNodes.remove(nextInQueue.node, nextInQueue.visitingSegment);
             if (!toBeRemoved.from.equals(nextInQueue.node)) {
-                nodeQueue.remove(0);
+                nodeQueue.removeFirst();
             }
         }
     }
@@ -373,13 +395,10 @@ public class DefaultExecutionPlan implements ExecutionPlan {
         if (!(node instanceof TaskNode)) {
             return;
         }
-        Iterables.removeIf(((TaskNode) node).getShouldSuccessors(), new Predicate<Node>() {
-            @Override
-            @SuppressWarnings("NullableProblems")
-            public boolean apply(Node input) {
-                return visitingNodes.containsEntry(input, nodeWithVisitingSegment.visitingSegment);
-            }
-        });
+        Iterables.removeIf(
+            ((TaskNode) node).getShouldSuccessors(),
+            input -> visitingNodes.containsEntry(input, nodeWithVisitingSegment.visitingSegment)
+        );
     }
 
     private void takePlanSnapshotIfCanBeRestoredToCurrentTask(Map<Node, Integer> planBeforeVisiting, Node node) {
@@ -402,30 +421,23 @@ public class DefaultExecutionPlan implements ExecutionPlan {
      * Given a finalizer task, determine where in the current node queue that it should be inserted.
      * The finalizer should be inserted after any of it's preceding tasks.
      */
-    private int finalizerTaskPosition(Node finalizer, final List<NodeInVisitingSegment> nodeQueue) {
+    private int finalizerTaskPosition(Node finalizer, final Deque<NodeInVisitingSegment> nodeQueue) {
         if (nodeQueue.size() == 0) {
             return 0;
         }
 
         Set<Node> precedingTasks = getAllPrecedingNodes(finalizer);
-        Set<Integer> precedingTaskIndices = CollectionUtils.collect(precedingTasks, new Transformer<Integer, Node>() {
-            @Override
-            public Integer transform(final Node dependsOnTask) {
-                return Iterables.indexOf(nodeQueue, new Predicate<NodeInVisitingSegment>() {
-                    @Override
-                    @SuppressWarnings("NullableProblems")
-                    public boolean apply(NodeInVisitingSegment nodeInVisitingSegment) {
-                        return nodeInVisitingSegment.node.equals(dependsOnTask);
-                    }
-                });
-            }
-        });
-        return Collections.max(precedingTaskIndices) + 1;
+        int maxPrecedingTaskIndex = precedingTasks.stream()
+            .mapToInt(dependsOnTask -> Iterables.indexOf(nodeQueue, nodeInVisitingSegment -> nodeInVisitingSegment.node.equals(dependsOnTask)))
+            .max()
+            .orElseThrow(IllegalStateException::new);
+
+        return maxPrecedingTaskIndex + 1;
     }
 
     private Set<Node> getAllPrecedingNodes(Node finalizer) {
-        Set<Node> precedingNodes = Sets.newHashSet();
-        Deque<Node> candidateNodes = new ArrayDeque<Node>();
+        Set<Node> precedingNodes = new HashSet<>();
+        Deque<Node> candidateNodes = new ArrayDeque<>();
 
         // Consider every node that must run before the finalizer
         Iterables.addAll(candidateNodes, finalizer.getAllSuccessors());
@@ -443,67 +455,77 @@ public class DefaultExecutionPlan implements ExecutionPlan {
         return precedingNodes;
     }
 
-    private void onOrderingCycle(Node successor, Node node) {
-        CachingDirectedGraphWalker<Node, Void> graphWalker = new CachingDirectedGraphWalker<Node, Void>(new DirectedGraph<Node, Void>() {
-            @Override
-            public void getNodeValues(Node node, Collection<? super Void> values, Collection<? super Node> connectedNodes) {
-                connectedNodes.addAll(node.getDependencySuccessors());
-                if (node instanceof TaskNode) {
-                    TaskNode taskNode = (TaskNode) node;
-                    connectedNodes.addAll(taskNode.getMustSuccessors());
-                    connectedNodes.addAll(taskNode.getFinalizingSuccessors());
-                }
+    private void onOrderingCycle(Node successor, Node currentNode) {
+        CachingDirectedGraphWalker<Node, Void> graphWalker = new CachingDirectedGraphWalker<>((node, values, connectedNodes) -> {
+            connectedNodes.addAll(node.getDependencySuccessors());
+            if (node instanceof TaskNode) {
+                TaskNode taskNode = (TaskNode) node;
+                connectedNodes.addAll(taskNode.getMustSuccessors());
+                connectedNodes.addAll(taskNode.getFinalizingSuccessors());
             }
         });
-        graphWalker.add(entryTasks);
+        graphWalker.add(successor);
 
         List<Set<Node>> cycles = graphWalker.findCycles();
         if (cycles.isEmpty()) {
             // TODO: This isn't correct. This means that we've detected a cycle while determining the execution plan, but the graph walker did not find one.
             // https://github.com/gradle/gradle/issues/2293
-            throw new GradleException("Misdetected cycle between " + node + " and " + successor + ". Help us by reporting this to https://github.com/gradle/gradle/issues/2293");
+            throw new GradleException("Misdetected cycle between " + currentNode + " and " + successor + ". Help us by reporting this to https://github.com/gradle/gradle/issues/2293");
         }
-        final List<Node> firstCycle = new ArrayList<Node>(cycles.get(0));
+        List<Node> firstCycle = new ArrayList<>(cycles.get(0));
         Collections.sort(firstCycle);
 
-        DirectedGraphRenderer<Node> graphRenderer = new DirectedGraphRenderer<Node>(new GraphNodeRenderer<Node>() {
-            @Override
-            public void renderTo(Node node, StyledTextOutput output) {
-                output.withStyle(StyledTextOutput.Style.Identifier).text(node);
-            }
-        }, new DirectedGraph<Node, Object>() {
-            @Override
-            public void getNodeValues(Node node, Collection<? super Object> values, Collection<? super Node> connectedNodes) {
+        DirectedGraphRenderer<Node> graphRenderer = new DirectedGraphRenderer<>(
+            (it, output) -> output.withStyle(StyledTextOutput.Style.Identifier).text(it),
+            (it, values, connectedNodes) -> {
                 for (Node dependency : firstCycle) {
-                    if (node.hasHardSuccessor(dependency)) {
+                    if (it.hasHardSuccessor(dependency)) {
                         connectedNodes.add(dependency);
                     }
                 }
-            }
-        });
+            });
         StringWriter writer = new StringWriter();
         graphRenderer.renderTo(firstCycle.get(0), writer);
         throw new CircularReferenceException(String.format("Circular dependency between the following tasks:%n%s", writer.toString()));
     }
 
+    @Override
     public void clear() {
         taskNodeFactory.clear();
         dependencyResolver.clear();
-        entryTasks.clear();
+        entryNodes.clear();
         nodeMapping.clear();
         executionQueue.clear();
         projectLocks.clear();
         failureCollector.clearFailures();
-        mutations.clear();
-        canonicalizedFileCache.clear();
+        producedButNotYetConsumed.clear();
         reachableCache.clear();
-        dependenciesCompleteCache.clear();
+        dependenciesWhichRequireMonitoring.clear();
         runningNodes.clear();
+        outputHierarchy.clear();
+        destroyableHierarchy.clear();
     }
 
     @Override
     public Set<Task> getTasks() {
         return nodeMapping.getTasks();
+    }
+
+    @Override
+    public List<Node> getScheduledNodes() {
+        return ImmutableList.copyOf(nodeMapping.nodes);
+    }
+
+    @Override
+    public List<Node> getScheduledNodesPlusDependencies() {
+        Set<Node> nodes = nodeMapping.nodes;
+        ImmutableList.Builder<Node> builder = ImmutableList.builder();
+        for (Node node : dependenciesWhichRequireMonitoring) {
+            if (!nodes.contains(node)) {
+                builder.add(node);
+            }
+        }
+        return builder.addAll(nodes).build();
     }
 
     @Override
@@ -517,171 +539,174 @@ public class DefaultExecutionPlan implements ExecutionPlan {
         return builder.build();
     }
 
+    @Override
     public void useFilter(Spec<? super Task> filter) {
         this.filter = filter;
     }
 
-    public void setContinueOnFailure(boolean continueOnFailre) {
-        this.continueOnFailure = continueOnFailre;
+    @Override
+    public void setContinueOnFailure(boolean continueOnFailure) {
+        this.continueOnFailure = continueOnFailure;
     }
 
     @Override
     @Nullable
     public Node selectNext(WorkerLeaseRegistry.WorkerLease workerLease, ResourceLockState resourceLockState) {
         if (allProjectsLocked()) {
+            // TODO - this is incorrect. We can still run nodes that don't need a project lock
             return null;
         }
 
+        for (Iterator<Node> iterator = dependenciesWhichRequireMonitoring.iterator(); iterator.hasNext();) {
+            Node node = iterator.next();
+            if (node.isComplete()) {
+                LOGGER.debug("Monitored node {} completed", node);
+                updateAllDependenciesCompleteForPredecessors(node);
+                iterator.remove();
+            }
+        }
+        if (!maybeNodesReady) {
+            return null;
+        }
         Iterator<Node> iterator = executionQueue.iterator();
+        boolean foundReadyNode = false;
         while (iterator.hasNext()) {
             Node node = iterator.next();
-            if (node.isReady() && allDependenciesComplete(node)) {
+            if (node.isReady() && node.allDependenciesComplete()) {
+                foundReadyNode = true;
                 MutationInfo mutations = getResolvedMutationInfo(node);
 
-                // TODO: convert output file checks to a resource lock
-                if (!tryLockProjectFor(node)
-                    || !workerLease.tryLock()
-                    || !canRunWithCurrentlyExecutedNodes(node, mutations)) {
+                if (!tryAcquireLocksForNode(node, workerLease, mutations)) {
                     resourceLockState.releaseLocks();
                     continue;
                 }
 
+                if (!tryAcquireWorkerLeaseForNode(node, workerLease)) {
+                    resourceLockState.releaseLocks();
+                    // if we can't get a worker lease, we won't be able to execute any other nodes, either
+                    break;
+                }
+
                 if (node.allDependenciesSuccessful()) {
-                    recordNodeStarted(node);
-                    node.startExecution();
+                    node.startExecution(this::recordNodeExecutionStarted);
+                    if (mutations.hasValidationProblem) {
+                        invalidNodeRunning = true;
+                    }
                 } else {
-                    node.skipExecution();
+                    node.skipExecution(this::recordNodeCompleted);
                 }
                 iterator.remove();
-
                 return node;
             }
         }
+        LOGGER.debug("No node could be selected, nodes ready: {}", foundReadyNode);
+        maybeNodesReady = foundReadyNode;
         return null;
     }
 
+    private boolean tryAcquireLocksForNode(Node node, WorkerLeaseRegistry.WorkerLease workerLease, MutationInfo mutations) {
+        if (!tryLockProjectFor(node)) {
+            LOGGER.debug("Cannot acquire project lock for node {}", node);
+            return false;
+        } else if (!tryLockSharedResourceFor(node)) {
+            LOGGER.debug("Cannot acquire shared resource lock for node {}", node);
+            return false;
+        } else if (!canRunWithCurrentlyExecutedNodes(mutations)) {
+            LOGGER.debug("Node {} cannot run with currently running nodes {}", node, runningNodes);
+            return false;
+        } else if (doesDestroyNotYetConsumedOutputOfAnotherNode(node, mutations.destroyablePaths)) {
+            return false;
+        }
+        return true;
+    }
+
+    private boolean tryAcquireWorkerLeaseForNode(Node node, WorkerLeaseRegistry.WorkerLease workerLease) {
+        if (!workerLease.tryLock()) {
+            LOGGER.debug("Cannot acquire worker lease lock for node {}", node);
+            return false;
+            // TODO: convert output file checks to a resource lock
+        }
+        return true;
+    }
+
+    private void updateAllDependenciesCompleteForPredecessors(Node node) {
+        for (Node predecessor : node.getAllPredecessors()) {
+            maybeNodesReady |= predecessor.updateAllDependenciesComplete() && predecessor.isReady();
+        }
+    }
+
     private boolean tryLockProjectFor(Node node) {
-        if (node.getProject() != null) {
-            return getProjectLock(node.getProject()).tryLock();
+        ResourceLock toLock = node.getProjectToLock();
+        if (toLock != null) {
+            return toLock.tryLock();
         } else {
             return true;
         }
     }
 
     private void unlockProjectFor(Node node) {
-        if (node.getProject() != null) {
-            getProjectLock(node.getProject()).unlock();
+        ResourceLock toUnlock = node.getProjectToLock();
+        if (toUnlock != null) {
+            toUnlock.unlock();
         }
     }
 
-    private ResourceLock getProjectLock(Project project) {
-        return projectLocks.get(project);
+    private boolean tryLockSharedResourceFor(Node node) {
+        return node.getResourcesToLock().stream().allMatch(ResourceLock::tryLock);
+    }
+
+    private void unlockSharedResourcesFor(Node node) {
+        node.getResourcesToLock().forEach(ResourceLock::unlock);
     }
 
     private MutationInfo getResolvedMutationInfo(Node node) {
-        MutationInfo mutations = this.mutations.get(node);
+        MutationInfo mutations = node.getMutationInfo();
         if (!mutations.resolved) {
-            resolveMutations(mutations, node);
+            node.resolveMutations();
+            mutations.hasValidationProblem = nodeValidator.hasValidationProblems(node);
+            outputHierarchy.recordNodeAccessingLocations(node, mutations.outputPaths);
+            destroyableHierarchy.recordNodeAccessingLocations(node, mutations.destroyablePaths);
         }
         return mutations;
     }
 
-    private void resolveMutations(MutationInfo mutations, Node node) {
-        if (node instanceof LocalTaskNode) {
-            LocalTaskNode taskNode = (LocalTaskNode) node;
-            TaskInternal task = taskNode.getTask();
-            ProjectInternal project = (ProjectInternal) task.getProject();
-            ServiceRegistry serviceRegistry = project.getServices();
-            PathToFileResolver resolver = serviceRegistry.get(PathToFileResolver.class);
-            PropertyWalker propertyWalker = serviceRegistry.get(PropertyWalker.class);
-            TaskProperties taskProperties = DefaultTaskProperties.resolve(propertyWalker, resolver, task);
-            mutations.outputPaths.addAll(getOutputPaths(canonicalizedFileCache, taskNode, taskProperties.getOutputFiles(), taskProperties.getLocalStateFiles()));
-            mutations.destroyablePaths.addAll(getDestroyablePaths(canonicalizedFileCache, taskNode, taskProperties.getDestroyableFiles()));
-            mutations.hasFileInputs = !taskProperties.getInputFileProperties().isEmpty();
-            mutations.hasOutputs = taskProperties.hasDeclaredOutputs();
-            mutations.hasLocalState = !taskProperties.getLocalStateFiles().isEmpty();
-            mutations.resolved = true;
-
-            if (!mutations.destroyablePaths.isEmpty()) {
-                if (mutations.hasOutputs) {
-                    throw new IllegalStateException("Task " + taskNode + " has both outputs and destroyables defined.  A task can define either outputs or destroyables, but not both.");
-                }
-                if (mutations.hasFileInputs) {
-                    throw new IllegalStateException("Task " + taskNode + " has both inputs and destroyables defined.  A task can define either inputs or destroyables, but not both.");
-                }
-                if (mutations.hasLocalState) {
-                    throw new IllegalStateException("Task " + taskNode + " has both local state and destroyables defined.  A task can define either local state or destroyables, but not both.");
-                }
-            }
-        }
-    }
-
-    private boolean allDependenciesComplete(Node node) {
-        if (dependenciesCompleteCache.contains(node)) {
-            return true;
-        }
-
-        boolean dependenciesComplete = node.allDependenciesComplete();
-        if (dependenciesComplete) {
-            dependenciesCompleteCache.add(node);
-        }
-
-        return dependenciesComplete;
-    }
-
     private boolean allProjectsLocked() {
-        for (ResourceLock lock : projectLocks.values()) {
+        for (ResourceLock lock : projectLocks) {
             if (!lock.isLocked()) {
                 return false;
             }
         }
-        return true;
+        return !projectLocks.isEmpty();
     }
 
-    private ResourceLock getOrCreateProjectLock(Project project) {
-        Path buildPath = ((ProjectInternal) project).getMutationState().getOwner().getIdentityPath();
-        Path projectPath = ((ProjectInternal) project).getIdentityPath();
-        return workerLeaseService.getProjectLock(buildPath, projectPath);
-    }
-
-    private boolean canRunWithCurrentlyExecutedNodes(Node node, MutationInfo mutations) {
-        Set<String> candidateNodeDestroyables = mutations.destroyablePaths;
-
-        if (!runningNodes.isEmpty()) {
-            Set<String> candidateNodeOutputs = mutations.outputPaths;
-            Set<String> candidateMutations = !candidateNodeOutputs.isEmpty() ? candidateNodeOutputs : candidateNodeDestroyables;
-            if (hasNodeWithOverlappingMutations(candidateMutations)) {
+    private boolean canRunWithCurrentlyExecutedNodes(MutationInfo mutations) {
+        if (mutations.hasValidationProblem) {
+            if (!runningNodes.isEmpty()) {
+                // Invalid work is not allowed to run together with any other work
                 return false;
             }
+        } else if (invalidNodeRunning) {
+            // No new work should be started when invalid work is running
+            return false;
         }
-
-        return !doesDestroyNotYetConsumedOutputOfAnotherNode(node, candidateNodeDestroyables);
+        return !hasRunningNodeWithOverlappingMutations(mutations);
     }
 
-    private static ImmutableSet<String> canonicalizedPaths(final Map<File, String> cache, Iterable<File> files) {
-        ImmutableSet.Builder<String> builder = ImmutableSet.builder();
-        for (File file : files) {
-            String path;
-            try {
-                path = cache.get(file);
-                if (path == null) {
-                    path = file.getCanonicalPath();
-                    cache.put(file, path);
-                }
-                builder.add(path);
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
-            }
+    private boolean hasRunningNodeWithOverlappingMutations(MutationInfo mutations) {
+        if (runningNodes.isEmpty()) {
+            return false;
         }
-        return builder.build();
-    }
-
-    private boolean hasNodeWithOverlappingMutations(Set<String> candidateMutationPaths) {
+        Set<String> candidateNodeOutputs = mutations.outputPaths;
+        Set<String> candidateMutationPaths = !candidateNodeOutputs.isEmpty()
+            ? candidateNodeOutputs
+            : mutations.destroyablePaths;
         if (!candidateMutationPaths.isEmpty()) {
-            for (Node runningNode : runningNodes) {
-                MutationInfo runningMutations = mutations.get(runningNode);
-                Iterable<String> runningMutationPaths = Iterables.concat(runningMutations.outputPaths, runningMutations.destroyablePaths);
-                if (hasOverlap(candidateMutationPaths, runningMutationPaths)) {
+            for (String candidateMutationPath : candidateMutationPaths) {
+                Stream<Node> nodesMutatingCandidatePath = Stream.concat(
+                    outputHierarchy.getNodesAccessing(candidateMutationPath).stream(),
+                    destroyableHierarchy.getNodesAccessing(candidateMutationPath).stream()
+                );
+                if (nodesMutatingCandidatePath.anyMatch(runningNodes::contains)) {
                     return true;
                 }
             }
@@ -690,26 +715,24 @@ public class DefaultExecutionPlan implements ExecutionPlan {
     }
 
     private boolean doesDestroyNotYetConsumedOutputOfAnotherNode(Node destroyer, Set<String> destroyablePaths) {
-        if (!destroyablePaths.isEmpty()) {
-            for (MutationInfo producingNode : mutations.values()) {
-                if (!producingNode.node.isComplete()) {
-                    // We don't care about producing nodes that haven't finished yet
+        if (destroyablePaths.isEmpty()) {
+            return false;
+        }
+        for (String destroyablePath : destroyablePaths) {
+            ImmutableSet<Node> producersDestroyedByDestroyer = outputHierarchy.getNodesAccessing(destroyablePath);
+            for (Node producingNode : producedButNotYetConsumed) {
+                if (!producersDestroyedByDestroyer.contains(producingNode)) {
                     continue;
                 }
-                if (producingNode.consumingNodes.isEmpty()) {
-                    // We don't care about nodes whose output is not consumed by anyone anymore
-                    continue;
-                }
-                if (!hasOverlap(destroyablePaths, producingNode.outputPaths)) {
-                    // No overlap no cry
-                    continue;
-                }
-                for (Node consumer : producingNode.consumingNodes) {
+                MutationInfo producingNodeMutations = producingNode.getMutationInfo();
+                assert !producingNodeMutations.consumingNodes.isEmpty();
+                for (Node consumer : producingNodeMutations.consumingNodes) {
                     if (doesConsumerDependOnDestroyer(consumer, destroyer)) {
                         // If there's an explicit dependency from consuming node to destroyer,
                         // then we accept that as the will of the user
                         continue;
                     }
+                    LOGGER.debug("Node {} destroys output of consumer {}", destroyer, consumer);
                     return true;
                 }
             }
@@ -739,127 +762,79 @@ public class DefaultExecutionPlan implements ExecutionPlan {
         return reachable;
     }
 
-    private static boolean hasOverlap(Iterable<String> paths1, Iterable<String> paths2) {
-        for (String path1 : paths1) {
-            for (String path2 : paths2) {
-                String overLappedPath = getOverLappedPath(path1, path2);
-                if (overLappedPath != null) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
-
-    private static Set<String> getOutputPaths(Map<File, String> canonicalizedFileCache, TaskNode task, FileCollection outputFiles, FileCollection localStateFiles) {
-        try {
-            return canonicalizedPaths(canonicalizedFileCache, Iterables.concat(outputFiles, localStateFiles));
-        } catch (ResourceDeadlockException e) {
-            throw new IllegalStateException(deadlockMessage(task, "an output or local state", "outputs"), e);
-        }
-    }
-
-    private static Set<String> getDestroyablePaths(Map<File, String> canonicalizedFileCache, TaskNode task, FileCollection destroyableFiles) {
-        try {
-            return canonicalizedPaths(canonicalizedFileCache, destroyableFiles);
-        } catch (ResourceDeadlockException e) {
-            throw new IllegalStateException(deadlockMessage(task, "a destroyable", "destroyables"), e);
-        }
-    }
-
-    private static String deadlockMessage(TaskNode task, String singular, String plural) {
-        return String.format("A deadlock was detected while resolving the %s for task '%s'. This can be caused, for instance, by %s property causing dependency resolution.", plural, task, singular);
-    }
-
-    @Nullable
-    private static String getOverLappedPath(String firstPath, String secondPath) {
-        if (firstPath.equals(secondPath)) {
-            return firstPath;
-        }
-        if (firstPath.length() == secondPath.length()) {
-            return null;
-        }
-
-        String shorter;
-        String longer;
-        if (firstPath.length() > secondPath.length()) {
-            shorter = secondPath;
-            longer = firstPath;
-        } else {
-            shorter = firstPath;
-            longer = secondPath;
-        }
-
-        boolean isOverlapping = longer.startsWith(shorter) && longer.charAt(shorter.length()) == File.separatorChar;
-        if (isOverlapping) {
-            return shorter;
-        } else {
-            return null;
-        }
-    }
-
-    private void recordNodeStarted(Node node) {
+    private void recordNodeExecutionStarted(Node node) {
         runningNodes.add(node);
     }
 
     private void recordNodeCompleted(Node node) {
-        runningNodes.remove(node);
-        MutationInfo mutations = this.mutations.get(node);
-        for (Node producer : mutations.producingNodes) {
-            MutationInfo producerMutations = this.mutations.get(producer);
-            if (producerMutations.consumingNodes.remove(node) && canRemoveMutation(producerMutations)) {
-                this.mutations.remove(producer);
+        LOGGER.debug("Node {} completed, executed: {}", node, node.isExecuted());
+        MutationInfo mutations = node.getMutationInfo();
+        for (Node producer : node.getDependencySuccessors()) {
+            MutationInfo producerMutations = producer.getMutationInfo();
+            if (producerMutations.consumingNodes.remove(node) && producerMutations.consumingNodes.isEmpty()) {
+                producedButNotYetConsumed.remove(producer);
             }
         }
 
-        if (canRemoveMutation(mutations)) {
-            this.mutations.remove(node);
+        if (!mutations.consumingNodes.isEmpty() && !mutations.outputPaths.isEmpty()) {
+            producedButNotYetConsumed.add(node);
         }
-    }
 
-    private static boolean canRemoveMutation(@Nullable MutationInfo mutations) {
-        return mutations != null && mutations.node.isComplete() && mutations.consumingNodes.isEmpty();
+        updateAllDependenciesCompleteForPredecessors(node);
     }
 
     @Override
-    public void nodeComplete(Node node) {
+    public void finishedExecuting(Node node) {
         try {
             if (!node.isComplete()) {
                 enforceFinalizers(node);
+                maybeNodesReady = true;
                 if (node.isFailed()) {
+                    LOGGER.debug("Node {} failed", node);
                     handleFailure(node);
+                } else {
+                    LOGGER.debug("Node {} finished executing", node);
                 }
 
-                node.finishExecution();
-                recordNodeCompleted(node);
+                runningNodes.remove(node);
+                node.finishExecution(this::recordNodeCompleted);
+            } else {
+                LOGGER.debug("Already completed node {} reported as finished executing", node);
             }
         } finally {
             unlockProjectFor(node);
+            unlockSharedResourcesFor(node);
+            invalidNodeRunning = false;
         }
     }
 
     private static void enforceFinalizers(Node node) {
         for (Node finalizerNode : node.getFinalizers()) {
             if (finalizerNode.isRequired() || finalizerNode.isMustNotRun()) {
-                enforceWithDependencies(finalizerNode, Sets.<Node>newHashSet());
+                enforceWithDependencies(finalizerNode);
             }
         }
     }
 
-    private static void enforceWithDependencies(Node nodeInfo, Set<Node> enforcedNodes) {
-        Deque<Node> candidateNodes = new ArrayDeque<Node>();
-        candidateNodes.add(nodeInfo);
+    private static void enforceWithDependencies(Node node) {
+        Set<Node> enforcedNodes = new HashSet<>();
 
-        while (!candidateNodes.isEmpty()) {
-            Node node = candidateNodes.pop();
-            if (!enforcedNodes.contains(node)) {
-                enforcedNodes.add(node);
+        Deque<Node> candidates = new ArrayDeque<>();
+        candidates.add(node);
 
-                candidateNodes.addAll(node.getDependencySuccessors());
+        while (!candidates.isEmpty()) {
+            Node candidate = candidates.pop();
+            if (!enforcedNodes.contains(candidate)) {
+                enforcedNodes.add(candidate);
 
-                if (node.isMustNotRun() || node.isRequired()) {
-                    node.enforceRun();
+                candidates.addAll(candidate.getDependencySuccessors());
+
+                if (candidate.isMustNotRun() || candidate.isRequired()) {
+                    candidate.enforceRun();
+                    // Completed changed from true to false - inform all nodes depending on this one.
+                    for (Node predecessor : candidate.getAllPredecessors()) {
+                        predecessor.forceAllDependenciesCompleteUpdate();
+                    }
                 }
             }
         }
@@ -907,13 +882,13 @@ public class DefaultExecutionPlan implements ExecutionPlan {
         for (Node node : nodeMapping) {
             // Allow currently executing and enforced tasks to complete, but skip everything else.
             if (node.isRequired()) {
-                node.skipExecution();
+                node.skipExecution(this::recordNodeCompleted);
                 aborted = true;
             }
 
             // If abortAll is set, also stop enforced tasks.
             if (abortAll && node.isReady()) {
-                node.abortExecution();
+                node.abortExecution(this::recordNodeCompleted);
                 aborted = true;
             }
         }
@@ -952,7 +927,7 @@ public class DefaultExecutionPlan implements ExecutionPlan {
 
     @Override
     public int size() {
-        return nodeMapping.size();
+        return nodeMapping.getNumberOfPublicNodes();
     }
 
     private static class GraphEdge {
@@ -972,22 +947,6 @@ public class DefaultExecutionPlan implements ExecutionPlan {
         private NodeInVisitingSegment(Node node, int visitingSegment) {
             this.node = node;
             this.visitingSegment = visitingSegment;
-        }
-    }
-
-    private static class MutationInfo {
-        final Node node;
-        final Set<Node> consumingNodes = Sets.newHashSet();
-        final Set<Node> producingNodes = Sets.newHashSet();
-        final Set<String> outputPaths = Sets.newHashSet();
-        final Set<String> destroyablePaths = Sets.newHashSet();
-        boolean hasFileInputs;
-        boolean hasOutputs;
-        boolean hasLocalState;
-        boolean resolved;
-
-        MutationInfo(Node node) {
-            this.node = node;
         }
     }
 
@@ -1038,6 +997,16 @@ public class DefaultExecutionPlan implements ExecutionPlan {
         @Override
         public int size() {
             return nodes.size();
+        }
+
+        public int getNumberOfPublicNodes() {
+            int publicNodes = 0;
+            for (Node node : this) {
+                if (node.isPublicNode()) {
+                    publicNodes++;
+                }
+            }
+            return publicNodes;
         }
 
         public void retainFirst(int count) {

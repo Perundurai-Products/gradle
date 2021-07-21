@@ -46,6 +46,7 @@ import org.gradle.internal.component.model.ConfigurationMetadata;
 import org.gradle.internal.component.model.DefaultIvyArtifactName;
 import org.gradle.internal.component.model.DependencyMetadata;
 import org.gradle.internal.component.model.Exclude;
+import org.gradle.internal.component.model.ExcludeMetadata;
 import org.gradle.internal.component.model.IvyArtifactName;
 import org.gradle.internal.serialize.Decoder;
 import org.gradle.internal.serialize.Encoder;
@@ -57,6 +58,7 @@ import java.util.Map;
 import java.util.Set;
 
 public class RealisedIvyModuleResolveMetadataSerializationHelper extends AbstractRealisedModuleResolveMetadataSerializationHelper {
+
     public RealisedIvyModuleResolveMetadataSerializationHelper(AttributeContainerSerializer attributeContainerSerializer, ImmutableModuleIdentifierFactory moduleIdentifierFactory) {
         super(attributeContainerSerializer, moduleIdentifierFactory);
     }
@@ -67,13 +69,14 @@ public class RealisedIvyModuleResolveMetadataSerializationHelper extends Abstrac
         ImmutableList.Builder<AbstractRealisedModuleComponentResolveMetadata.ImmutableRealisedVariantImpl> builder = ImmutableList.builder();
         for (ComponentVariant variant: variants) {
             builder.add(new AbstractRealisedModuleComponentResolveMetadata.ImmutableRealisedVariantImpl(resolveMetadata.getId(), variant.getName(), variant.getAttributes().asImmutable(), variant.getDependencies(), variant.getDependencyConstraints(),
-                variant.getFiles(), ImmutableCapabilities.of(variant.getCapabilities().getCapabilities()), variantToDependencies.get(variant.getName())));
+                variant.getFiles(), ImmutableCapabilities.of(variant.getCapabilities().getCapabilities()), variantToDependencies.get(variant.getName()), variant.isExternalVariant()));
         }
         ImmutableList<AbstractRealisedModuleComponentResolveMetadata.ImmutableRealisedVariantImpl> realisedVariants = builder.build();
         return new RealisedIvyModuleResolveMetadata(resolveMetadata, realisedVariants, readIvyConfigurations(decoder, resolveMetadata));
     }
 
-    protected void writeDependencies(Encoder encoder, ConfigurationMetadata configuration) throws IOException {
+    @Override
+    protected void writeDependencies(Encoder encoder, ConfigurationMetadata configuration, Map<ExternalDependencyDescriptor, Integer> deduplicationDependencyCache) throws IOException {
         List<? extends DependencyMetadata> dependencies = configuration.getDependencies();
         encoder.writeSmallInt(dependencies.size());
         for (DependencyMetadata dependency: dependencies) {
@@ -85,7 +88,8 @@ public class RealisedIvyModuleResolveMetadataSerializationHelper extends Abstrac
                 ExternalDependencyDescriptor dependencyDescriptor = dependencyMetadata.getDependencyDescriptor();
                 if (dependencyDescriptor instanceof IvyDependencyDescriptor) {
                     encoder.writeByte(IVY_DEPENDENCY_METADATA);
-                    writeIvyDependency(encoder, (IvyDependencyDescriptor) dependencyDescriptor);
+                    boolean addedByRule = configuration instanceof RealisedConfigurationMetadata && ((RealisedConfigurationMetadata) configuration).isAddedByRule();
+                    writeIvyDependency(encoder, (IvyDependencyDescriptor) dependencyDescriptor, configuration.getName(), addedByRule);
                 } else {
                     throw new IllegalStateException("Unknown type of dependency descriptor: " + dependencyDescriptor.getClass());
                 }
@@ -94,24 +98,68 @@ public class RealisedIvyModuleResolveMetadataSerializationHelper extends Abstrac
         }
     }
 
+    @Override
+    protected void writeConfiguration(Encoder encoder, ConfigurationMetadata configuration) throws IOException {
+        super.writeConfiguration(encoder, configuration);
+        if (configuration instanceof RealisedConfigurationMetadata) {
+            RealisedConfigurationMetadata realisedMetadata = (RealisedConfigurationMetadata) configuration;
+            if (realisedMetadata.isAddedByRule()) {
+                encoder.writeBoolean(true);
+                writeMavenExcludeRules(encoder, realisedMetadata.getExcludes());
+            } else {
+                encoder.writeBoolean(false);
+            }
+        } else {
+            encoder.writeBoolean(false);
+        }
+    }
+
     private Map<String, ConfigurationMetadata> readIvyConfigurations(Decoder decoder, DefaultIvyModuleResolveMetadata metadata) throws IOException {
-        Map<Artifact, ModuleComponentArtifactMetadata> artifacts = new IdentityHashMap<Artifact, ModuleComponentArtifactMetadata>();
-        IvyConfigurationHelper configurationHelper = new IvyConfigurationHelper(metadata.getArtifactDefinitions(), artifacts, metadata.getExcludes(), metadata.getDependencies(), metadata.getId());
+        IvyConfigurationHelper configurationHelper = new IvyConfigurationHelper(metadata.getArtifactDefinitions(), new IdentityHashMap<>(), metadata.getExcludes(), metadata.getDependencies(), metadata.getId());
 
         ImmutableMap<String, Configuration> configurationDefinitions = metadata.getConfigurationDefinitions();
-
         int configurationsCount = decoder.readSmallInt();
         Map<String, ConfigurationMetadata> configurations = Maps.newHashMapWithExpectedSize(configurationsCount);
+
         for (int i = 0; i < configurationsCount; i++) {
             String configurationName = decoder.readString();
+            boolean transitive = true;
+            boolean visible = true;
+            ImmutableSet<String> hierarchy = ImmutableSet.of(configurationName);
+            ImmutableList<ExcludeMetadata> excludes;
+
             Configuration configuration = configurationDefinitions.get(configurationName);
-            assert configuration != null;
-            ImmutableSet<String> hierarchy = LazyToRealisedModuleComponentResolveMetadataHelper.constructHierarchy(configuration, configurationDefinitions);
+            if (configuration != null) { // if the configuration represents a variant added by a rule, it is not in the definition list
+                transitive = configuration.isTransitive();
+                visible = configuration.isVisible();
+                hierarchy = LazyToRealisedModuleComponentResolveMetadataHelper.constructHierarchy(configuration, configurationDefinitions);
+                excludes = configurationHelper.filterExcludes(hierarchy);
+            } else {
+                excludes = ImmutableList.of();
+            }
+
             ImmutableAttributes attributes = getAttributeContainerSerializer().read(decoder);
             ImmutableCapabilities capabilities = readCapabilities(decoder);
+            boolean isExternalVariant = decoder.readBoolean();
+            boolean hasExplicitExcludes = decoder.readBoolean();
+            if (hasExplicitExcludes) {
+                excludes = ImmutableList.copyOf(readMavenExcludes(decoder));
+            }
+            ImmutableList<? extends ModuleComponentArtifactMetadata> artifacts = readFiles(decoder, metadata.getId());
 
-            RealisedConfigurationMetadata configurationMetadata = new RealisedConfigurationMetadata(metadata.getId(), configurationName, configuration.isTransitive(), configuration.isVisible(),
-                hierarchy, configurationHelper.filterArtifacts(configurationName, hierarchy), configurationHelper.filterExcludes(hierarchy), attributes, capabilities);
+            RealisedConfigurationMetadata configurationMetadata = new RealisedConfigurationMetadata(
+                metadata.getId(),
+                configurationName,
+                transitive,
+                visible,
+                hierarchy,
+                artifacts,
+                excludes,
+                attributes,
+                capabilities,
+                false,
+                false,
+                isExternalVariant);
 
             ImmutableList.Builder<ModuleDependencyMetadata> builder = ImmutableList.builder();
             int dependenciesCount = decoder.readSmallInt();
@@ -152,9 +200,9 @@ public class RealisedIvyModuleResolveMetadataSerializationHelper extends Abstrac
         return new IvyDependencyDescriptor(requested, dynamicConstraintVersion, changing, transitive,  optional, configMappings, artifacts, excludes);
     }
 
-    private void writeIvyDependency(Encoder encoder, IvyDependencyDescriptor ivyDependency) throws IOException {
+    private void writeIvyDependency(Encoder encoder, IvyDependencyDescriptor ivyDependency, String configurationName, boolean configurationAddedByRule) throws IOException {
         getComponentSelectorSerializer().write(encoder, ivyDependency.getSelector());
-        writeDependencyConfigurationMapping(encoder, ivyDependency);
+        writeDependencyConfigurationMapping(encoder, ivyDependency, configurationName, configurationAddedByRule);
         writeArtifacts(encoder, ivyDependency.getDependencyArtifacts());
         writeExcludeRules(encoder, ivyDependency.getAllExcludes());
         encoder.writeString(ivyDependency.getDynamicConstraintVersion());
@@ -198,12 +246,19 @@ public class RealisedIvyModuleResolveMetadataSerializationHelper extends Abstrac
         return result;
     }
 
-    private void writeDependencyConfigurationMapping(Encoder encoder, IvyDependencyDescriptor dep) throws IOException {
+    private void writeDependencyConfigurationMapping(Encoder encoder, IvyDependencyDescriptor dep, String configurationName, boolean configurationAddedByRule) throws IOException {
         SetMultimap<String, String> confMappings = dep.getConfMappings();
-        encoder.writeSmallInt(confMappings.keySet().size());
+        int mappingCount = confMappings.keySet().size() + (configurationAddedByRule ? 1 : 0);
+        encoder.writeSmallInt(mappingCount);
         for (String conf : confMappings.keySet()) {
             encoder.writeString(conf);
             writeStringSet(encoder, confMappings.get(conf));
+        }
+        if (configurationAddedByRule) {
+            // since the dependencies are reconstructed from the serialized form which interprets the mappings,
+            // we have to make sure to also map from the new configuration.
+            encoder.writeString(configurationName);
+            writeStringSet(encoder, ImmutableSet.copyOf(confMappings.values()));
         }
     }
 

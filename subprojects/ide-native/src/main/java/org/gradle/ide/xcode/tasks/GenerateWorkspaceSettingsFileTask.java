@@ -18,14 +18,20 @@ package org.gradle.ide.xcode.tasks;
 
 import org.gradle.api.Incubating;
 import org.gradle.ide.xcode.tasks.internal.XcodeWorkspaceSettingsFile;
+import org.gradle.internal.Cast;
 import org.gradle.plugins.ide.api.PropertyListGeneratorTask;
+import org.gradle.work.DisableCachingByDefault;
 
 /**
- * Task for generating a workspace settings file.
+ * Task for generating a Xcode workspace settings file (e.g. {@code Foo.xcodeproj/project.xcworkspace/xcshareddata/WorkspaceSettings.xcsettings}).
  *
+ * <p>This task is used in conjunction with {@link org.gradle.ide.xcode.tasks.GenerateXcodeWorkspaceFileTask}.</p>
+ *
+ * @see org.gradle.ide.xcode.XcodeWorkspace
  * @since 4.2
  */
 @Incubating
+@DisableCachingByDefault(because = "Not made cacheable, yet")
 public class GenerateWorkspaceSettingsFileTask extends PropertyListGeneratorTask<XcodeWorkspaceSettingsFile> {
     @Override
     protected void configure(XcodeWorkspaceSettingsFile settingsFile) {
@@ -33,6 +39,6 @@ public class GenerateWorkspaceSettingsFileTask extends PropertyListGeneratorTask
 
     @Override
     protected XcodeWorkspaceSettingsFile create() {
-        return new XcodeWorkspaceSettingsFile(getPropertyListTransformer());
+        return new XcodeWorkspaceSettingsFile(Cast.uncheckedNonnullCast(getPropertyListTransformer()));
     }
 }

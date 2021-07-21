@@ -16,8 +16,6 @@
 package org.gradle.integtests.fixtures.publish.maven
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.integtests.fixtures.FeaturePreviewsFixture
-import org.gradle.integtests.fixtures.GradleMetadataResolveRunner
 import org.gradle.test.fixtures.ArtifactResolutionExpectationSpec
 import org.gradle.test.fixtures.GradleMetadataAwarePublishingSpec
 import org.gradle.test.fixtures.ModuleArtifact
@@ -31,12 +29,8 @@ import static org.gradle.integtests.fixtures.RepoScriptBlockUtil.mavenCentralRep
 
 abstract class AbstractMavenPublishIntegTest extends AbstractIntegrationSpec implements GradleMetadataAwarePublishingSpec {
 
-    def setup() {
-        prepare()
-    }
-
-    protected static MavenJavaModule javaLibrary(MavenFileModule mavenFileModule) {
-        return new MavenJavaModule(mavenFileModule)
+    protected static MavenJavaModule javaLibrary(MavenFileModule mavenFileModule, List<String> features = [MavenJavaModule.MAIN_FEATURE], boolean withDocumentation = false) {
+        return new MavenJavaModule(mavenFileModule, features, withDocumentation)
     }
 
     protected static MavenJavaPlatformModule javaPlatform(MavenFileModule mavenFileModule) {
@@ -44,7 +38,7 @@ abstract class AbstractMavenPublishIntegTest extends AbstractIntegrationSpec imp
     }
 
     void resolveArtifacts(Object dependencyNotation, @DelegatesTo(value = MavenArtifactResolutionExpectation, strategy = Closure.DELEGATE_FIRST) Closure<?> expectationSpec) {
-        MavenArtifactResolutionExpectation expectation = new MavenArtifactResolutionExpectation(dependencyNotation)
+        MavenArtifactResolutionExpectation expectation = new MavenArtifactResolutionExpectation(dependencyNotation, this)
         expectation.dependency = convertDependencyNotation(dependencyNotation)
         expectationSpec.resolveStrategy = Closure.DELEGATE_FIRST
         expectationSpec.delegate = expectation
@@ -70,13 +64,12 @@ abstract class AbstractMavenPublishIntegTest extends AbstractIntegrationSpec imp
         }
     }
 
-    private def doResolveArtifacts(ResolveParams params) {
+    def doResolveArtifacts(ResolveParams params) {
         // Replace the existing buildfile with one for resolving the published module
         settingsFile.text = "rootProject.name = 'resolve'"
-        FeaturePreviewsFixture.enableGradleMetadata(settingsFile)
         def attributes = params.variant == null ?
             "" :
-            """ 
+            """
     attributes {
         attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage.class, Usage.${params.variant}))
     }
@@ -109,9 +102,10 @@ abstract class AbstractMavenPublishIntegTest extends AbstractIntegrationSpec imp
         }
 
         def externalRepo = requiresExternalDependencies?mavenCentralRepositoryDefinition():''
-
-        buildFile.text = """import org.gradle.api.internal.artifacts.dsl.dependencies.PlatformSupport
-
+        def optional = params.optionalFeatureCapabilities.collect {
+            "resolve($dependencyNotation) { capabilities { requireCapability('$it') } }"
+        }.join('\n')
+        buildFile.text = """
             apply plugin: 'java-base' // to get the standard Java library derivation strategy
             configurations {
                 resolve {
@@ -119,22 +113,19 @@ abstract class AbstractMavenPublishIntegTest extends AbstractIntegrationSpec imp
                 }
             }
             repositories {
-                maven { 
+                maven {
                     url "${mavenRepo.uri}"
                     metadataSources {
                         ${params.resolveModuleMetadata?'gradleMetadata':'mavenPom'}()
+                        ${params.resolveModuleMetadata?'':'ignoreGradleMetadataRedirection()'}
                     }
                 }
                 ${externalRepo}
             }
 
             dependencies {
-               attributesSchema { 
-                getMatchingStrategy(PlatformSupport.COMPONENT_CATEGORY)
-                   .disambiguationRules
-                   .add(PlatformSupport.PreferRegularPlatform)
-               }
                resolve($dependencyNotation) $extraArtifacts
+               $optional
             }
 
             task resolveArtifacts(type: Sync) {
@@ -162,13 +153,18 @@ abstract class AbstractMavenPublishIntegTest extends AbstractIntegrationSpec imp
         String classifier
         String ext
         String variant
-        boolean resolveModuleMetadata = GradleMetadataResolveRunner.isExperimentalResolveBehaviorEnabled()
+        boolean resolveModuleMetadata
         boolean expectFailure
+
+        List<String> optionalFeatureCapabilities = []
     }
 
     class MavenArtifactResolutionExpectation extends ResolveParams implements ArtifactResolutionExpectationSpec<MavenModule> {
 
-        MavenArtifactResolutionExpectation(Object dependencyNotation) {
+        private final AbstractMavenPublishIntegTest test
+
+        MavenArtifactResolutionExpectation(Object dependencyNotation, AbstractMavenPublishIntegTest test) {
+            this.test = test
             if (dependencyNotation instanceof MavenModule) {
                 module = dependencyNotation
             }
@@ -180,8 +176,8 @@ abstract class AbstractMavenPublishIntegTest extends AbstractIntegrationSpec imp
         }
 
         void validate() {
-            singleValidation(true, withModuleMetadataSpec)
             singleValidation(false, withoutModuleMetadataSpec)
+            singleValidation(true, withModuleMetadataSpec)
         }
 
         void singleValidation(boolean withModuleMetadata, SingleArtifactResolutionResultSpec expectationSpec) {
@@ -193,10 +189,11 @@ abstract class AbstractMavenPublishIntegTest extends AbstractIntegrationSpec imp
                 additionalArtifacts: additionalArtifacts?.asImmutable(),
                 variant: variant,
                 resolveModuleMetadata: withModuleMetadata,
-                expectFailure: !expectationSpec.expectSuccess
+                expectFailure: !expectationSpec.expectSuccess,
+                optionalFeatureCapabilities: optionalFeatureCapabilities,
             )
             println "Checking ${additionalArtifacts?'additional artifacts':'artifacts'} when resolving ${withModuleMetadata?'with':'without'} Gradle module metadata"
-            def resolutionResult = doResolveArtifacts(params)
+            def resolutionResult = test.doResolveArtifacts(params)
             expectationSpec.with {
                 if (expectSuccess) {
                     assert resolutionResult == expectedFileNames

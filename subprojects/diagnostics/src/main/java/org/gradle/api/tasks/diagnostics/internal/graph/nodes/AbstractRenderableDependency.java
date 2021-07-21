@@ -26,15 +26,6 @@ import java.util.List;
 import java.util.Set;
 
 public abstract class AbstractRenderableDependency implements RenderableDependency {
-    @Override
-    public Object getId() {
-        return null;
-    }
-
-    @Override
-    public String getName() {
-        return null;
-    }
 
     @Override
     public String getDescription() {
@@ -42,8 +33,8 @@ public abstract class AbstractRenderableDependency implements RenderableDependen
     }
 
     @Override
-    public ResolvedVariantResult getResolvedVariant() {
-        return null;
+    public List<ResolvedVariantResult> getResolvedVariants() {
+        return Collections.emptyList();
     }
 
     @Override

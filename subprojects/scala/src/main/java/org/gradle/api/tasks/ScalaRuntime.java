@@ -15,13 +15,20 @@
  */
 package org.gradle.api.tasks;
 
+import com.google.common.base.Joiner;
+import com.google.common.base.Splitter;
 import org.gradle.api.Buildable;
 import org.gradle.api.GradleException;
 import org.gradle.api.Project;
+import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.file.FileCollection;
 import org.gradle.api.internal.artifacts.dependencies.DefaultExternalModuleDependency;
+import org.gradle.api.internal.file.collections.FailingFileCollection;
 import org.gradle.api.internal.file.collections.LazilyInitializedFileCollection;
+import org.gradle.api.internal.project.ProjectInternal;
 import org.gradle.api.internal.tasks.TaskDependencyResolveContext;
+import org.gradle.api.plugins.jvm.internal.JvmEcosystemUtilities;
+import org.gradle.api.plugins.scala.ScalaPluginExtension;
 
 import javax.annotation.Nullable;
 import java.io.File;
@@ -35,17 +42,19 @@ import java.util.regex.Pattern;
  * <p>Example usage:
  *
  * <pre class='autoTested'>
- *     apply plugin: "scala"
+ *     plugins {
+ *         id 'scala'
+ *     }
  *
  *     repositories {
  *         mavenCentral()
  *     }
  *
  *     dependencies {
- *         compile "org.scala-lang:scala-library:2.10.1"
+ *         implementation "org.scala-lang:scala-library:2.10.1"
  *     }
  *
- *     def scalaClasspath = scalaRuntime.inferScalaClasspath(configurations.compile)
+ *     def scalaClasspath = scalaRuntime.inferScalaClasspath(configurations.compileClasspath)
  *     // The returned class path can be used to configure the 'scalaClasspath' property of tasks
  *     // such as 'ScalaCompile' or 'ScalaDoc', or to execute these and other Scala tools directly.
  * </pre>
@@ -54,9 +63,11 @@ public class ScalaRuntime {
     private static final Pattern SCALA_JAR_PATTERN = Pattern.compile("scala-(\\w.*?)-(\\d.*).jar");
 
     private final Project project;
+    private final JvmEcosystemUtilities jvmEcosystemUtilities;
 
     public ScalaRuntime(Project project) {
         this.project = project;
+        this.jvmEcosystemUtilities = ((ProjectInternal) project).getServices().get(JvmEcosystemUtilities.class);
     }
 
     /**
@@ -79,10 +90,14 @@ public class ScalaRuntime {
 
             @Override
             public FileCollection createDelegate() {
-                if (project.getRepositories().isEmpty()) {
-                    throw new GradleException(String.format("Cannot infer Scala class path because no repository is declared in %s", project));
+                try {
+                    return inferScalaClasspath();
+                } catch (RuntimeException e) {
+                    return new FailingFileCollection(getDisplayName(), e);
                 }
+            }
 
+            private Configuration inferScalaClasspath() {
                 File scalaLibraryJar = findScalaJar(classpath, "library");
                 if (scalaLibraryJar == null) {
                     throw new GradleException(String.format("Cannot infer Scala class path because no Scala library Jar was found. "
@@ -94,7 +109,21 @@ public class ScalaRuntime {
                     throw new AssertionError(String.format("Unexpectedly failed to parse version of Scala Jar file: %s in %s", scalaLibraryJar, project));
                 }
 
-                return project.getConfigurations().detachedConfiguration(new DefaultExternalModuleDependency("org.scala-lang", "scala-compiler", scalaVersion));
+                String zincVersion = project.getExtensions().getByType(ScalaPluginExtension.class).getZincVersion().get();
+
+                String scalaMajorMinorVersion = Joiner.on('.').join(Splitter.on('.').splitToList(scalaVersion).subList(0, 2));
+                DefaultExternalModuleDependency compilerBridgeJar = new DefaultExternalModuleDependency("org.scala-sbt", "compiler-bridge_" + scalaMajorMinorVersion, zincVersion);
+                compilerBridgeJar.setTransitive(false);
+                compilerBridgeJar.artifact(artifact -> {
+                    artifact.setClassifier("sources");
+                    artifact.setType("jar");
+                    artifact.setExtension("jar");
+                    artifact.setName(compilerBridgeJar.getName());
+                });
+                DefaultExternalModuleDependency compilerInterfaceJar = new DefaultExternalModuleDependency("org.scala-sbt", "compiler-interface", zincVersion);
+                Configuration scalaRuntimeClasspath = project.getConfigurations().detachedConfiguration(new DefaultExternalModuleDependency("org.scala-lang", "scala-compiler", scalaVersion), compilerBridgeJar, compilerInterfaceJar);
+                jvmEcosystemUtilities.configureAsRuntimeClasspath(scalaRuntimeClasspath);
+                return scalaRuntimeClasspath;
             }
 
             // let's override this so that delegate isn't created at autowiring time (which would mean on every build)

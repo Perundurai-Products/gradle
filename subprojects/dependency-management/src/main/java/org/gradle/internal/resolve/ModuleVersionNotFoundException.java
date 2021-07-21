@@ -19,6 +19,7 @@ import com.google.common.collect.Lists;
 import org.gradle.api.artifacts.ModuleVersionIdentifier;
 import org.gradle.api.artifacts.component.ComponentSelector;
 import org.gradle.api.artifacts.component.ModuleComponentSelector;
+import org.gradle.internal.Factory;
 import org.gradle.internal.logging.text.TreeFormatter;
 
 import java.util.Collection;
@@ -29,7 +30,7 @@ public class ModuleVersionNotFoundException extends ModuleVersionResolveExceptio
      * This is used by {@link ModuleVersionResolveException#withIncomingPaths(java.util.Collection)}.
      */
     @SuppressWarnings("UnusedDeclaration")
-    public ModuleVersionNotFoundException(ComponentSelector selector, String message) {
+    public ModuleVersionNotFoundException(ComponentSelector selector, Factory<String> message) {
         super(selector, message);
     }
 
@@ -45,32 +46,34 @@ public class ModuleVersionNotFoundException extends ModuleVersionResolveExceptio
         super(selector, format(selector, attemptedLocations));
     }
 
-    private static String format(ModuleComponentSelector selector, Collection<String> locations, Collection<String> unmatchedVersions, Collection<RejectedVersion> rejectedVersions) {
-        TreeFormatter builder = new TreeFormatter();
-        if (unmatchedVersions.isEmpty() && rejectedVersions.isEmpty()) {
-            builder.node(String.format("Could not find any matches for %s as no versions of %s:%s are available.", selector, selector.getGroup(), selector.getModule()));
-        } else {
-            builder.node(String.format("Could not find any version that matches %s.", selector));
-            if (!unmatchedVersions.isEmpty()) {
-                builder.node("Versions that do not match");
-                appendSizeLimited(builder, unmatchedVersions);
-            }
-            if (!rejectedVersions.isEmpty()) {
-                Collection<RejectedVersion> byRule = Lists.newArrayListWithExpectedSize(rejectedVersions.size());
-                Collection<RejectedVersion> byAttributes = Lists.newArrayListWithExpectedSize(rejectedVersions.size());
-                mapRejections(rejectedVersions, byRule, byAttributes);
-                if (!byRule.isEmpty()) {
-                    builder.node("Versions rejected by component selection rules");
-                    appendSizeLimited(builder, byRule);
+    private static Factory<String> format(ModuleComponentSelector selector, Collection<String> locations, Collection<String> unmatchedVersions, Collection<RejectedVersion> rejectedVersions) {
+        return () -> {
+            TreeFormatter builder = new TreeFormatter();
+            if (unmatchedVersions.isEmpty() && rejectedVersions.isEmpty()) {
+                builder.node(String.format("Could not find any matches for %s as no versions of %s:%s are available.", selector, selector.getGroup(), selector.getModule()));
+            } else {
+                builder.node(String.format("Could not find any version that matches %s.", selector));
+                if (!unmatchedVersions.isEmpty()) {
+                    builder.node("Versions that do not match");
+                    appendSizeLimited(builder, unmatchedVersions);
                 }
-                if (!byAttributes.isEmpty()) {
-                    builder.node("Versions rejected by attribute matching");
-                    appendSizeLimited(builder, byAttributes);
+                if (!rejectedVersions.isEmpty()) {
+                    Collection<RejectedVersion> byRule = Lists.newArrayListWithExpectedSize(rejectedVersions.size());
+                    Collection<RejectedVersion> byAttributes = Lists.newArrayListWithExpectedSize(rejectedVersions.size());
+                    mapRejections(rejectedVersions, byRule, byAttributes);
+                    if (!byRule.isEmpty()) {
+                        builder.node("Versions rejected by component selection rules");
+                        appendSizeLimited(builder, byRule);
+                    }
+                    if (!byAttributes.isEmpty()) {
+                        builder.node("Versions rejected by attribute matching");
+                        appendSizeLimited(builder, byAttributes);
+                    }
                 }
             }
-        }
-        addLocations(builder, locations);
-        return builder.toString();
+            addLocations(builder, locations);
+            return builder.toString();
+        };
     }
 
     private static void mapRejections(Collection<RejectedVersion> in, Collection<RejectedVersion> outByRule, Collection<RejectedVersion> outByAttributes) {
@@ -83,18 +86,22 @@ public class ModuleVersionNotFoundException extends ModuleVersionResolveExceptio
         }
     }
 
-    private static String format(ModuleVersionIdentifier id, Collection<String> locations) {
-        TreeFormatter builder = new TreeFormatter();
-        builder.node(String.format("Could not find %s.", id));
-        addLocations(builder, locations);
-        return builder.toString();
+    private static Factory<String> format(ModuleVersionIdentifier id, Collection<String> locations) {
+        return () -> {
+            TreeFormatter builder = new TreeFormatter();
+            builder.node(String.format("Could not find %s.", id));
+            addLocations(builder, locations);
+            return builder.toString();
+        };
     }
 
-    private static String format(ModuleComponentSelector selector, Collection<String> locations) {
-        TreeFormatter builder = new TreeFormatter();
-        builder.node(String.format("Could not find any version that matches %s.", selector));
-        addLocations(builder, locations);
-        return builder.toString();
+    private static Factory<String> format(ModuleComponentSelector selector, Collection<String> locations) {
+        return () -> {
+            TreeFormatter builder = new TreeFormatter();
+            builder.node(String.format("Could not find any version that matches %s.", selector));
+            addLocations(builder, locations);
+            return builder.toString();
+        };
     }
 
     private static void appendSizeLimited(TreeFormatter builder, Collection<?> values) {
@@ -125,5 +132,25 @@ public class ModuleVersionNotFoundException extends ModuleVersionResolveExceptio
             builder.node(location);
         }
         builder.endChildren();
+        tryHintAboutArtifactSource(builder, locations);
+    }
+
+    // This method should ideally use more data to figure out if the message should be displayed
+    // or not. In particular, the ivy patterns can make it difficult to find out if an Ivy artifact
+    // source should be configured. At this stage, this information is lost, so we do a best effort
+    // based on the file locations.
+    private static void tryHintAboutArtifactSource(TreeFormatter builder, Collection<String> locations) {
+        if (locations.size() == 1) {
+            String singleLocation = locations.iterator().next();
+            boolean isPom = singleLocation.endsWith(".pom");
+            boolean isIvy = singleLocation.contains("ivy-") && singleLocation.endsWith(".xml");
+            boolean isModule = singleLocation.endsWith(".module");
+            String format = isPom ? "Maven POM" : (isIvy ? "ivy.xml" : (isModule ? "Gradle module" : null));
+            if (format != null) {
+                builder.node(
+                    String.format("If the artifact you are trying to retrieve can be found in the repository but without metadata in '%s' format, you need to adjust the 'metadataSources { ... }' of the repository declaration.", format)
+                );
+            }
+        }
     }
 }

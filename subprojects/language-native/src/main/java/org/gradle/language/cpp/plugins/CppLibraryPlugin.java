@@ -16,13 +16,11 @@
 
 package org.gradle.language.cpp.plugins;
 
-import org.gradle.api.Incubating;
 import org.gradle.api.Plugin;
 import org.gradle.api.Project;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.internal.artifacts.dsl.LazyPublishArtifact;
 import org.gradle.api.internal.attributes.ImmutableAttributesFactory;
-import org.gradle.api.internal.file.FileOperations;
 import org.gradle.api.model.ObjectFactory;
 import org.gradle.api.provider.Provider;
 import org.gradle.api.provider.ProviderFactory;
@@ -35,11 +33,13 @@ import org.gradle.language.cpp.CppPlatform;
 import org.gradle.language.cpp.CppSharedLibrary;
 import org.gradle.language.cpp.CppStaticLibrary;
 import org.gradle.language.cpp.internal.DefaultCppLibrary;
+import org.gradle.language.cpp.internal.DefaultCppPlatform;
 import org.gradle.language.internal.NativeComponentFactory;
 import org.gradle.language.nativeplatform.internal.Dimensions;
 import org.gradle.language.nativeplatform.internal.toolchains.ToolChainSelector;
 import org.gradle.nativeplatform.Linkage;
 import org.gradle.nativeplatform.TargetMachineFactory;
+import org.gradle.nativeplatform.platform.internal.Architectures;
 import org.gradle.nativeplatform.platform.internal.DefaultNativePlatform;
 
 import javax.inject.Inject;
@@ -60,7 +60,6 @@ import static org.gradle.language.nativeplatform.internal.Dimensions.useHostAsDe
  *
  * @since 4.1
  */
-@Incubating
 public class CppLibraryPlugin implements Plugin<Project> {
     private final NativeComponentFactory componentFactory;
     private final ToolChainSelector toolChainSelector;
@@ -68,7 +67,7 @@ public class CppLibraryPlugin implements Plugin<Project> {
     private final TargetMachineFactory targetMachineFactory;
 
     /**
-     * Injects a {@link FileOperations} instance.
+     * CppLibraryPlugin.
      *
      * @since 4.2
      */
@@ -114,7 +113,7 @@ public class CppLibraryPlugin implements Plugin<Project> {
             }
 
             private Stream<CppBinary> getDebugSharedHostStream() {
-                return getDebugSharedStream().filter(binary -> binary.getTargetPlatform().getArchitecture().equals(DefaultNativePlatform.host().getArchitecture()));
+                return getDebugSharedStream().filter(binary -> Architectures.forInput(binary.getTargetMachine().getArchitecture().getName()).equals(DefaultNativePlatform.host().getArchitecture()));
             }
 
             private Stream<CppBinary> getDebugStaticStream() {
@@ -122,7 +121,7 @@ public class CppLibraryPlugin implements Plugin<Project> {
             }
 
             private Stream<CppBinary> getDebugStaticHostStream() {
-                return getDebugStaticStream().filter(binary -> binary.getTargetPlatform().getArchitecture().equals(DefaultNativePlatform.host().getArchitecture()));
+                return getDebugStaticStream().filter(binary -> Architectures.forInput(binary.getTargetMachine().getArchitecture().getName()).equals(DefaultNativePlatform.host().getArchitecture()));
             }
         }));
 
@@ -136,7 +135,7 @@ public class CppLibraryPlugin implements Plugin<Project> {
                     providers.provider(() -> project.getGroup().toString()), providers.provider(() -> project.getVersion().toString()),
                     variantIdentity -> {
                         if (tryToBuildOnHost(variantIdentity)) {
-                            ToolChainSelector.Result<CppPlatform> result = toolChainSelector.select(CppPlatform.class, variantIdentity.getTargetMachine());
+                            ToolChainSelector.Result<CppPlatform> result = toolChainSelector.select(CppPlatform.class, new DefaultCppPlatform(variantIdentity.getTargetMachine()));
 
                             if (variantIdentity.getLinkage().equals(Linkage.SHARED)) {
                                 library.addSharedLibrary(variantIdentity, result.getTargetPlatform(), result.getToolChain(), result.getPlatformToolProvider());

@@ -21,12 +21,13 @@ import org.gradle.cache.FileLockManager;
 import org.gradle.cache.PersistentCache;
 import org.gradle.cache.PersistentIndexedCache;
 import org.gradle.cache.PersistentIndexedCacheParameters;
+import org.gradle.internal.Cast;
 import org.gradle.internal.event.ListenerManager;
 import org.gradle.internal.execution.OutputChangeListener;
 import org.gradle.internal.hash.HashCode;
 import org.gradle.internal.serialize.HashCodeSerializer;
 import org.gradle.internal.serialize.Serializer;
-import org.gradle.internal.snapshot.FileSystemSnapshotter;
+import org.gradle.internal.vfs.FileSystemAccess;
 
 import javax.annotation.Nullable;
 import java.io.Closeable;
@@ -40,20 +41,20 @@ import static org.gradle.cache.internal.filelock.LockOptionsBuilder.mode;
 
 public class DefaultFileContentCacheFactory implements FileContentCacheFactory, Closeable {
     private final ListenerManager listenerManager;
-    private final FileSystemSnapshotter fileSystemSnapshotter;
+    private final FileSystemAccess fileSystemAccess;
     private final InMemoryCacheDecoratorFactory inMemoryCacheDecoratorFactory;
     private final PersistentCache cache;
     private final HashCodeSerializer hashCodeSerializer = new HashCodeSerializer();
-    private final ConcurrentMap<String, DefaultFileContentCache<?>> caches = new ConcurrentHashMap<String, DefaultFileContentCache<?>>();
+    private final ConcurrentMap<String, DefaultFileContentCache<?>> caches = new ConcurrentHashMap<>();
 
-    public DefaultFileContentCacheFactory(ListenerManager listenerManager, FileSystemSnapshotter fileSystemSnapshotter, CacheRepository cacheRepository, InMemoryCacheDecoratorFactory inMemoryCacheDecoratorFactory, @Nullable Object scope) {
+    public DefaultFileContentCacheFactory(ListenerManager listenerManager, FileSystemAccess fileSystemAccess, CacheRepository cacheRepository, InMemoryCacheDecoratorFactory inMemoryCacheDecoratorFactory, @Nullable Object scope) {
         this.listenerManager = listenerManager;
-        this.fileSystemSnapshotter = fileSystemSnapshotter;
+        this.fileSystemAccess = fileSystemAccess;
         this.inMemoryCacheDecoratorFactory = inMemoryCacheDecoratorFactory;
         cache = cacheRepository
             .cache(scope, "fileContent")
             .withDisplayName("file content cache")
-            .withLockOptions(mode(FileLockManager.LockMode.None)) // Lock on demand
+            .withLockOptions(mode(FileLockManager.LockMode.OnDemand)) // Lock on demand
             .open();
     }
 
@@ -68,10 +69,10 @@ public class DefaultFileContentCacheFactory implements FileContentCacheFactory, 
             .withCacheDecorator(inMemoryCacheDecoratorFactory.decorator(normalizedCacheSize, true));
         PersistentIndexedCache<HashCode, V> store = cache.createCache(parameters);
 
-        DefaultFileContentCache<V> cache = (DefaultFileContentCache<V>) caches.get(name);
+        DefaultFileContentCache<V> cache = Cast.uncheckedCast(caches.get(name));
         if (cache == null) {
-            cache = new DefaultFileContentCache<V>(name, fileSystemSnapshotter, store, calculator);
-            DefaultFileContentCache<V> existing = (DefaultFileContentCache<V>) caches.putIfAbsent(name, cache);
+            cache = new DefaultFileContentCache<>(name, fileSystemAccess, store, calculator);
+            DefaultFileContentCache<V> existing = Cast.uncheckedCast(caches.putIfAbsent(name, cache));
             if (existing == null) {
                 listenerManager.addListener(cache);
             } else {
@@ -89,48 +90,34 @@ public class DefaultFileContentCacheFactory implements FileContentCacheFactory, 
      * The second level indexes on the hash of file content and contains the value that was calculated from a file with the given hash.
      */
     private static class DefaultFileContentCache<V> implements FileContentCache<V>, OutputChangeListener {
-        private final Map<File, V> cache = new ConcurrentHashMap<File, V>();
+        private final Map<File, V> locationCache = new ConcurrentHashMap<>();
         private final String name;
-        private final FileSystemSnapshotter fileSystemSnapshotter;
+        private final FileSystemAccess fileSystemAccess;
         private final PersistentIndexedCache<HashCode, V> contentCache;
         private final Calculator<? extends V> calculator;
 
-        DefaultFileContentCache(String name, FileSystemSnapshotter fileSystemSnapshotter, PersistentIndexedCache<HashCode, V> contentCache, Calculator<? extends V> calculator) {
+        DefaultFileContentCache(String name, FileSystemAccess fileSystemAccess, PersistentIndexedCache<HashCode, V> contentCache, Calculator<? extends V> calculator) {
             this.name = name;
-            this.fileSystemSnapshotter = fileSystemSnapshotter;
+            this.fileSystemAccess = fileSystemAccess;
             this.contentCache = contentCache;
             this.calculator = calculator;
         }
 
         @Override
-        public void beforeOutputChange() {
-            // A very dumb strategy for invalidating cache
-            cache.clear();
-        }
-
-        @Override
         public void beforeOutputChange(Iterable<String> affectedOutputPaths) {
-            beforeOutputChange();
+            // A very dumb strategy for invalidating cache
+            locationCache.clear();
         }
 
         @Override
         public V get(File file) {
-            // TODO - don't calculate the same value concurrently
-            V value = cache.get(file);
-            if (value == null) {
-                HashCode contentHash = fileSystemSnapshotter.getRegularFileContentHash(file);
-                if (contentHash != null) {
-                    value = contentCache.get(contentHash);
-                    if (value == null) {
-                        value = calculator.calculate(file, true);
-                        contentCache.put(contentHash, value);
-                    }
-                } else {
-                    value = calculator.calculate(file, false);
-                }
-                cache.put(file, value);
-            }
-            return value;
+            return locationCache.computeIfAbsent(file,
+                location -> fileSystemAccess.readRegularFileContentHash(
+                    location.getAbsolutePath(),
+                    contentHash -> contentCache.get(contentHash, key -> calculator.calculate(location, true))
+                ).orElseGet(
+                    () -> calculator.calculate(location, false)
+                ));
         }
 
         private void assertStoredIn(PersistentIndexedCache<HashCode, V> store) {

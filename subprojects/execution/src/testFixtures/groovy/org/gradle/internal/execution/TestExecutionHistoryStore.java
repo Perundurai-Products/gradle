@@ -25,6 +25,7 @@ import org.gradle.internal.execution.history.impl.DefaultAfterPreviousExecutionS
 import org.gradle.internal.execution.history.impl.SerializableFileCollectionFingerprint;
 import org.gradle.internal.fingerprint.CurrentFileCollectionFingerprint;
 import org.gradle.internal.fingerprint.FileCollectionFingerprint;
+import org.gradle.internal.snapshot.FileSystemSnapshot;
 import org.gradle.internal.snapshot.ValueSnapshot;
 import org.gradle.internal.snapshot.impl.ImplementationSnapshot;
 
@@ -45,14 +46,23 @@ public class TestExecutionHistoryStore implements ExecutionHistoryStore {
     }
 
     @Override
-    public void store(String key, OriginMetadata originMetadata, ImplementationSnapshot implementation, ImmutableList<ImplementationSnapshot> additionalImplementations, ImmutableSortedMap<String, ValueSnapshot> inputProperties, ImmutableSortedMap<String, CurrentFileCollectionFingerprint> inputFileProperties, ImmutableSortedMap<String, CurrentFileCollectionFingerprint> outputFileProperties, boolean successful) {
+    public void store(
+        String key,
+        OriginMetadata originMetadata,
+        ImplementationSnapshot implementation,
+        ImmutableList<ImplementationSnapshot> additionalImplementations,
+        ImmutableSortedMap<String, ValueSnapshot> inputProperties,
+        ImmutableSortedMap<String, CurrentFileCollectionFingerprint> inputFileProperties,
+        ImmutableSortedMap<String, FileSystemSnapshot> outputFileProperties,
+        boolean successful
+    ) {
         executionHistory.put(key, new DefaultAfterPreviousExecutionState(
             originMetadata,
             implementation,
             additionalImplementations,
             inputProperties,
             prepareForSerialization(inputFileProperties),
-            prepareForSerialization(outputFileProperties),
+            outputFileProperties,
             successful
         ));
     }
@@ -63,10 +73,10 @@ public class TestExecutionHistoryStore implements ExecutionHistoryStore {
     }
 
     private static ImmutableSortedMap<String, FileCollectionFingerprint> prepareForSerialization(ImmutableSortedMap<String, CurrentFileCollectionFingerprint> fingerprints) {
-        return copyOfSorted(transformValues(fingerprints, value -> {
-            //noinspection ConstantConditions
-            return new SerializableFileCollectionFingerprint(value.getFingerprints(), value.getRootHashes());
-        }));
+        return copyOfSorted(transformValues(
+            fingerprints,
+            value -> new SerializableFileCollectionFingerprint(value.getFingerprints(), value.getRootHashes(), value.getStrategyConfigurationHash())
+        ));
     }
 
     public Map<String, AfterPreviousExecutionState> getExecutionHistory() {

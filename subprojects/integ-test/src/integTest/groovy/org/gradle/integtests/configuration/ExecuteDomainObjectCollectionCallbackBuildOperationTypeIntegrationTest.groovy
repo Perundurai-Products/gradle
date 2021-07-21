@@ -47,7 +47,7 @@ class ExecuteDomainObjectCollectionCallbackBuildOperationTypeIntegrationTest ext
         """
 
         when:
-        run('tasks')
+        run('help')
 
         then:
         def creatingBuildOpParent = creatingBuildOpParentQuery(ops)
@@ -105,11 +105,7 @@ class ExecuteDomainObjectCollectionCallbackBuildOperationTypeIntegrationTest ext
         """
 
         when:
-        if (containerName == 'findbugs reports') {
-            executer.expectDeprecationWarnings(1)
-        }
-
-        run('tasks')
+        run('help')
 
         then:
         def callbackPluginApplication = ops.only(ApplyPluginBuildOperationType, { it.details.pluginClass == 'CallbackPlugin' })
@@ -150,19 +146,18 @@ class ExecuteDomainObjectCollectionCallbackBuildOperationTypeIntegrationTest ext
         "matching{it.name == 'foo'}.all"     | 'distributions'            | ['distribution']               | 'distributions'                               | createFooDistributions()
         "matching{true}.all" | 'test reports'            | ['java-library']               | 'test.reports'                           | ''
         "matching{true}.all" | 'checkstyle reports'      | ['java-library', 'checkstyle'] | 'checkstyleMain.reports'                 | ''
-        "matching{true}.all" | 'findbugs reports'        | ['java-library', 'findbugs']   | 'findbugsMain.reports'                   | ''
         "matching{true}.all" | 'pmd reports'             | ['java-library', 'pmd']        | 'pmdMain.reports'                        | ''
         "matching{true}.all" | 'codenarc reports'        | ['groovy', 'codenarc']         | 'codenarcMain.reports'                   | ''
         "matching{true}.all" | 'html dependency reports' | ['project-report']             | 'htmlDependencyReport.reports'           | ''
-        "matching{true}.all" | 'build dasboard reports'  | ['build-dashboard']            | 'buildDashboard.reports'                 | ''
+        "matching{true}.all" | 'build dashboard reports' | ['build-dashboard']            | 'buildDashboard.reports'                 | ''
         "matching{true}.all" | 'jacoco reports'          | ['java-library', 'jacoco']     | 'jacocoTestReport.reports'               | ''
     }
 
     def "task registration callback action executions emit build operation with script applicationId"() {
         given:
         file('registration.gradle') << """
-            tasks.register('foo') { 
-                println 'task registration action' 
+            tasks.register('foo') {
+                println 'task registration action'
             }
         """
         buildFile << """
@@ -173,21 +168,21 @@ class ExecuteDomainObjectCollectionCallbackBuildOperationTypeIntegrationTest ext
         run('foo')
 
         then:
-        def resgisterCallbackBuildOp = ops.only(ExecuteDomainObjectCollectionCallbackBuildOperationType)
+        def registerCallbackBuildOp = ops.only(ExecuteDomainObjectCollectionCallbackBuildOperationType)
         def registrationScriptApplication = ops.only(ApplyScriptPluginBuildOperationType, { it.details.file.endsWith('registration.gradle') })
-        assert registrationScriptApplication.details.applicationId == resgisterCallbackBuildOp.details.applicationId
+        assert registrationScriptApplication.details.applicationId == registerCallbackBuildOp.details.applicationId
     }
 
     def "task registration callback action executions emit build operation with plugin applicationId"() {
         given:
         file('registration.gradle') << """
-           
+
         """
         buildFile << """
             class RegisterPlugin implements Plugin<Project> {
                 void apply(Project p) {
-                    p.tasks.register('foo') { 
-                        println 'task registration action' 
+                    p.tasks.register('foo') {
+                        println 'task registration action'
                     }
                 }
             }
@@ -206,9 +201,9 @@ class ExecuteDomainObjectCollectionCallbackBuildOperationTypeIntegrationTest ext
     def "nested container callbacks emit build operation with application id"() {
         given:
         file('registration.gradle') << """
-           
+
         """
-        buildFile << """
+        buildFile """
             class CallbackPlugin implements Plugin<Project> {
                 void apply(Project p) {
                     p.plugins.withType(RegisterPlugin) {
@@ -219,11 +214,11 @@ class ExecuteDomainObjectCollectionCallbackBuildOperationTypeIntegrationTest ext
                     }
                 }
             }
-            
+
             class RegisterPlugin implements Plugin<Project> {
                void apply(Project p) {
-                    p.tasks.register('foo') { 
-                        println 'task registration callback' 
+                    p.tasks.register('foo') {
+                        println 'task registration callback'
                     }
                 }
             }
@@ -232,7 +227,7 @@ class ExecuteDomainObjectCollectionCallbackBuildOperationTypeIntegrationTest ext
         """
 
         when:
-        run('tasks')
+        run('help')
 
         then:
         def registerPluginApplication = ops.only(ApplyPluginBuildOperationType, { it.details.pluginClass == 'RegisterPlugin' })
@@ -263,13 +258,13 @@ class ExecuteDomainObjectCollectionCallbackBuildOperationTypeIntegrationTest ext
             apply from:'script.gradle'
             class FooPlugin implements Plugin<Project> { void apply(Project p) {} }
             class BarPlugin implements Plugin<Project> { void apply(Project p) {} }
-            
+
             ${domainObjectCreation('foo')}
             ${domainObjectCreation('bar')}
         """
 
         when:
-        run('tasks')
+        run('help')
 
         then:
         def scriptPluginApplication = ops.only(ApplyScriptPluginBuildOperationType, { it.details.file.endsWith('script.gradle') })
@@ -287,9 +282,9 @@ class ExecuteDomainObjectCollectionCallbackBuildOperationTypeIntegrationTest ext
     def "container callbacks registered from lifecycle listener emit build operation with application id"() {
         given:
         file('registration.gradle') << """
-           
+
         """
-        buildFile << """
+        buildFile """
             class CallbackPlugin implements Plugin<Project> {
                 void apply(Project p) {
                     p.afterEvaluate {
@@ -300,7 +295,7 @@ class ExecuteDomainObjectCollectionCallbackBuildOperationTypeIntegrationTest ext
                     }
                 }
             }
-            
+
             class RegisterPlugin implements Plugin<Project> {
                void apply(Project p) {
                     p.repositories.mavenCentral()
@@ -311,7 +306,7 @@ class ExecuteDomainObjectCollectionCallbackBuildOperationTypeIntegrationTest ext
         """
 
         when:
-        run('tasks')
+        run('help')
 
         then:
         def callbackPluginApplication = ops.only(ApplyPluginBuildOperationType, { it.details.pluginClass == 'CallbackPlugin' })
@@ -343,17 +338,13 @@ class ExecuteDomainObjectCollectionCallbackBuildOperationTypeIntegrationTest ext
         """
         buildFile << """
             buildscript {
-                repositories {
-                    mavenCentral()
-                }
+                ${mavenCentralRepository()}
             }
-            repositories {
-                mavenCentral()
-            }
+            ${mavenCentralRepository()}
         """
 
         when:
-        run('tasks')
+        run('help')
 
         then:
         def settingsScriptApplicationId = ops.only(ApplyScriptPluginBuildOperationType, { it.details.file.endsWith('settings.gradle') })
@@ -382,17 +373,17 @@ class ExecuteDomainObjectCollectionCallbackBuildOperationTypeIntegrationTest ext
 
         buildFile << """
             apply from: 'callback.gradle'
-            
+
             repositories {
                 mavenCentral()
             }
-            
+
             configurations.foo.resolve()
-            
+
         """
 
         when:
-        run('tasks')
+        run('help')
 
         then:
         def callbackScriptApplicationId = ops.only(ApplyScriptPluginBuildOperationType, { it.details.file.endsWith('callback.gradle') })
@@ -449,7 +440,7 @@ class ExecuteDomainObjectCollectionCallbackBuildOperationTypeIntegrationTest ext
 
     void callbackScript(String containerAccess, String callbackName) {
         file("callbackScript.gradle") << """
-        
+
         ${containerAccess}.${callbackName} {
             println "script callback from callbackScriptPlugin.gradle for \$it"
         }

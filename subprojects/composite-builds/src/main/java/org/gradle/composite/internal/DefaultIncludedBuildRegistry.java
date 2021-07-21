@@ -16,57 +16,63 @@
 
 package org.gradle.composite.internal;
 
-import com.google.common.collect.LinkedHashMultimap;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
-import com.google.common.collect.SetMultimap;
+import com.google.common.base.MoreObjects;
 import org.gradle.api.GradleException;
 import org.gradle.api.artifacts.component.BuildIdentifier;
 import org.gradle.api.internal.BuildDefinition;
+import org.gradle.api.internal.GradleInternal;
 import org.gradle.api.internal.SettingsInternal;
 import org.gradle.api.internal.artifacts.DefaultBuildIdentifier;
-import org.gradle.api.internal.project.ProjectStateRegistry;
-import org.gradle.initialization.GradleLauncherFactory;
+import org.gradle.internal.build.BuildAddedListener;
 import org.gradle.internal.build.BuildState;
 import org.gradle.internal.build.BuildStateRegistry;
+import org.gradle.internal.build.IncludedBuildFactory;
 import org.gradle.internal.build.IncludedBuildState;
 import org.gradle.internal.build.NestedRootBuild;
 import org.gradle.internal.build.RootBuildState;
 import org.gradle.internal.build.StandAloneNestedBuild;
+import org.gradle.internal.composite.IncludedBuildInternal;
 import org.gradle.internal.concurrent.CompositeStoppable;
 import org.gradle.internal.concurrent.Stoppable;
 import org.gradle.internal.event.ListenerManager;
-import org.gradle.internal.service.scopes.BuildTreeScopeServices;
-import org.gradle.internal.logging.text.TreeFormatter;
 import org.gradle.util.Path;
 
 import java.io.File;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
 
 public class DefaultIncludedBuildRegistry implements BuildStateRegistry, Stoppable {
     private final IncludedBuildFactory includedBuildFactory;
-    private final ProjectStateRegistry projectRegistry;
     private final IncludedBuildDependencySubstitutionsBuilder dependencySubstitutionsBuilder;
-    private final GradleLauncherFactory gradleLauncherFactory;
-    private final ListenerManager listenerManager;
-    private final BuildTreeScopeServices rootServices;
+    private final BuildAddedListener buildAddedBroadcaster;
+    private final BuildStateFactory buildStateFactory;
 
     // TODO: Locking around this state
     private RootBuildState rootBuild;
-    private final Map<BuildIdentifier, BuildState> builds = Maps.newHashMap();
-    private final Map<File, IncludedBuildState> includedBuilds = Maps.newLinkedHashMap();
-    private final List<IncludedBuildState> pendingIncludedBuilds = Lists.newArrayList();
+    private final Map<BuildIdentifier, BuildState> buildsByIdentifier = new HashMap<>();
+    private final Map<File, IncludedBuildState> includedBuildsByRootDir = new LinkedHashMap<>();
+    private final Map<Path, File> includedBuildDirectoriesByPath = new LinkedHashMap<>();
+    private final Deque<IncludedBuildState> pendingIncludedBuilds = new ArrayDeque<>();
+    private boolean registerSubstitutionsForRootBuild = false;
 
-    public DefaultIncludedBuildRegistry(IncludedBuildFactory includedBuildFactory, ProjectStateRegistry projectRegistry, IncludedBuildDependencySubstitutionsBuilder dependencySubstitutionsBuilder, GradleLauncherFactory gradleLauncherFactory, ListenerManager listenerManager, BuildTreeScopeServices rootServices) {
+    private final Map<Path, IncludedBuildState> libraryBuilds = new LinkedHashMap<>();
+    private final Set<IncludedBuildState> currentlyConfiguring = new HashSet<>();
+
+    public DefaultIncludedBuildRegistry(IncludedBuildFactory includedBuildFactory, IncludedBuildDependencySubstitutionsBuilder dependencySubstitutionsBuilder, ListenerManager listenerManager, BuildStateFactory buildStateFactory) {
         this.includedBuildFactory = includedBuildFactory;
-        this.projectRegistry = projectRegistry;
         this.dependencySubstitutionsBuilder = dependencySubstitutionsBuilder;
-        this.gradleLauncherFactory = gradleLauncherFactory;
-        this.listenerManager = listenerManager;
-        this.rootServices = rootServices;
+        this.buildAddedBroadcaster = listenerManager.getBroadcaster(BuildAddedListener.class);
+        this.buildStateFactory = buildStateFactory;
     }
 
     @Override
@@ -82,7 +88,7 @@ public class DefaultIncludedBuildRegistry implements BuildStateRegistry, Stoppab
         if (rootBuild != null) {
             throw new IllegalStateException("Root build already defined.");
         }
-        rootBuild = new DefaultRootBuildState(buildDefinition, gradleLauncherFactory, listenerManager, rootServices);
+        rootBuild = buildStateFactory.createRootBuild(buildDefinition);
         addBuild(rootBuild);
         return rootBuild;
     }
@@ -97,29 +103,41 @@ public class DefaultIncludedBuildRegistry implements BuildStateRegistry, Stoppab
     }
 
     private void addBuild(BuildState build) {
-        BuildState before = builds.put(build.getBuildIdentifier(), build);
+        BuildState before = buildsByIdentifier.put(build.getBuildIdentifier(), build);
         if (before != null) {
             throw new IllegalArgumentException("Build is already registered: " + build.getBuildIdentifier());
         }
-    }
-
-    public boolean hasIncludedBuilds() {
-        return !includedBuilds.isEmpty();
-    }
-
-    @Override
-    public Collection<IncludedBuildState> getIncludedBuilds() {
-        return includedBuilds.values();
+        buildAddedBroadcaster.buildAdded(build);
     }
 
     @Override
     public IncludedBuildState addIncludedBuild(BuildDefinition buildDefinition) {
-         return registerBuild(buildDefinition, false);
+        return registerBuild(buildDefinition, false);
     }
 
     @Override
-    public IncludedBuildState getIncludedBuild(final BuildIdentifier buildIdentifier) {
-        BuildState includedBuildState = builds.get(buildIdentifier);
+    public IncludedBuildState addIncludedBuildOf(IncludedBuildFactory includedBuildFactory, BuildDefinition buildDefinition) {
+        return registerBuildOf(includedBuildFactory, buildDefinition, false);
+    }
+
+    @Override
+    public synchronized IncludedBuildState addImplicitIncludedBuild(BuildDefinition buildDefinition) {
+        // TODO: synchronization with other methods
+        IncludedBuildState includedBuild = includedBuildsByRootDir.get(buildDefinition.getBuildRootDir());
+        if (includedBuild == null) {
+            includedBuild = registerBuild(buildDefinition, true);
+        }
+        return includedBuild;
+    }
+
+    @Override
+    public Collection<IncludedBuildState> getIncludedBuilds() {
+        return includedBuildsByRootDir.values();
+    }
+
+    @Override
+    public IncludedBuildState getIncludedBuild(BuildIdentifier buildIdentifier) {
+        BuildState includedBuildState = buildsByIdentifier.get(buildIdentifier);
         if (!(includedBuildState instanceof IncludedBuildState)) {
             throw new IllegalArgumentException("Could not find " + buildIdentifier);
         }
@@ -128,7 +146,7 @@ public class DefaultIncludedBuildRegistry implements BuildStateRegistry, Stoppab
 
     @Override
     public BuildState getBuild(BuildIdentifier buildIdentifier) {
-        BuildState buildState = builds.get(buildIdentifier);
+        BuildState buildState = buildsByIdentifier.get(buildIdentifier);
         if (buildState == null) {
             throw new IllegalArgumentException("Could not find " + buildIdentifier);
         }
@@ -137,100 +155,135 @@ public class DefaultIncludedBuildRegistry implements BuildStateRegistry, Stoppab
 
     @Override
     public void beforeConfigureRootBuild() {
-        registerSubstitutions(includedBuilds.values());
+        registerSubstitutions();
+    }
+
+    @Override
+    public void afterConfigureRootBuild() {
+        if (registerSubstitutionsForRootBuild) {
+            dependencySubstitutionsBuilder.build(rootBuild);
+        }
     }
 
     @Override
     public void finalizeIncludedBuilds() {
-        SettingsInternal settings = getRootBuild().getLoadedSettings();
-        SetMultimap<String, IncludedBuildState> names = LinkedHashMultimap.create();
         while (!pendingIncludedBuilds.isEmpty()) {
-            IncludedBuildState build = pendingIncludedBuilds.remove(0);
-            build.loadSettings();
-            String buildName = build.getName();
-            names.put(buildName, build);
-            if (settings.getRootProject().getName().equals(buildName)) {
-                throw new GradleException("Included build in " + build.getRootDirectory() + " has the same root project name '" + buildName + "' as the main build.");
-            }
-            if (settings.findProject(":" + buildName) != null) {
-                throw new GradleException("Included build in " + build.getRootDirectory() + " has a root project whose name '" + buildName + "' is the same as a project of the main build.");
-            }
-        }
-        for (String buildName : names.keySet()) {
-            Set<IncludedBuildState> buildsWithName = names.get(buildName);
-            if (buildsWithName.size() > 1) {
-                TreeFormatter visitor = new TreeFormatter();
-                visitor.node("Multiple included builds have the same root project name '" + buildName + "'");
-                visitor.startChildren();
-                for (IncludedBuildState build : buildsWithName) {
-                    visitor.node("Included build in " + build.getRootDirectory());
-                }
-                visitor.endChildren();
-                throw new GradleException(visitor.toString());
-            }
+            IncludedBuildState build = pendingIncludedBuilds.removeFirst();
+            assertNameDoesNotClashWithRootSubproject(build);
         }
     }
 
-    private void registerSubstitutions(Iterable<IncludedBuildState> includedBuilds) {
-        for (IncludedBuildState includedBuild : includedBuilds) {
+    private void registerSubstitutions() {
+        for (IncludedBuildState includedBuild : libraryBuilds.values()) {
+            currentlyConfiguring.add(includedBuild);
             dependencySubstitutionsBuilder.build(includedBuild);
+            currentlyConfiguring.remove(includedBuild);
         }
     }
 
     @Override
-    public synchronized IncludedBuildState addImplicitIncludedBuild(BuildDefinition buildDefinition) {
-        // TODO: synchronization with other methods
-        IncludedBuildState includedBuild = includedBuilds.get(buildDefinition.getBuildRootDir());
-        if (includedBuild == null) {
-            includedBuild = registerBuild(buildDefinition, true);
+    public StandAloneNestedBuild addBuildSrcNestedBuild(BuildDefinition buildDefinition, BuildState owner) {
+        if (!SettingsInternal.BUILD_SRC.equals(buildDefinition.getName())) {
+            throw new IllegalStateException("Expected buildSrc build, got: " + buildDefinition.getName());
         }
-        return includedBuild;
-    }
-
-    @Override
-    public StandAloneNestedBuild addNestedBuild(BuildDefinition buildDefinition, BuildState owner) {
-        if (buildDefinition.getName() == null) {
-            throw new UnsupportedOperationException("Not yet implemented."); // but should be
-        }
+        Path identityPath = assignPath(owner, buildDefinition.getName(), buildDefinition.getBuildRootDir());
         BuildIdentifier buildIdentifier = idFor(buildDefinition.getName());
-        Path identityPath = pathFor(owner, buildIdentifier.getName());
-        DefaultNestedBuild build = new DefaultNestedBuild(buildIdentifier, identityPath, buildDefinition, owner);
+        StandAloneNestedBuild build = buildStateFactory.createNestedBuild(buildIdentifier, identityPath, buildDefinition, owner);
         addBuild(build);
         return build;
     }
 
     @Override
-    public NestedRootBuild addNestedBuildTree(BuildDefinition buildDefinition, BuildState owner) {
+    public NestedRootBuild addNestedBuildTree(BuildDefinition buildDefinition, BuildState owner, String buildName) {
         if (buildDefinition.getName() != null || buildDefinition.getBuildRootDir() != null) {
             throw new UnsupportedOperationException("Not yet implemented."); // but should be
         }
-        BuildIdentifier buildIdentifier = idFor(buildDefinition.getStartParameter().getCurrentDir().getName());
-        Path identityPath = pathFor(owner, buildIdentifier.getName());
-        return new RootOfNestedBuildTree(buildDefinition, buildIdentifier, identityPath, owner);
+        File dir = buildDefinition.getStartParameter().getCurrentDir();
+        String name = MoreObjects.firstNonNull(buildName, dir.getName());
+        validateNameIsNotBuildSrc(name, dir);
+        Path identityPath = assignPath(owner, name, dir);
+        BuildIdentifier buildIdentifier = idFor(name);
+        RootOfNestedBuildTree rootOfNestedBuildTree = buildStateFactory.createNestedTree(buildDefinition, buildIdentifier, identityPath, owner);
+        // Attach the build only after it has been fully constructed.
+        rootOfNestedBuildTree.attach();
+        return rootOfNestedBuildTree;
+    }
+
+    @Override
+    public void registerSubstitutionsForRootBuild() {
+        registerSubstitutionsForRootBuild = true;
+    }
+
+    @Override
+    public void ensureConfigured(IncludedBuildState buildToConfigure) {
+        if (currentlyConfiguring.contains(buildToConfigure)) {
+            return;
+        }
+        currentlyConfiguring.add(buildToConfigure);
+        GradleInternal gradle = buildToConfigure.getConfiguredBuild();
+        for (IncludedBuildInternal reference : gradle.includedBuilds()) {
+            BuildState target = reference.getTarget();
+            if (target instanceof IncludedBuildState) {
+                dependencySubstitutionsBuilder.build((IncludedBuildState) target);
+            }
+        }
+        currentlyConfiguring.remove(buildToConfigure);
+    }
+
+    @Override
+    public void visitBuilds(Consumer<? super BuildState> visitor) {
+        List<BuildState> ordered = new ArrayList<>(buildsByIdentifier.values());
+        ordered.sort(Comparator.comparing(BuildState::getIdentityPath));
+        for (BuildState buildState : ordered) {
+            visitor.accept(buildState);
+        }
+    }
+
+    private void validateNameIsNotBuildSrc(String name, File dir) {
+        if (SettingsInternal.BUILD_SRC.equals(name)) {
+            throw new GradleException("Included build " + dir + " has build name 'buildSrc' which cannot be used as it is a reserved name.");
+        }
     }
 
     private IncludedBuildState registerBuild(BuildDefinition buildDefinition, boolean isImplicit) {
+        return registerBuildOf(includedBuildFactory, buildDefinition, isImplicit);
+    }
+
+    private IncludedBuildState registerBuildOf(
+        IncludedBuildFactory includedBuildFactory,
+        BuildDefinition buildDefinition,
+        boolean isImplicit
+    ) {
         // TODO: synchronization
-        if (buildDefinition.getBuildRootDir() == null) {
+        File buildDir = buildDefinition.getBuildRootDir();
+        if (buildDir == null) {
             throw new IllegalArgumentException("Included build must have a root directory defined");
         }
-        if (rootBuild == null) {
-            throw new IllegalStateException("No root build attached yet.");
-        }
-        IncludedBuildState includedBuild = includedBuilds.get(buildDefinition.getBuildRootDir());
+        IncludedBuildState includedBuild = includedBuildsByRootDir.get(buildDir);
         if (includedBuild == null) {
-            String buildName = buildDefinition.getBuildRootDir().getName();
+            if (rootBuild == null) {
+                throw new IllegalStateException("No root build attached yet.");
+            }
+            String buildName = buildDefinition.getName();
+            if (buildName == null) {
+                throw new IllegalStateException("build name is required");
+            }
+            validateNameIsNotBuildSrc(buildName, buildDir);
+            Path idPath = assignPath(rootBuild, buildDefinition.getName(), buildDir);
             BuildIdentifier buildIdentifier = idFor(buildName);
-            Path idPath = pathFor(rootBuild, buildIdentifier.getName());
 
             includedBuild = includedBuildFactory.createBuild(buildIdentifier, idPath, buildDefinition, isImplicit, rootBuild);
-            includedBuilds.put(buildDefinition.getBuildRootDir(), includedBuild);
+            includedBuildsByRootDir.put(buildDir, includedBuild);
             pendingIncludedBuilds.add(includedBuild);
             addBuild(includedBuild);
+            includedBuildFactory.prepareBuild(includedBuild);
         } else {
             if (includedBuild.isImplicitBuild() != isImplicit) {
                 throw new IllegalStateException("Unexpected state for build.");
             }
+        }
+        if (!buildDefinition.isPluginBuild()) {
+            libraryBuilds.put(includedBuild.getIdentityPath(), includedBuild);
         }
         // TODO: else, verify that the build definition is the same
         return includedBuild;
@@ -241,18 +294,30 @@ public class DefaultIncludedBuildRegistry implements BuildStateRegistry, Stoppab
 
         // Create a synthetic id for the build, if the id is already used
         // Should instead use a structured id implementation of some kind instead
-        for (int count = 1; builds.containsKey(buildIdentifier); count++) {
+        for (int count = 1; buildsByIdentifier.containsKey(buildIdentifier); count++) {
             buildIdentifier = new DefaultBuildIdentifier(buildName + ":" + count);
         }
         return buildIdentifier;
     }
 
-    private Path pathFor(BuildState owner, String name) {
-        return owner.getIdentityPath().append(Path.path(name));
+    private Path assignPath(BuildState owner, String name, File dir) {
+        Path requestedPath = owner.getIdentityPath().append(Path.path(name));
+        File existingForPath = includedBuildDirectoriesByPath.putIfAbsent(requestedPath, dir);
+        if (existingForPath != null) {
+            throw new GradleException("Included build " + dir + " has build path " + requestedPath + " which is the same as included build " + existingForPath);
+        }
+
+        return requestedPath;
     }
 
     @Override
     public void stop() {
-        CompositeStoppable.stoppable(builds.values()).stop();
+        CompositeStoppable.stoppable(buildsByIdentifier.values()).stop();
+    }
+
+    private void assertNameDoesNotClashWithRootSubproject(IncludedBuildState includedBuild) {
+        if (rootBuild.getLoadedSettings().findProject(":" + includedBuild.getName()) != null) {
+            throw new GradleException("Included build in " + includedBuild.getBuildRootDir() + " has name '" + includedBuild.getName() + "' which is the same as a project of the main build.");
+        }
     }
 }

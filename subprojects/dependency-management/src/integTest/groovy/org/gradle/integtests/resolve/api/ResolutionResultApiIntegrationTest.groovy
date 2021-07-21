@@ -19,13 +19,12 @@
 package org.gradle.integtests.resolve.api
 
 import org.gradle.integtests.fixtures.AbstractDependencyResolutionTest
-import org.gradle.integtests.fixtures.FeaturePreviewsFixture
-import org.gradle.integtests.fixtures.FluidDependenciesResolveRunner
+import org.gradle.integtests.fixtures.extensions.FluidDependenciesResolveTest
 import org.gradle.integtests.fixtures.resolve.ResolveTestFixture
-import org.junit.runner.RunWith
+import spock.lang.Issue
 import spock.lang.Unroll
 
-@RunWith(FluidDependenciesResolveRunner)
+@FluidDependenciesResolveTest
 class ResolutionResultApiIntegrationTest extends AbstractDependencyResolutionTest {
     ResolveTestFixture resolve = new ResolveTestFixture(buildFile, 'conf')
 
@@ -62,10 +61,10 @@ class ResolutionResultApiIntegrationTest extends AbstractDependencyResolutionTes
                     def result = configurations.conf.incoming.resolutionResult
                     result.allComponents {
                         if(it.id instanceof ModuleComponentIdentifier) {
-                            println it.id.module + ":" + it.id.version + " " + it.selectionReason.description
+                            println it.id.module + ":" + it.id.version + " " + it.selectionReason
                         }
                         else if(it.id instanceof ProjectComponentIdentifier) {
-                            println it.moduleVersion.name + ":" + it.moduleVersion.version + " " + it.selectionReason.description
+                            println it.moduleVersion.name + ":" + it.moduleVersion.version + " " + it.selectionReason
                         }
                     }
                 }
@@ -78,7 +77,7 @@ class ResolutionResultApiIntegrationTest extends AbstractDependencyResolutionTes
         then:
         output.contains """
 cool-project:5.0 root
-foo:1.0 between versions 0.5 and 1.0
+foo:1.0 between versions 1.0 and 0.5
 leaf:2.0 forced
 bar:1.0 requested
 baz:1.0 requested
@@ -98,25 +97,23 @@ baz:1.0 requested
                 .dependsOn(leaf2, reason: 'second reason')
                 .withModuleMetadata()
                 .publish()
-
         }
-        FeaturePreviewsFixture.enableGradleMetadata(settingsFile)
 
         when:
         file("build.gradle") << """
             configurations {
                 conf
             }
-            
+
             repositories {
                maven { url "${mavenRepo.uri}" }
             }
-            
+
             dependencies {
                 conf 'org.test:a:1.0'
                 conf 'org.test:b:1.0'
             }
-            
+
             task checkDeps {
                 doLast {
                     def result = configurations.conf.incoming.resolutionResult
@@ -129,8 +126,8 @@ baz:1.0 requested
                             descriptions.each {
                                 println "\$it.cause : \$it.description"
                             }
-                            def descriptor = descriptions.find { it.cause == ComponentSelectionCause.REQUESTED }
-                            assert descriptor?.description == 'second reason'
+                            def descriptors = descriptions.findAll { it.cause == ComponentSelectionCause.REQUESTED }
+                            assert descriptors.description == ['first reason', 'second reason']
                         }
                     }
                 }
@@ -145,7 +142,7 @@ baz:1.0 requested
     def "resolution result API gives access to dependency reasons in case of conflict and selection by rule"() {
         given:
         mavenRepo.with {
-            def leaf1 = module('org.test', 'leaf', '1.0').publish()
+            module('org.test', 'leaf', '1.0').publish()
             def leaf2 = module('org.test', 'leaf', '1.1').publish()
             module('org.test', 'a', '1.0')
                 .dependsOn('org.test', 'leaf', '0.9')
@@ -158,7 +155,6 @@ baz:1.0 requested
 
         }
         settingsFile << """rootProject.name='test'"""
-        FeaturePreviewsFixture.enableGradleMetadata(settingsFile)
         file("build.gradle") << """
             configurations {
                 conf {
@@ -175,19 +171,19 @@ baz:1.0 requested
                     }
                 }
             }
-            
+
             repositories {
                maven { url "${mavenRepo.uri}" }
             }
-            
+
             dependencies {
                 conf 'org.test:a:1.0'
                 conf 'org.test:b:1.0'
-                
+
             }
         """
         resolve.prepare()
-        buildFile << """           
+        buildFile << """
             checkDeps {
                 doLast {
                     def result = configurations.conf.incoming.resolutionResult
@@ -200,8 +196,8 @@ baz:1.0 requested
                             descriptions.each {
                                 println "\$it.cause : \$it.description"
                             }
-                            def descriptor = descriptions.find { it.cause == ComponentSelectionCause.REQUESTED }
-                            assert descriptor?.description == 'second reason'
+                            def descriptors = descriptions.findAll { it.cause == ComponentSelectionCause.REQUESTED }
+                            assert descriptors.description == ['requested', 'second reason']
                         }
                     }
                 }
@@ -217,14 +213,14 @@ baz:1.0 requested
             root(":", ":test:") {
                 module('org.test:a:1.0:runtime') {
                     edge('org.test:leaf:0.9', 'org.test:leaf:1.1')
-                        .byConflictResolution("between versions 1.0 and 1.1") // conflict with the version requested by 'b'
+                        .byConflictResolution("between versions 1.1 and 1.0") // conflict with the version requested by 'b'
                         .byReason('second reason') // this comes from 'b'
                         .selectedByRule("substitute 0.9 with 1.0")
                 }
                 module('org.test:b:1.0:runtime') {
                     module('org.test:leaf:1.1')
                         .selectedByRule("substitute 0.9 with 1.0")
-                        .byConflictResolution("between versions 1.0 and 1.1")
+                        .byConflictResolution("between versions 1.1 and 1.0")
                         .byReason('second reason')
                 }
             }
@@ -248,7 +244,7 @@ baz:1.0 requested
             }
             dependencies {
                 conf "org:foo:1.0"
-                
+
                 constraints {
                     conf("org:foo:1.0") {
                         version {
@@ -258,7 +254,7 @@ baz:1.0 requested
                     }
                 }
             }
-            
+
             configurations.all {
                 resolutionStrategy.eachDependency {
                     if (requested.name == 'foo') {
@@ -266,7 +262,7 @@ baz:1.0 requested
                     }
                 }
             }
-            
+
             task checkWithApi {
                 doLast {
                     def result = configurations.conf.incoming.resolutionResult
@@ -315,7 +311,7 @@ baz:1.0 requested
                     if ($useReason) { because("This is a direct dependency reason") }
                 }
             }
-            
+
             configurations.all {
                 resolutionStrategy.eachDependency {
                     if (requested.name == 'foo') {
@@ -323,7 +319,7 @@ baz:1.0 requested
                     }
                 }
             }
-            
+
             task checkWithApi {
                 doLast {
                     def result = configurations.conf.incoming.resolutionResult
@@ -351,7 +347,7 @@ baz:1.0 requested
         useReason << [true, false]
     }
 
-    void "expired cache entry doesn't break reading reasons from cache"() {
+    void "expired cache entry doesn't break reading from cache"() {
         given:
         mavenRepo.module("org", "foo", "1.0").publish()
         mavenRepo.module("org", "bar", "1.0").publish()
@@ -365,19 +361,34 @@ baz:1.0 requested
             configurations {
                 conf
             }
+
+            def attr = Attribute.of("myAttribute", String)
+
             dependencies {
                 conf("org:foo:1.0") {
                     because 'first reason' // must have custom reasons to show the problem
                 }
-                conf("org:bar:1.0") {
+                conf("org:bar") {
                     because 'second reason'
+
+                    attributes {
+                        attribute(attr, 'val') // make sure attributes are properly serialized and read back
+                    }
+                }
+                constraints {
+                    conf("org:bar") {
+                        version {
+                            require "[0.1, 2.0["
+                            prefer "1.0"
+                        }
+                    }
                 }
             }
-            
+
             task resolveTwice {
                 doLast {
                     def result = configurations.conf.incoming.resolutionResult
-                    result.allComponents { 
+                    result.allComponents {
                         it.selectionReason.descriptions.each {
                            println "\${it.cause} : \${it.description}"
                         }
@@ -402,5 +413,316 @@ baz:1.0 requested
         then:
         noExceptionThrown()
 
+    }
+
+    def "each dependency is associated to its resolved variant"() {
+        mavenRepo.module("org", "dep", "1.0").publish()
+        mavenRepo.module("com", "foo", "1.0").publish()
+        mavenRepo.module("com", "bar", "1.0").publish()
+        mavenRepo.module("com", "baz", "1.0").publish()
+        settingsFile << """
+            include 'lib', 'tool'
+        """
+        buildFile << """
+            allprojects {
+               repositories {
+                  maven { url "${mavenRepo.uri}" }
+               }
+
+                apply plugin: 'java-library'
+            }
+
+            project(":lib") {
+                dependencies {
+                   api "org:dep:1.0"
+                }
+            }
+
+            project(":tool") {
+                apply plugin: 'java-test-fixtures'
+                dependencies {
+                    api "com:baz:1.0"
+                    testFixturesApi "com:foo:1.0"
+                    testFixturesImplementation "com:bar:1.0"
+                }
+            }
+
+            dependencies {
+                implementation(project(":lib"))
+                testImplementation(testFixtures(project(":tool")))
+                testImplementation(testFixtures(project(":tool"))) // intentional duplication
+            }
+
+
+        """
+        withResolutionResultDumper("testCompileClasspath", "testRuntimeClasspath")
+
+        when:
+        succeeds 'resolve'
+
+        then:
+        outputContains """
+testCompileClasspath
+   project :lib (apiElements)
+      org:dep:1.0 (compile)
+   project :tool (testFixturesApiElements)
+      project :tool (apiElements)
+         com:baz:1.0 (compile)
+      com:foo:1.0 (compile)
+"""
+
+        and:
+        outputContains """testRuntimeClasspath
+   project :lib (runtimeElements)
+      org:dep:1.0 (runtime)
+   project :tool (testFixturesRuntimeElements)
+      project :tool (runtimeElements)
+         com:baz:1.0 (runtime)
+      com:foo:1.0 (runtime)
+      com:bar:1.0 (runtime)
+"""
+    }
+
+    def "requested dependency attributes are reported on dependency result as desugared attributes"() {
+        settingsFile << "include 'platform'"
+        buildFile << """
+            project(":platform") {
+                apply plugin: 'java-platform'
+            }
+
+            apply plugin: 'java-library'
+
+            dependencies {
+                implementation(platform(project(":platform")))
+            }
+
+            task checkDependencyAttributes {
+                doLast {
+                    configurations.compileClasspath.incoming.resolutionResult.root.dependencies.each {
+                        def desugaredCategory = Attribute.of("org.gradle.category", String)
+                        assert it.requested.attributes.getAttribute(desugaredCategory) == 'platform'
+                    }
+                }
+            }
+        """
+
+        expect:
+        succeeds 'checkDependencyAttributes'
+
+    }
+
+    def "reports duplicated dependencies in all variants"() {
+        mavenRepo.module('org', 'foo', '1.0').publish()
+        mavenRepo.module('org', 'bar', '1.0').publish()
+        mavenRepo.module('org', 'baz', '1.0').publish()
+        mavenRepo.module('org', 'gaz', '1.0').publish()
+
+        file("producer/build.gradle") << """
+            plugins {
+              id 'java-library'
+              id 'java-test-fixtures'
+            }
+            dependencies {
+              testFixturesApi('org:foo:1.0')
+              testFixturesImplementation('org:bar:1.0')
+              testFixturesImplementation('org:baz:1.0')
+
+              api('org:baz:1.0')
+              implementation('org:gaz:1.0')
+            }
+            """
+                    buildFile << """
+            plugins {
+              id 'java-library'
+            }
+
+            allprojects {
+               repositories {
+                  maven { url "${mavenRepo.uri}" }
+               }
+            }
+
+            dependencies {
+              implementation(project(':producer'))
+              testImplementation(testFixtures(project(':producer')))
+            }
+        """
+        settingsFile << """
+            include 'producer'
+        """
+
+        withResolutionResultDumper("testCompileClasspath", "testRuntimeClasspath")
+
+        when: "baz should appear in both apiElements and testFixturesRuntimeElements"
+        succeeds 'resolve'
+
+        then:
+        outputContains("""
+testCompileClasspath
+   project :producer (apiElements)
+      org:baz:1.0 (compile)
+   project :producer (testFixturesApiElements)
+      project :producer (apiElements)
+      org:foo:1.0 (compile)
+""")
+
+        and:
+        outputContains("""
+testRuntimeClasspath
+   project :producer (runtimeElements)
+      org:baz:1.0 (runtime)
+      org:gaz:1.0 (runtime)
+   project :producer (testFixturesRuntimeElements)
+      project :producer (runtimeElements)
+      org:foo:1.0 (runtime)
+      org:bar:1.0 (runtime)
+      org:baz:1.0 (runtime)
+""")
+    }
+
+    def "reports if we try to get dependencies from a different variant"() {
+        mavenRepo.module('org', 'foo', '1.0').publish()
+
+        file("producer/build.gradle") << """
+            plugins {
+              id 'java-library'
+              id 'java-test-fixtures'
+            }
+            dependencies {
+              testFixturesApi('org:foo:1.0')
+            }
+            """
+        buildFile << """
+            plugins {
+              id 'java-library'
+            }
+
+            allprojects {
+               repositories {
+                  maven { url "${mavenRepo.uri}" }
+               }
+            }
+
+            dependencies {
+              implementation(project(':producer'))
+              testImplementation(testFixtures(project(':producer')))
+            }
+
+            task resolve {
+                doLast {
+                    def result = configurations.testCompileClasspath.incoming.resolutionResult
+                    def rootComponent = result.root
+                    def childComponent = result.allComponents.find { it.toString() == 'project :producer' }
+                    def childVariant = childComponent.variants[0]
+                    // try to get dependencies for child variant on the wrong component
+                    println(rootComponent.getDependenciesForVariant(childVariant))
+                }
+            }
+        """
+        settingsFile << """
+            include 'producer'
+        """
+
+        when:
+        fails 'resolve'
+
+        then:
+        failure.assertHasCause("Variant 'apiElements' doesn't belong to resolved component 'project :'. There's no resolved variant with the same name. Most likely you are using a variant from another component to get the dependencies of this component.")
+    }
+
+    @Issue("https://github.com/gradle/gradle/issues/12643")
+    def "resolved variant of a selected node shouldn't be null"() {
+        buildFile << """
+        apply plugin: 'java-library'
+
+        ${mavenCentralRepository()}
+
+        configurations.all {
+            resolutionStrategy.capabilitiesResolution.withCapability('com.google.collections:google-collections') {
+                selectHighestVersion()
+            }
+        }
+        dependencies {
+            implementation 'com.google.guava:guava:28.1-jre'
+            implementation 'com.google.collections:google-collections:1.0'
+            components {
+                withModule('com.google.guava:guava') {
+                    allVariants {
+                        withCapabilities {
+                           addCapability('com.google.collections', 'google-collections', id.version)
+                        }
+                    }
+                }
+            }
+        }
+
+        task resolve {
+            doLast {
+                def result = configurations.compileClasspath.incoming.resolutionResult
+                result.allDependencies {
+                    assert it instanceof ResolvedDependencyResult
+                    assert it.resolvedVariant != null
+                }
+            }
+        }
+        """
+
+        expect:
+        succeeds 'resolve'
+
+    }
+
+    private void withResolutionResultDumper(String... configurations) {
+        def confList = configurations.collect { configuration ->
+            """
+                // dump variant dependencies
+                def result_$configuration = configurations.${configuration}.incoming.resolutionResult
+                dump("$configuration", result_${configuration}.root, null, 0)
+
+                // check that configuration attributes are visible and desugared
+                def consumerAttributes_$configuration = configurations.${configuration}.attributes
+                assert result_${configuration}.requestedAttributes.keySet().size() == consumerAttributes_${configuration}.keySet().size()
+                consumerAttributes_${configuration}.keySet().each {
+                    println "Checking \$it of type \$it.type"
+                    def desugared = Attribute.of(it.name, String)
+                    assert result_${configuration}.requestedAttributes.getAttribute(desugared) == consumerAttributes_${configuration}.getAttribute(it).toString()
+                }
+            """
+        }
+        buildFile << """
+
+            task resolve {
+                doLast {
+                    { -> ${confList.join('\n')} }()
+                    println()
+                    println 'Waiting for the cache to expire'
+                    // see org.gradle.api.internal.artifacts.ivyservice.resolveengine.store.CachedStoreFactory
+                    Thread.sleep(800) // must be > cache expiry
+                    println 'Read result again to make sure serialization state is ok'
+                    println();
+                    { -> ${confList.join('\n')} }()
+                }
+            }
+
+            void dump(String root, ResolvedComponentResult result, ResolvedVariantResult variant, int depth, Set visited = []) {
+                if (visited.add([result, variant])) {
+                    if (variant == null) {
+                        println(root)
+                    }
+                    def dependencies = variant == null ? result.dependencies : result.getDependenciesForVariant(variant)
+                    depth++
+                    dependencies.each {
+                        if (it instanceof ResolvedDependencyResult) {
+                            def resolvedVariant = it.resolvedVariant
+                            def selected = it.selected
+                            println("   " * depth + "\$selected (\$resolvedVariant)")
+                            dump(root, selected, resolvedVariant, depth, visited)
+                        } else {
+                            println("   " * depth + "\$it (unresolved)")
+                        }
+                    }
+                }
+            }
+"""
     }
 }

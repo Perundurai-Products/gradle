@@ -17,10 +17,12 @@ package org.gradle.integtests.fixtures.executer;
 
 import org.gradle.integtests.fixtures.logging.GroupedOutputFixture;
 
-import java.util.List;
-import java.util.Set;
-
 public interface ExecutionResult {
+    /**
+     * Returns a copy of this result that ignores `buildSrc` tasks.
+     */
+    ExecutionResult getIgnoreBuildSrc();
+
     /**
      * Stdout of the Gradle execution, normalized to use new-line char as line separator.
      *
@@ -32,15 +34,24 @@ public interface ExecutionResult {
      * Stdout of the Gradle execution, normalized to use new-line char as line separator. Excludes warnings about deprecated or incubating features used to run the build.
      *
      * <ul>
-     *     <li>Removes warning about running on Java 7.</li>
      *     <li>Removes warning about running using configure on demand or parallel execution.</li>
-     *     <li>Removes notice about starting the daemon.</li>
-     *     <li>Normalizes build time to 1 second.
+     *     <li>Removes notice about starting or stopping the daemon.</li>
+     *     <li>Normalizes build time to 0 seconds.
      * </ul>
      *
      * <p>You should avoid using this method as it couples the tests to a particular layout for the console. Instead use the more descriptive assertion methods.</p>
      */
     String getNormalizedOutput();
+
+    /**
+     * Stdout of the Gradle execution, with ANSI characters interpreted and text attributes rendered as plain text.
+     */
+    String getFormattedOutput();
+
+    /**
+     * Stdout of the Gradle execution, with ANSI characters interpreted and text attributes discarded.
+     */
+    String getPlainTextOutput();
 
     /**
      * Returns a fixture that parses the output and forms them into the expected groups
@@ -55,18 +66,29 @@ public interface ExecutionResult {
     String getError();
 
     /**
+     * Retrieves the first output line that contains the passed in text.
+     *
+     * Fails with an assertion if no output line contains the given text.
+     *
+     * @param text the text to match
+     */
+    String getOutputLineThatContains(String text);
+
+    /**
+     * Retrieves the first output line in the post build output that contains the passed in text.
+     *
+     * Fails with an assertion if no post build output line contains the given text.
+     *
+     * @param text the text to match
+     */
+    String getPostBuildOutputLineThatContains(String text);
+
+    /**
      * Asserts that this result includes the given error log message. Does not consider any text in or following the build result message (use {@link #assertHasPostBuildOutput(String)} instead).
      *
      * @param expectedOutput The expected log message, with line endings normalized to a newline character.
      */
     ExecutionResult assertHasErrorOutput(String expectedOutput);
-
-    /**
-     * Asserts that this result includes the given error log message in the raw output (including ANSI characters and build result message).
-     *
-     * @param expectedOutput The expected log message, with line endings normalized to a newline character.
-     */
-    ExecutionResult assertHasRawErrorOutput(String expectedOutput);
 
     /**
      * Returns true when this result includes the given error log message. Does not consider any text in or following the build result message (use {@link #assertHasPostBuildOutput(String)} instead).
@@ -83,13 +105,6 @@ public interface ExecutionResult {
      * @param expectedOutput The expected log message, with line endings normalized to a newline character.
      */
     ExecutionResult assertOutputContains(String expectedOutput);
-
-    /**
-     * Asserts that this result includes the given non-error log message (including ANSI characters and build result message).
-     *
-     * @param expectedOutput The expected log message, with line endings normalized to a newline character.
-     */
-    ExecutionResult assertRawOutputContains(String expectedOutput);
 
     /**
      * Asserts that the given content includes the given log message.
@@ -115,36 +130,36 @@ public interface ExecutionResult {
     ExecutionResult assertHasPostBuildOutput(String expectedOutput);
 
     /**
-     * Returns the tasks have been executed in order started (includes tasks that were skipped). Asserts that each task appears once only. Note: ignores buildSrc tasks.
+     * Assert that the given message does not appear after the build result message.
      *
-     * <p>You should avoid using this method, as as doing so not provide useful context on assertion failure. Instead, use the more descriptive assertion methods
+     * @param expectedOutput The expected log message, with line endings normalized to a newline character.
      */
-    List<String> getExecutedTasks();
+    ExecutionResult assertNotPostBuildOutput(String expectedOutput);
 
     /**
-     * Asserts that exactly the given set of tasks have been executed in the given order. Note: ignores buildSrc tasks.
+     * Asserts that exactly the given set of tasks have been executed in the given order.
      * Each task path can be either a String or a {@link TaskOrderSpec}.  See {@link TaskOrderSpecs} for common assertions
      * and an explanation of their usage.  Defaults to a {@link TaskOrderSpecs#exact(Object[])} assertion.
      */
     ExecutionResult assertTasksExecutedInOrder(Object... taskPaths);
 
     /**
-     * Asserts that exactly the given set of tasks have been executed in any order. Note: ignores buildSrc tasks.
+     * Asserts that exactly the given set of tasks have been executed in any order.
      */
     ExecutionResult assertTasksExecuted(Object... taskPaths);
 
     /**
-     * Asserts that the given task has been executed. Note: ignores buildSrc tasks.
+     * Asserts that the given task has been executed.
      */
     ExecutionResult assertTaskExecuted(String taskPath);
 
     /**
-     * Asserts that exactly the given set of tasks have been executed in any order and none of the tasks were skipped. Note: ignores buildSrc tasks.
+     * Asserts that exactly the given set of tasks have been executed in any order and none of the tasks were skipped.
      */
     ExecutionResult assertTasksExecutedAndNotSkipped(Object... taskPaths);
 
     /**
-     * Asserts that the given task has not been executed. Note: ignores buildSrc tasks.
+     * Asserts that the given task has not been executed.
      */
     ExecutionResult assertTaskNotExecuted(String taskPath);
 
@@ -156,29 +171,27 @@ public interface ExecutionResult {
     ExecutionResult assertTaskOrder(Object... taskPaths);
 
     /**
-     * Returns the tasks that were skipped, in an undefined order. Note: ignores buildSrc tasks.
-     *
-     * <p>You should avoid using this method, as as doing so not provide useful context on assertion failure. Instead, use the more descriptive assertion methods
-     */
-    Set<String> getSkippedTasks();
-
-    /**
-     * Asserts that exactly the given set of tasks have been skipped. Note: ignores buildSrc tasks.
+     * Asserts that exactly the given set of tasks have been skipped.
      */
     ExecutionResult assertTasksSkipped(Object... taskPaths);
 
     /**
-     * Asserts the given task has been skipped. Note: ignores buildSrc tasks.
+     * Asserts the given task has been skipped.
      */
     ExecutionResult assertTaskSkipped(String taskPath);
 
     /**
-     * Asserts that exactly the given set of tasks have not been skipped. Note: ignores buildSrc tasks.
+     * Asserts that exactly the given set of tasks have not been skipped.
      */
     ExecutionResult assertTasksNotSkipped(Object... taskPaths);
 
     /**
-     * Asserts that the given task has not been skipped. Note: ignores buildSrc tasks.
+     * Asserts that the given task has not been skipped.
      */
     ExecutionResult assertTaskNotSkipped(String taskPath);
+
+    /**
+     * Asserts that the important information from this result has been verified by the test.
+     */
+    void assertResultVisited();
 }

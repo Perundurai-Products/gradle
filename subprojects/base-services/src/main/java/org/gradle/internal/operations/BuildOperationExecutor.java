@@ -16,12 +16,15 @@
 
 package org.gradle.internal.operations;
 
-import net.jcip.annotations.ThreadSafe;
 import org.gradle.api.Action;
+import org.gradle.internal.Factory;
+import org.gradle.internal.service.scopes.Scopes;
+import org.gradle.internal.service.scopes.ServiceScope;
+
+import javax.annotation.concurrent.ThreadSafe;
 
 /**
- * Runs build operations. These are the pieces of work that make up a build. Build operations can be nested inside other
- * build operations.
+ * Executes build operations synchronously, asynchronously or via a {@link BuildOperationQueue}.
  *
  * The executor provides several capabilities:
  *
@@ -30,15 +33,16 @@ import org.gradle.api.Action;
  *     execution can be received by tooling API clients.</p>
  *     <p>Generates progress logging events.</p>
  * </ul>
- *
- * <p>Operations are executed synchronously or asynchronous.</p>
  */
 @ThreadSafe
-public interface BuildOperationExecutor {
+@ServiceScope(Scopes.BuildSession.class)
+public interface BuildOperationExecutor extends BuildOperationRunner {
     /**
      * Runs the given build operation synchronously. Invokes the given operation from the current thread.
      *
-     * <p>Rethrows any exception thrown by the action.</p>
+     * <p>Rethrows any exception thrown by the action.
+     * Runtime exceptions are rethrown as is.
+     * Checked exceptions are wrapped in {@link BuildOperationInvocationException}.</p>
      */
     void run(RunnableBuildOperation buildOperation);
 
@@ -46,29 +50,18 @@ public interface BuildOperationExecutor {
      * Calls the given build operation synchronously. Invokes the given operation from the current thread.
      * Returns the result.
      *
-     * <p>Rethrows any exception thrown by the action.</p>
+     * <p>Rethrows any exception thrown by the action.
+     * Runtime exceptions are rethrown as is.
+     * Checked exceptions are wrapped in {@link BuildOperationInvocationException}.</p>
      */
     <T> T call(CallableBuildOperation<T> buildOperation);
 
     /**
-     * Starts an operation that can be finished later through its context available via {@link ExecutingBuildOperation#getContext()}.
+     * Starts an operation that can be finished later.
      *
      * When a parent operation is finished any unfinished child operations will be failed.
      */
-    ExecutingBuildOperation start(BuildOperationDescriptor.Builder descriptor);
-
-    /**
-     * Submits an arbitrary number of runnable operations, created synchronously by the scheduling action, to be executed in the global
-     * build operation thread pool. Operations may execute concurrently. Blocks until all operations are complete.
-     */
-    <O extends RunnableBuildOperation> void runAll(Action<BuildOperationQueue<O>> schedulingAction);
-
-    /**
-     * Submits an arbitrary number of operations, created synchronously by the scheduling action, to be executed by the supplied
-     * worker in the global build operation thread pool. Operations may execute concurrently, so the worker should be thread-safe.
-     * Blocks until all operations are complete.
-     */
-    <O extends BuildOperation> void runAll(BuildOperationWorker<O> worker, Action<BuildOperationQueue<O>> schedulingAction);
+    BuildOperationContext start(BuildOperationDescriptor.Builder descriptor);
 
     /**
      * Returns the state of the build operation currently running on this thread. Can be used as parent of a new build operation
@@ -77,4 +70,50 @@ public interface BuildOperationExecutor {
      * @throws IllegalStateException When the current thread is not executing an operation.
      */
     BuildOperationRef getCurrentOperation();
+
+    /**
+     * Submits an arbitrary number of runnable operations, created synchronously by the scheduling action, to be executed in the global
+     * build operation thread pool. Operations may execute concurrently. Blocks until all operations are complete.
+     *
+     * <p>Actions are not permitted to access any mutable project state. Generally, this is preferred.</p>
+     */
+    <O extends RunnableBuildOperation> void runAll(Action<BuildOperationQueue<O>> schedulingAction);
+
+    /**
+     * Overload allowing {@link BuildOperationConstraint} to be specified.
+     *
+     * @see BuildOperationExecutor#runAllWithAccessToProjectState(Action)
+     */
+    <O extends RunnableBuildOperation> void runAll(Action<BuildOperationQueue<O>> schedulingAction, BuildOperationConstraint buildOperationConstraint);
+
+    /**
+     * Same as {@link #runAll(Action)}. However, the actions are allowed to access mutable project state. In general, this is more likely to
+     * result in deadlocks and other flaky behaviours.
+     *
+     * <p>See {@link org.gradle.internal.resources.ProjectLeaseRegistry#whileDisallowingProjectLockChanges(Factory)} for more details.
+     */
+    <O extends RunnableBuildOperation> void runAllWithAccessToProjectState(Action<BuildOperationQueue<O>> schedulingAction);
+
+    /**
+     * Overload allowing {@link BuildOperationConstraint} to be specified.
+     *
+     * @see BuildOperationExecutor#runAllWithAccessToProjectState(Action)
+     */
+    <O extends RunnableBuildOperation> void runAllWithAccessToProjectState(Action<BuildOperationQueue<O>> schedulingAction, BuildOperationConstraint buildOperationConstraint);
+
+    /**
+     * Submits an arbitrary number of operations, created synchronously by the scheduling action, to be executed by the supplied
+     * worker in the global build operation thread pool. Operations may execute concurrently, so the worker should be thread-safe.
+     * Blocks until all operations are complete.
+     *
+     * <p>Actions are not permitted to access any mutable project state. Generally, this is preferred.</p>
+     */
+    <O extends BuildOperation> void runAll(BuildOperationWorker<O> worker, Action<BuildOperationQueue<O>> schedulingAction);
+
+    /**
+     * Overload allowing {@link BuildOperationConstraint} to be specified.
+     *
+     * @see BuildOperationExecutor#runAll(BuildOperationWorker, Action)
+     */
+    <O extends BuildOperation> void runAll(BuildOperationWorker<O> worker, Action<BuildOperationQueue<O>> schedulingAction, BuildOperationConstraint buildOperationConstraint);
 }

@@ -23,7 +23,7 @@ import org.gradle.reporting.HtmlPageBuilder;
 import org.gradle.reporting.HtmlReportRenderer;
 import org.gradle.reporting.ReportRenderer;
 import org.gradle.util.GradleVersion;
-import org.gradle.util.RelativePathUtil;
+import org.gradle.util.internal.RelativePathUtil;
 
 import java.io.File;
 import java.io.Writer;
@@ -40,6 +40,7 @@ public class BuildDashboardGenerator extends ReportRenderer<Collection<Report>, 
     @Override
     public void render(Collection<Report> reports, final File outputFile) {
         this.reports = new TreeSet<Report>(new Comparator<Report>() {
+            @Override
             public int compare(Report o1, Report o2) {
                 return o1.getDisplayName().compareTo(o2.getDisplayName());
             }
@@ -75,7 +76,7 @@ public class BuildDashboardGenerator extends ReportRenderer<Collection<Report>, 
                         ul();
                         for (Report report : reports) {
                             li();
-                            if (report.getDestination().exists()) {
+                            if (report.getOutputLocation().get().getAsFile().exists()) {
                                 a().href(RelativePathUtil.relativePath(outputFile.getParentFile(), getHtmlLinkedFileFromReport(report))).text(report.getDisplayName());
                             } else {
                                 span().classAttr("unavailable").text(report.getDisplayName());
@@ -102,7 +103,7 @@ public class BuildDashboardGenerator extends ReportRenderer<Collection<Report>, 
         if (report instanceof DirectoryReport) {
             return ((DirectoryReport) report).getEntryPoint();
         } else {
-            return report.getDestination();
+            return report.getOutputLocation().get().getAsFile();
         }
     }
 }

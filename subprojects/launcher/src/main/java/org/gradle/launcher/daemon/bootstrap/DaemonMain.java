@@ -29,6 +29,7 @@ import org.gradle.internal.nativeintegration.services.NativeServices;
 import org.gradle.internal.remote.Address;
 import org.gradle.internal.serialize.kryo.KryoBackedDecoder;
 import org.gradle.internal.service.scopes.GradleUserHomeScopeServiceRegistry;
+import org.gradle.internal.stream.EncodedStream;
 import org.gradle.launcher.bootstrap.EntryPoint;
 import org.gradle.launcher.bootstrap.ExecutionListener;
 import org.gradle.launcher.daemon.configuration.DaemonParameters;
@@ -41,7 +42,6 @@ import org.gradle.launcher.daemon.server.DaemonServices;
 import org.gradle.launcher.daemon.server.MasterExpirationStrategy;
 import org.gradle.launcher.daemon.server.expiry.DaemonExpirationStrategy;
 import org.gradle.process.internal.shutdown.ShutdownHooks;
-import org.gradle.process.internal.streams.EncodedStream;
 
 import java.io.ByteArrayInputStream;
 import java.io.EOFException;
@@ -58,16 +58,14 @@ import java.util.List;
  * unexpected client disconnection) the process will exit with 1.
  */
 public class DaemonMain extends EntryPoint {
-
     private static final Logger LOGGER = Logging.getLogger(DaemonMain.class);
-    public static final String SINGLE_USE_FLAG = "--single-use";
 
     private PrintStream originalOut;
     private PrintStream originalErr;
 
     @Override
     protected void doAction(String[] args, ExecutionListener listener) {
-        //The first argument is not really used but it is very useful in diagnosing, i.e. running 'jps -m'
+        // The first argument is not really used but it is very useful in diagnosing, i.e. running 'jps -m'
         if (args.length != 1) {
             invalidArgs("Following arguments are required: <gradle-version>");
         }
@@ -106,7 +104,7 @@ public class DaemonMain extends EntryPoint {
             throw new UncheckedIOException(e);
         }
 
-        NativeServices.initialize(gradleHomeDir);
+        NativeServices.initializeOnDaemon(gradleHomeDir);
         DaemonServerConfiguration parameters = new DefaultDaemonServerConfiguration(daemonUid, daemonBaseDir, idleTimeoutMs, periodicCheckIntervalMs, singleUse, priority, startupOpts);
         LoggingServiceRegistry loggingRegistry = LoggingServiceRegistry.newCommandLineProcessLogging();
         LoggingManagerInternal loggingManager = loggingRegistry.newInstance(LoggingManagerInternal.class);
@@ -146,14 +144,11 @@ public class DaemonMain extends EntryPoint {
     }
 
     protected void daemonStarted(Long pid, String uid, Address address, File daemonLog) {
-        //directly printing to the stream to avoid log level filtering.
+        // directly printing to the stream to avoid log level filtering.
         new DaemonStartupCommunication().printDaemonStarted(originalOut, pid, uid, address, daemonLog);
         try {
             originalOut.close();
             originalErr.close();
-
-            //TODO - make this work on windows
-            //originalIn.close();
         } finally {
             originalOut = null;
             originalErr = null;
@@ -161,7 +156,7 @@ public class DaemonMain extends EntryPoint {
     }
 
     protected void initialiseLogging(LoggingManagerInternal loggingManager, File daemonLog) {
-        //create log file
+        // create log file
         PrintStream result;
         try {
             Files.createParentDirs(daemonLog);
@@ -169,34 +164,49 @@ public class DaemonMain extends EntryPoint {
         } catch (Exception e) {
             throw new RuntimeException("Unable to create daemon log file", e);
         }
+
+        reducePermissionsOnDaemonLog(daemonLog);
+
         final PrintStream log = result;
 
         ShutdownHooks.addShutdownHook(new Runnable() {
+            @Override
             public void run() {
-                //just in case we have a bug related to logging,
-                //printing some exit info directly to file:
+                // just in case we have a bug related to logging,
+                // printing some exit info directly to file:
                 log.println(DaemonMessages.DAEMON_VM_SHUTTING_DOWN);
             }
         });
 
-        //close all streams and redirect IO
+        // close all streams and redirect IO
         redirectOutputsAndInput(log);
 
-        //after redirecting we need to add the new std out/err to the renderer singleton
-        //so that logging gets its way to the daemon log:
+        // after redirecting we need to add the new std out/err to the renderer singleton
+        // so that logging gets its way to the daemon log:
         loggingManager.attachSystemOutAndErr();
 
-        //Making the daemon infrastructure log with DEBUG. This is only for the infrastructure!
-        //Each build request carries it's own log level and it is used during the execution of the build (see LogToClient)
+        // Making the daemon infrastructure log with DEBUG. This is only for the infrastructure!
+        // Each build request carries it's own log level and it is used during the execution of the build (see LogToClient)
         loggingManager.setLevelInternal(LogLevel.DEBUG);
 
         loggingManager.start();
     }
 
+    /**
+     * Set the permissions for the daemon log to be only readable/writable by the current user.
+     */
+    private void reducePermissionsOnDaemonLog(File daemonLog) {
+        //noinspection ResultOfMethodCallIgnored
+        daemonLog.setReadable(false, false);
+        //noinspection ResultOfMethodCallIgnored
+        daemonLog.setReadable(true);
+        //noinspection ResultOfMethodCallIgnored
+        daemonLog.setExecutable(false);
+    }
+
     private void redirectOutputsAndInput(PrintStream printStream) {
         this.originalOut = System.out;
         this.originalErr = System.err;
-        //InputStream originalIn = System.in;
 
         System.setOut(printStream);
         System.setErr(printStream);

@@ -24,14 +24,11 @@ import org.gradle.api.file.FileVisitDetails;
 import org.gradle.api.file.FileVisitor;
 import org.gradle.api.file.RelativePath;
 import org.gradle.api.internal.file.AbstractFileTreeElement;
-import org.gradle.api.internal.file.FileSystemSubset;
-import org.gradle.api.internal.file.collections.ArchiveFileTree;
 import org.gradle.api.internal.file.collections.DirectoryFileTree;
 import org.gradle.api.internal.file.collections.DirectoryFileTreeFactory;
-import org.gradle.api.internal.file.collections.MinimalFileTree;
-import org.gradle.api.internal.file.collections.DefaultSingletonFileTree;
+import org.gradle.api.provider.Provider;
+import org.gradle.internal.file.Chmod;
 import org.gradle.internal.hash.FileHasher;
-import org.gradle.internal.nativeintegration.filesystem.Chmod;
 import org.gradle.internal.nativeintegration.filesystem.FileSystem;
 
 import java.io.File;
@@ -43,30 +40,43 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-public class ZipFileTree implements MinimalFileTree, ArchiveFileTree {
-    private final File zipFile;
+public class ZipFileTree extends AbstractArchiveFileTree {
+    private final Provider<File> fileProvider;
     private final File tmpDir;
     private final Chmod chmod;
     private final DirectoryFileTreeFactory directoryFileTreeFactory;
     private final FileHasher fileHasher;
 
-    public ZipFileTree(File zipFile, File tmpDir, Chmod chmod, DirectoryFileTreeFactory directoryFileTreeFactory, FileHasher fileHasher) {
-        this.zipFile = zipFile;
+    public ZipFileTree(Provider<File> zipFile,
+                       File tmpDir,
+                       Chmod chmod,
+                       DirectoryFileTreeFactory directoryFileTreeFactory,
+                       FileHasher fileHasher) {
+        this.fileProvider = zipFile;
         this.tmpDir = tmpDir;
         this.chmod = chmod;
         this.directoryFileTreeFactory = directoryFileTreeFactory;
         this.fileHasher = fileHasher;
     }
 
-    public String getDisplayName() {
-        return String.format("ZIP '%s'", zipFile);
+    @Override
+    public String toString() {
+        return getDisplayName();
     }
 
+    @Override
+    public String getDisplayName() {
+        return String.format("ZIP '%s'", fileProvider.getOrNull());
+    }
+
+    @Override
     public DirectoryFileTree getMirror() {
         return directoryFileTreeFactory.create(getExpandedDir());
     }
 
+    @Override
     public void visit(FileVisitor visitor) {
+        File zipFile = fileProvider.get();
         if (!zipFile.exists()) {
             throw new InvalidUserDataException(String.format("Cannot expand %s as it does not exist.", getDisplayName()));
         }
@@ -105,11 +115,13 @@ public class ZipFileTree implements MinimalFileTree, ArchiveFileTree {
         }
     }
 
-    public File getBackingFile() {
-        return zipFile;
+    @Override
+    public Provider<File> getBackingFileProvider() {
+        return fileProvider;
     }
 
     private File getExpandedDir() {
+        File zipFile = fileProvider.get();
         String expandedDirName = zipFile.getName() + "_" + fileHasher.hash(zipFile);
         return new File(tmpDir, expandedDirName);
     }
@@ -131,14 +143,17 @@ public class ZipFileTree implements MinimalFileTree, ArchiveFileTree {
             this.stopFlag = stopFlag;
         }
 
+        @Override
         public String getDisplayName() {
             return String.format("zip entry %s!%s", originalFile, entry.getName());
         }
 
+        @Override
         public void stopVisiting() {
             stopFlag.set(true);
         }
 
+        @Override
         public File getFile() {
             if (file == null) {
                 file = new File(expandedDir, entry.getName());
@@ -149,18 +164,22 @@ public class ZipFileTree implements MinimalFileTree, ArchiveFileTree {
             return file;
         }
 
+        @Override
         public long getLastModified() {
             return entry.getTime();
         }
 
+        @Override
         public boolean isDirectory() {
             return entry.isDirectory();
         }
 
+        @Override
         public long getSize() {
             return entry.getSize();
         }
 
+        @Override
         public InputStream open() {
             try {
                 return zip.getInputStream(entry);
@@ -169,10 +188,12 @@ public class ZipFileTree implements MinimalFileTree, ArchiveFileTree {
             }
         }
 
+        @Override
         public RelativePath getRelativePath() {
             return new RelativePath(!entry.isDirectory(), entry.getName().split("/"));
         }
 
+        @Override
         public int getMode() {
             int unixMode = entry.getUnixMode() & 0777;
             if (unixMode == 0) {
@@ -184,21 +205,6 @@ public class ZipFileTree implements MinimalFileTree, ArchiveFileTree {
                 }
             }
             return unixMode;
-        }
-    }
-
-    @Override
-    public void registerWatchPoints(FileSystemSubset.Builder builder) {
-        builder.add(zipFile);
-    }
-
-    @Override
-    public void visitTreeOrBackingFile(FileVisitor visitor) {
-        File backingFile = getBackingFile();
-        if (backingFile!=null) {
-            new DefaultSingletonFileTree(backingFile).visit(visitor);
-        } else {
-            visit(visitor);
         }
     }
 }

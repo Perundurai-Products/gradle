@@ -25,13 +25,14 @@ import org.gradle.api.file.FileVisitDetails
 import org.gradle.api.file.FileVisitor
 import org.gradle.api.file.RelativePath
 import org.gradle.api.internal.file.CopyActionProcessingStreamAction
+import org.gradle.api.internal.file.TestFiles
 import org.gradle.api.tasks.WorkResult
 import org.gradle.api.tasks.WorkResults
 import org.gradle.internal.logging.ConfigureLogging
 import org.gradle.internal.logging.TestOutputEventListener
 import org.gradle.internal.nativeintegration.filesystem.FileSystem
 import org.gradle.internal.reflect.Instantiator
-import org.gradle.util.ClosureBackedAction
+import org.gradle.util.internal.ClosureBackedAction
 import org.gradle.util.TestUtil
 import org.junit.Rule
 import spock.lang.Shared
@@ -54,7 +55,7 @@ class DuplicateHandlingCopyActionExecutorTest extends Specification {
     @Rule ConfigureLogging logging = new ConfigureLogging(outputEventListener)
 
     @Shared Instantiator instantiator = TestUtil.instantiatorFactory().decorateLenient()
-    def executer = new CopyActionExecuter(instantiator, fileSystem, false)
+    def executer = new CopyActionExecuter(instantiator, TestUtil.objectFactory(), fileSystem, false, TestFiles.documentationRegistry())
     def copySpec = Mock(MyCopySpec) {
         getChildren() >> []
     }

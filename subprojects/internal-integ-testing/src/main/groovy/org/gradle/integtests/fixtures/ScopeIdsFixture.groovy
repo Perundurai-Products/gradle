@@ -26,7 +26,8 @@ import org.gradle.internal.scopeids.id.UserScopeId
 import org.gradle.internal.scopeids.id.WorkspaceScopeId
 import org.gradle.test.fixtures.file.TestDirectoryProvider
 import org.gradle.test.fixtures.file.TestFile
-import org.gradle.util.TextUtil
+
+import static org.gradle.util.internal.TextUtil.normaliseFileSeparators
 
 /**
  * Extracts the scope IDs for a build, and asserts that all nested builds have the same IDs.
@@ -91,38 +92,61 @@ class ScopeIdsFixture extends UserInitScriptExecuterFixture {
         getBuildPaths().last()
     }
 
+    @Override
+    String initScriptContent() {
+        """
+            class CollectScopeIds extends DefaultTask {
+
+                private File outputJsonFile
+
+                void setOutputJsonFile(File file) {
+                    outputJsonFile = file
+                }
+
+                @TaskAction def collect() {
+                    def gradle = services.get(Gradle)
+                    def scopeIds = [
+                        "\${gradle.identityPath}": [
+                            buildInvocation: services.get(${BuildInvocationScopeId.name}).id.asString(),
+                            workspace: services.get(${WorkspaceScopeId.name}).id.asString(),
+                            user: services.get(${UserScopeId.name}).id.asString()
+                        ]
+                    ]
+                    outputJsonFile << groovy.json.JsonOutput.toJson(scopeIds) + '\\n'
+                }
+            }
+
+            rootProject {
+                task collectScopeIds(type: CollectScopeIds) {
+                    outputJsonFile = new File("${normaliseFileSeparators(idsFile.absolutePath)}")
+                }
+                tasks.withType(DefaultTask) {
+                    if (name != "collectScopeIds") {
+                        dependsOn collectScopeIds
+                    }
+                }
+            }
+        """
+    }
+
+    @Override
+    void configureExecuter(GradleExecuter executer) {
+        super.configureExecuter(executer)
+        executer.beforeExecute {
+            idsFile.delete()
+        }
+    }
+
     private TestFile getIdsFile() {
         testDir.testDirectory.file("ids.json")
     }
 
     @Override
-    String initScriptContent() {
-        """
-            if (gradle.parent == null) {
-                def ids = Collections.synchronizedMap([:])
-                gradle.ext.scopeIds = ids
-                gradle.buildFinished {
-                    gradle.rootProject.file("${TextUtil.normaliseFileSeparators(idsFile.absolutePath)}").text = groovy.json.JsonOutput.toJson(ids)
-                }
-            }
-
-            gradle.rootProject {
-                def rootGradle = gradle
-                while (rootGradle.parent != null) {
-                    rootGradle = rootGradle.parent
-                }           
-                rootGradle.ext.scopeIds[gradle.identityPath] = [
-                    buildInvocation: gradle.services.get(${BuildInvocationScopeId.name}).id.asString(),
-                    workspace: gradle.services.get(${WorkspaceScopeId.name}).id.asString(),
-                    user: gradle.services.get(${UserScopeId.name}).id.asString()
-                ]
-            }
-        """
-    }
-
-    @Override
     void afterBuild() {
-        Map<String, Map<String, String>> idsMap = new JsonSlurper().parse(idsFile) as Map
+        Map<String, Map<String, String>> idsMap = idsFile.readLines()
+            .collect { line -> new JsonSlurper().parse(new StringReader(line)) as Map<String, Map<String, String>> }
+            .collectMany { it.entrySet() }
+            .collectEntries { it }
         Map<String, ScopeIds> ids = [:]
         idsMap.each {
             ids[it.key] = new ScopeIds(
@@ -134,17 +158,17 @@ class ScopeIdsFixture extends UserInitScriptExecuterFixture {
 
         // Assert that same IDs were used for all builds in build
         def allScopeIds = ids.values()
-        def buildInvocationIds = allScopeIds.buildInvocation
+        def buildInvocationIds = allScopeIds*.buildInvocation
 
         assert buildInvocationIds.unique(false).size() == 1
 
         if (!disableConsistentWorkspaceIdCheck) {
-            def workspaceIds = allScopeIds.workspace
+            def workspaceIds = allScopeIds*.workspace
             assert workspaceIds.unique(false).size() == 1
         }
 
         if (!disableConsistentUserIdCheck) {
-            def userIds = allScopeIds.user
+            def userIds = allScopeIds*.user
             assert userIds.unique(false).size() == 1
         }
 

@@ -20,12 +20,13 @@ import org.gradle.api.DefaultTask
 import org.gradle.api.Project
 import org.gradle.api.internal.project.DefaultProject
 import org.gradle.api.logging.configuration.WarningMode
-import org.gradle.internal.featurelifecycle.DeprecatedFeatureUsage
-import org.gradle.internal.featurelifecycle.DeprecatedUsageBuildOperationProgressBroadaster
+import org.gradle.internal.deprecation.DeprecationLogger
 import org.gradle.internal.featurelifecycle.UsageLocationReporter
+import org.gradle.internal.operations.BuildOperationProgressEventEmitter
+import org.gradle.test.fixtures.file.LeaksFileHandles
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
-import org.gradle.util.Resources
-import org.gradle.util.SingleMessageLogger
+import org.gradle.util.internal.IncubationLogger
+import org.gradle.util.internal.Resources
 import org.junit.Rule
 import spock.lang.Ignore
 import spock.lang.Issue
@@ -35,7 +36,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 class ProjectBuilderTest extends Specification {
     @Rule
-    public final TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider()
+    public final TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider(getClass())
     @Rule
     public final Resources resources = new Resources()
 
@@ -120,6 +121,7 @@ class ProjectBuilderTest extends Specification {
         task.property == 'some value'
     }
 
+    @LeaksFileHandles("script jar is held open")
     def canApplyABuildScript() {
         when:
         def project = buildProject()
@@ -169,28 +171,15 @@ class ProjectBuilderTest extends Specification {
         latch.get()
     }
 
-    def "emits deprecation warning when using constructor directly"() {
-        given:
-        def broadcaster = Mock(DeprecatedUsageBuildOperationProgressBroadaster)
-        SingleMessageLogger.init(Mock(UsageLocationReporter), WarningMode.None, broadcaster)
-
-        when:
-        new ProjectBuilder()
-
-        then:
-        1 * broadcaster.progress(_) >> { DeprecatedFeatureUsage usage ->
-            assert usage.summary == "The ProjectBuilder() constructor has been deprecated."
-            assert usage.advice == "Please use ProjectBuilder.builder() instead."
-        }
-
-        cleanup:
-        SingleMessageLogger.reset()
+    def "ProjectBuilder can not be directly instantiated"() {
+        expect:
+        ProjectBuilder.constructors.size() == 0
     }
 
     def "does not emit deprecation warning when using the builder() method"() {
         given:
-        def broadcaster = Mock(DeprecatedUsageBuildOperationProgressBroadaster)
-        SingleMessageLogger.init(Mock(UsageLocationReporter), WarningMode.None, broadcaster)
+        def broadcaster = Mock(BuildOperationProgressEventEmitter)
+        DeprecationLogger.init(Mock(UsageLocationReporter), WarningMode.None, broadcaster)
 
         when:
         ProjectBuilder.builder()
@@ -199,7 +188,7 @@ class ProjectBuilderTest extends Specification {
         0 * broadcaster.progress(_)
 
         cleanup:
-        SingleMessageLogger.reset()
+        IncubationLogger.reset()
     }
 }
 

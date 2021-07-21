@@ -17,8 +17,10 @@
 package org.gradle.language.base
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.integtests.fixtures.UnsupportedWithConfigurationCache
 import org.gradle.internal.logging.text.DiagnosticsVisitor
 
+@UnsupportedWithConfigurationCache(because = "software model")
 class BinariesLifecycleTaskIntegrationTest extends AbstractIntegrationSpec {
     def setup() {
         settingsFile << """rootProject.name = 'assemble-binary'"""

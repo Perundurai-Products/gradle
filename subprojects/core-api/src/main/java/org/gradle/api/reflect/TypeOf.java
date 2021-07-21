@@ -17,7 +17,6 @@
 package org.gradle.api.reflect;
 
 import com.google.common.base.Function;
-import org.gradle.api.Incubating;
 import org.gradle.internal.Cast;
 import org.gradle.model.internal.type.ModelType;
 
@@ -205,6 +204,17 @@ public abstract class TypeOf<T> {
     }
 
     /**
+     * Returns the first declared lower-bound of the wildcard type expression represented by this type.
+     *
+     * @return null if no lower-bound has been explicitly declared.
+     * @since 6.0
+     */
+    @Nullable
+    public TypeOf<?> getLowerBound() {
+        return nullableTypeOf(type.getLowerBound());
+    }
+
+    /**
      * Is this type assignable from the given type?
      *
      * @param type the given type
@@ -246,10 +256,9 @@ public abstract class TypeOf<T> {
      * </p>
      *
      * @since 5.0
-     * 
+     *
      * @return Underlying Java Class of this type.
      */
-    @Incubating
     public Class<T> getConcreteClass() {
         return type.getConcreteClass();
     }

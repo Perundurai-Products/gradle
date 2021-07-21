@@ -33,11 +33,12 @@ public class DefaultComponentIdentifierFactory implements ComponentIdentifierFac
         this.currentBuild = currentBuild;
     }
 
+    @Override
     public ComponentIdentifier createComponentIdentifier(Module module) {
-        String projectPath = module.getProjectPath();
+        ProjectComponentIdentifier projectId = module.getProjectId();
 
-        if (projectPath != null) {
-            return currentBuild.getIdentifierForProject(Path.path(projectPath));
+        if (projectId != null) {
+            return projectId;
         }
 
         return new DefaultModuleComponentIdentifier(DefaultModuleIdentifier.newId(module.getGroup(), module.getName()), module.getVersion());

@@ -19,18 +19,17 @@ package org.gradle.cache.internal;
 import com.google.common.cache.Cache;
 import com.google.common.util.concurrent.Runnables;
 import com.google.common.util.concurrent.UncheckedExecutionException;
-import org.gradle.api.Transformer;
 import org.gradle.cache.FileLock;
 import org.gradle.internal.Cast;
 import org.gradle.internal.UncheckedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 
-class InMemoryDecoratedCache<K, V> implements MultiProcessSafeAsyncPersistentIndexedCache<K, V> {
+class InMemoryDecoratedCache<K, V> implements MultiProcessSafeAsyncPersistentIndexedCache<K, V>, InMemoryCacheController {
     private final static Logger LOG = LoggerFactory.getLogger(InMemoryDecoratedCache.class);
     private final static Object NULL = new Object();
     private final MultiProcessSafeAsyncPersistentIndexedCache<K, V> delegate;
@@ -54,16 +53,11 @@ class InMemoryDecoratedCache<K, V> implements MultiProcessSafeAsyncPersistentInd
     public V get(final K key) {
         Object value;
         try {
-            value = inMemoryCache.get(key, new Callable<Object>() {
-                @Override
-                public Object call() throws Exception {
-                    Object out = delegate.get(key);
-                    return out == null ? NULL : out;
-                }
+            value = inMemoryCache.get(key, () -> {
+                Object out = delegate.get(key);
+                return out == null ? NULL : out;
             });
-        } catch (UncheckedExecutionException e) {
-            throw UncheckedException.throwAsUncheckedException(e.getCause());
-        } catch (ExecutionException e) {
+        } catch (UncheckedExecutionException | ExecutionException e) {
             throw UncheckedException.throwAsUncheckedException(e.getCause());
         }
         if (value == NULL) {
@@ -74,8 +68,8 @@ class InMemoryDecoratedCache<K, V> implements MultiProcessSafeAsyncPersistentInd
     }
 
     @Override
-    public V get(final K key, final Transformer<? extends V, ? super K> producer, final Runnable completion) {
-        final AtomicReference<Runnable> completionRef = new AtomicReference<Runnable>(completion);
+    public V get(final K key, final Function<? super K, ? extends V> producer, final Runnable completion) {
+        final AtomicReference<Runnable> completionRef = new AtomicReference<>(completion);
         Object value;
         try {
             value = inMemoryCache.getIfPresent(key);
@@ -85,24 +79,19 @@ class InMemoryDecoratedCache<K, V> implements MultiProcessSafeAsyncPersistentInd
             } else if (value != null) {
                 return Cast.uncheckedCast(value);
             }
-            value = inMemoryCache.get(key, new Callable<Object>() {
-                @Override
-                public Object call() throws Exception {
-                    if (!wasNull) {
-                        Object out = delegate.get(key);
-                        if (out != null) {
-                            return out;
-                        }
+            value = inMemoryCache.get(key, () -> {
+                if (!wasNull) {
+                    Object out = delegate.get(key);
+                    if (out != null) {
+                        return out;
                     }
-                    V value = producer.transform(key);
-                    delegate.putLater(key, value, completion);
-                    completionRef.set(Runnables.doNothing());
-                    return value;
                 }
+                V generatedValue = producer.apply(key);
+                delegate.putLater(key, generatedValue, completion);
+                completionRef.set(Runnables.doNothing());
+                return generatedValue;
             });
-        } catch (UncheckedExecutionException e) {
-            throw UncheckedException.throwAsUncheckedException(e.getCause());
-        } catch (ExecutionException e) {
+        } catch (UncheckedExecutionException | ExecutionException e) {
             throw UncheckedException.throwAsUncheckedException(e.getCause());
         } finally {
             completionRef.get().run();
@@ -151,5 +140,15 @@ class InMemoryDecoratedCache<K, V> implements MultiProcessSafeAsyncPersistentInd
     public void beforeLockRelease(FileLock.State currentCacheState) {
         fileLockStateReference.set(currentCacheState);
         delegate.beforeLockRelease(currentCacheState);
+    }
+
+    @Override
+    public String getCacheId() {
+        return cacheId;
+    }
+
+    @Override
+    public void clearInMemoryCache() {
+        inMemoryCache.invalidateAll();
     }
 }

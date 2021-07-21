@@ -21,47 +21,59 @@ import org.gradle.api.internal.TaskInternal;
 import org.gradle.api.internal.tasks.TaskExecuter;
 import org.gradle.api.internal.tasks.TaskExecuterResult;
 import org.gradle.api.internal.tasks.TaskExecutionContext;
-import org.gradle.api.internal.tasks.TaskOutputFilePropertySpec;
 import org.gradle.api.internal.tasks.TaskStateInternal;
-import org.gradle.api.logging.Logger;
-import org.gradle.api.logging.Logging;
-import org.gradle.internal.cleanup.BuildOutputCleanupRegistry;
+import org.gradle.api.internal.tasks.properties.FilePropertySpec;
+import org.gradle.api.internal.tasks.properties.TaskProperties;
+import org.gradle.internal.execution.BuildOutputCleanupRegistry;
 import org.gradle.internal.execution.OutputChangeListener;
 import org.gradle.internal.execution.history.OutputFilesRepository;
+import org.gradle.internal.file.Deleter;
 import org.gradle.internal.operations.BuildOperationContext;
 import org.gradle.internal.operations.BuildOperationDescriptor;
 import org.gradle.internal.operations.BuildOperationExecutor;
 import org.gradle.internal.operations.RunnableBuildOperation;
-import org.gradle.util.GFileUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 public class CleanupStaleOutputsExecuter implements TaskExecuter {
 
     public static final String CLEAN_STALE_OUTPUTS_DISPLAY_NAME = "Clean stale outputs";
 
-    private final Logger logger = Logging.getLogger(CleanupStaleOutputsExecuter.class);
+    private final Logger logger = LoggerFactory.getLogger(CleanupStaleOutputsExecuter.class);
     private final BuildOperationExecutor buildOperationExecutor;
+    private final Deleter deleter;
     private final OutputChangeListener outputChangeListener;
     private final TaskExecuter executer;
     private final OutputFilesRepository outputFilesRepository;
     private final BuildOutputCleanupRegistry cleanupRegistry;
 
-    public CleanupStaleOutputsExecuter(BuildOutputCleanupRegistry cleanupRegistry, OutputFilesRepository outputFilesRepository, BuildOperationExecutor buildOperationExecutor, OutputChangeListener outputChangeListener, TaskExecuter executer) {
+    public CleanupStaleOutputsExecuter(
+        BuildOperationExecutor buildOperationExecutor,
+        BuildOutputCleanupRegistry cleanupRegistry,
+        Deleter deleter,
+        OutputChangeListener outputChangeListener,
+        OutputFilesRepository outputFilesRepository,
+        TaskExecuter executer
+    ) {
         this.cleanupRegistry = cleanupRegistry;
         this.buildOperationExecutor = buildOperationExecutor;
+        this.deleter = deleter;
         this.outputChangeListener = outputChangeListener;
         this.executer = executer;
         this.outputFilesRepository = outputFilesRepository;
     }
 
     @Override
-    public TaskExecuterResult execute(final TaskInternal task, TaskStateInternal state, TaskExecutionContext context) {
-        final Set<File> filesToDelete = new HashSet<File>();
-        TaskProperties taskProperties = context.getTaskProperties();
-        for (TaskOutputFilePropertySpec outputFileSpec : taskProperties.getOutputFileProperties()) {
+    public TaskExecuterResult execute(TaskInternal task, TaskStateInternal state, TaskExecutionContext context) {
+        Set<File> filesToDelete = new HashSet<>();
+        TaskProperties properties = context.getTaskProperties();
+        for (FilePropertySpec outputFileSpec : properties.getOutputFileProperties()) {
             FileCollection files = outputFileSpec.getPropertyFiles();
             for (File file : files) {
                 if (cleanupRegistry.isOutputOwnedByBuild(file) && !outputFilesRepository.isGeneratedByGradle(file) && file.exists()) {
@@ -70,14 +82,18 @@ public class CleanupStaleOutputsExecuter implements TaskExecuter {
             }
         }
         if (!filesToDelete.isEmpty()) {
-            outputChangeListener.beforeOutputChange();
+            outputChangeListener.beforeOutputChange(
+                filesToDelete.stream()
+                    .map(File::getAbsolutePath)
+                    .collect(Collectors.toList())
+            );
             buildOperationExecutor.run(new RunnableBuildOperation() {
                 @Override
-                public void run(BuildOperationContext context) {
+                public void run(BuildOperationContext context) throws IOException {
                     for (File file : filesToDelete) {
                         if (file.exists()) {
                             logger.info("Deleting stale output file: {}", file.getAbsolutePath());
-                            GFileUtils.forceDelete(file);
+                            deleter.deleteRecursively(file);
                         }
                     }
                 }

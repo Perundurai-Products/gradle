@@ -23,12 +23,12 @@ import org.gradle.api.artifacts.component.ComponentIdentifier;
 import org.gradle.api.artifacts.component.ComponentSelector;
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier;
 import org.gradle.api.artifacts.component.ModuleComponentSelector;
+import org.gradle.api.capabilities.Capability;
 import org.gradle.api.internal.attributes.AttributesSchemaInternal;
 import org.gradle.api.internal.attributes.ImmutableAttributes;
 import org.gradle.internal.component.external.model.DefaultConfigurationMetadata;
 import org.gradle.internal.component.external.model.DefaultModuleComponentIdentifier;
 import org.gradle.internal.component.external.model.DefaultModuleComponentSelector;
-import org.gradle.internal.component.external.model.ModuleComponentArtifactMetadata;
 import org.gradle.internal.component.external.model.ModuleDependencyMetadata;
 import org.gradle.internal.component.external.model.VariantMetadataRules;
 import org.gradle.internal.component.model.ComponentResolveMetadata;
@@ -39,6 +39,8 @@ import org.gradle.internal.component.model.ForcingDependencyMetadata;
 import org.gradle.internal.component.model.IvyArtifactName;
 import org.gradle.internal.component.model.LocalComponentDependencyMetadata;
 
+import javax.annotation.Nullable;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
@@ -52,7 +54,7 @@ class LenientPlatformDependencyMetadata implements ModuleDependencyMetadata, For
     private final boolean force;
     private final boolean transitive;
 
-    LenientPlatformDependencyMetadata(ResolveState resolveState, NodeState from, ModuleComponentSelector cs, ModuleComponentIdentifier componentId, ComponentIdentifier platformId, boolean force, boolean transitive) {
+    LenientPlatformDependencyMetadata(ResolveState resolveState, NodeState from, ModuleComponentSelector cs, ModuleComponentIdentifier componentId, @Nullable ComponentIdentifier platformId, boolean force, boolean transitive) {
         this.resolveState = resolveState;
         this.from = from;
         this.cs = cs;
@@ -78,13 +80,18 @@ class LenientPlatformDependencyMetadata implements ModuleDependencyMetadata, For
     }
 
     @Override
-    public List<ConfigurationMetadata> selectConfigurations(ImmutableAttributes consumerAttributes, ComponentResolveMetadata targetComponent, AttributesSchemaInternal consumerSchema) {
+    public ModuleDependencyMetadata withEndorseStrictVersions(boolean endorse) {
+        return this;
+    }
+
+    @Override
+    public List<ConfigurationMetadata> selectConfigurations(ImmutableAttributes consumerAttributes, ComponentResolveMetadata targetComponent, AttributesSchemaInternal consumerSchema, Collection<? extends Capability> explicitRequestedCapabilities) {
         if (targetComponent instanceof LenientPlatformResolveMetadata) {
             LenientPlatformResolveMetadata platformMetadata = (LenientPlatformResolveMetadata) targetComponent;
-            return Collections.<ConfigurationMetadata>singletonList(new LenientPlatformConfigurationMetadata(platformMetadata.getPlatformState(), platformId));
+            return Collections.singletonList(new LenientPlatformConfigurationMetadata(platformMetadata.getPlatformState(), platformId));
         }
         // the target component exists, so we need to fallback to the traditional selection process
-        return new LocalComponentDependencyMetadata(componentId, cs, null, ImmutableAttributes.EMPTY, ImmutableAttributes.EMPTY, null, Collections.<IvyArtifactName>emptyList(), Collections.<ExcludeMetadata>emptyList(), false, false, true, false, null).selectConfigurations(consumerAttributes, targetComponent, consumerSchema);
+        return new LocalComponentDependencyMetadata(componentId, cs, null, ImmutableAttributes.EMPTY, ImmutableAttributes.EMPTY, null, Collections.emptyList(), Collections.emptyList(), false, false, true, false, false, null).selectConfigurations(consumerAttributes, targetComponent, consumerSchema, explicitRequestedCapabilities);
     }
 
     @Override
@@ -103,6 +110,11 @@ class LenientPlatformDependencyMetadata implements ModuleDependencyMetadata, For
     }
 
     @Override
+    public DependencyMetadata withTargetAndArtifacts(ComponentSelector target, List<IvyArtifactName> artifacts) {
+        return this;
+    }
+
+    @Override
     public boolean isChanging() {
         return false;
     }
@@ -115,6 +127,15 @@ class LenientPlatformDependencyMetadata implements ModuleDependencyMetadata, For
     @Override
     public boolean isConstraint() {
         return true;
+    }
+
+    @Override
+    public boolean isEndorsingStrictVersions() {
+        return false;
+    }
+
+    private boolean isExternalVariant() {
+        return false;
     }
 
     @Override
@@ -142,15 +163,15 @@ class LenientPlatformDependencyMetadata implements ModuleDependencyMetadata, For
         private final VirtualPlatformState platformState;
         private final ComponentIdentifier platformId;
 
-        public LenientPlatformConfigurationMetadata(VirtualPlatformState platform, ComponentIdentifier platformId) {
-            super(componentId, "default", true, false, ImmutableSet.of("default"), ImmutableList.<ModuleComponentArtifactMetadata>of(), VariantMetadataRules.noOp(), ImmutableList.<ExcludeMetadata>of(), ImmutableAttributes.EMPTY);
+        public LenientPlatformConfigurationMetadata(VirtualPlatformState platform, @Nullable ComponentIdentifier platformId) {
+            super(componentId, "default", true, false, ImmutableSet.of("default"), ImmutableList.of(), VariantMetadataRules.noOp(), ImmutableList.of(), ImmutableAttributes.EMPTY, false, false);
             this.platformState = platform;
             this.platformId = platformId;
         }
 
         @Override
-        public List<? extends DependencyMetadata> getDependencies() {
-            List<DependencyMetadata> result = null;
+        public List<? extends ModuleDependencyMetadata> getDependencies() {
+            List<ModuleDependencyMetadata> result = null;
             List<String> candidateVersions = platformState.getCandidateVersions();
             Set<ModuleResolveState> modules = platformState.getParticipatingModules();
             for (ModuleResolveState module : modules) {
@@ -181,10 +202,10 @@ class LenientPlatformDependencyMetadata implements ModuleDependencyMetadata, For
                     platformState.attachOrphanEdges();
                 }
             }
-            return result == null ? Collections.<DependencyMetadata>emptyList() : result;
+            return result == null ? Collections.emptyList() : result;
         }
 
-        private List<DependencyMetadata> registerPlatformEdge(List<DependencyMetadata> result, Set<ModuleResolveState> modules, ModuleComponentIdentifier leafId, ModuleComponentSelector leafSelector, ComponentIdentifier platformId, boolean force) {
+        private List<ModuleDependencyMetadata> registerPlatformEdge(@Nullable List<ModuleDependencyMetadata> result, Set<ModuleResolveState> modules, ModuleComponentIdentifier leafId, ModuleComponentSelector leafSelector, ComponentIdentifier platformId, boolean force) {
             if (result == null) {
                 result = Lists.newArrayListWithExpectedSize(modules.size());
             }

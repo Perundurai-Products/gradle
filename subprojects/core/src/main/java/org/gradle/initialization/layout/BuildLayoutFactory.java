@@ -15,13 +15,13 @@
  */
 package org.gradle.initialization.layout;
 
-import javax.annotation.Nullable;
 import org.gradle.api.initialization.Settings;
 import org.gradle.api.resources.MissingResourceException;
 import org.gradle.internal.FileUtils;
 import org.gradle.internal.scan.UsedByScanPlugin;
 import org.gradle.internal.scripts.DefaultScriptFileResolver;
 
+import javax.annotation.Nullable;
 import java.io.File;
 
 @UsedByScanPlugin
@@ -72,9 +72,6 @@ public class BuildLayoutFactory {
         }
         for (File candidate = currentDir.getParentFile(); candidate != null && !candidate.equals(stopAt); candidate = candidate.getParentFile()) {
             settingsFile = findExistingSettingsFileIn(candidate);
-            if (settingsFile == null) {
-                settingsFile = findExistingSettingsFileIn(new File(candidate, "master"));
-            }
             if (settingsFile != null) {
                 return layout(candidate, settingsFile);
             }

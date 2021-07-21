@@ -17,11 +17,15 @@
 package org.gradle.plugin.devel.tasks
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.util.GUtil
+import org.gradle.internal.reflect.problems.ValidationProblemId
+import org.gradle.internal.reflect.validation.ValidationMessageChecker
+import org.gradle.internal.reflect.validation.ValidationTestFor
+import org.gradle.util.internal.GUtil
 
-import static org.gradle.plugin.devel.tasks.PluginUnderTestMetadata.*
+import static org.gradle.plugin.devel.tasks.PluginUnderTestMetadata.IMPLEMENTATION_CLASSPATH_PROP_KEY
+import static org.gradle.plugin.devel.tasks.PluginUnderTestMetadata.METADATA_FILE_NAME
 
-class PluginUnderTestMetadataIntegrationTest extends AbstractIntegrationSpec {
+class PluginUnderTestMetadataIntegrationTest extends AbstractIntegrationSpec implements ValidationMessageChecker {
 
     private static final String TASK_NAME = 'pluginClasspathManifest'
 
@@ -29,8 +33,12 @@ class PluginUnderTestMetadataIntegrationTest extends AbstractIntegrationSpec {
         buildFile << """
             apply plugin: 'java'
         """
+        expectReindentedValidationMessage()
     }
 
+    @ValidationTestFor(
+        ValidationProblemId.VALUE_NOT_SET
+    )
     def "fails the task for null plugin classpath and output directory"() {
         given:
         buildFile << """
@@ -41,7 +49,7 @@ class PluginUnderTestMetadataIntegrationTest extends AbstractIntegrationSpec {
         fails TASK_NAME
 
         then:
-        failure.assertHasCause("No value has been specified for property 'outputDirectory'.")
+        failureDescriptionContains(missingValueMessage { type(PluginUnderTestMetadata.name).property('outputDirectory').includeLink() })
     }
 
     def "implementation-classpath entry in metadata is empty if there is no classpath"() {

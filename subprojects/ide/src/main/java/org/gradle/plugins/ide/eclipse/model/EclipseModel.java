@@ -19,7 +19,11 @@ package org.gradle.plugins.ide.eclipse.model;
 import com.google.common.base.Preconditions;
 import groovy.lang.Closure;
 import org.gradle.api.Action;
+import org.gradle.api.Project;
+import org.gradle.api.internal.project.ProjectInternal;
+import org.gradle.api.internal.tasks.DefaultTaskDependency;
 import org.gradle.api.model.ObjectFactory;
+import org.gradle.api.tasks.TaskDependency;
 import org.gradle.internal.xml.XmlTransformer;
 import org.gradle.plugins.ide.api.XmlFileContentMerger;
 
@@ -27,16 +31,18 @@ import javax.inject.Inject;
 import java.io.File;
 import java.util.Map;
 
-import static org.gradle.util.ConfigureUtil.configure;
+import static org.gradle.util.internal.ConfigureUtil.configure;
 
 /**
  * DSL-friendly model of the Eclipse project information.
  * First point of entry for customizing Eclipse project generation.
  *
  * <pre class='autoTested'>
- * apply plugin: 'java'
- * apply plugin: 'eclipse'
- * apply plugin: 'eclipse-wtp' //for web projects only
+ * plugins {
+ *     id 'java'
+ *     id 'eclipse'
+ *     id 'eclipse-wtp' // for web projects only
+ * }
  *
  * eclipse {
  *   pathVariables 'GRADLE_HOME': file('/best/software/gradle'), 'TOMCAT_HOME': file('../tomcat')
@@ -66,6 +72,25 @@ public class EclipseModel {
     private EclipseJdt jdt;
 
     private EclipseWtp wtp;
+
+    private final DefaultTaskDependency synchronizationTasks;
+
+    private final DefaultTaskDependency autoBuildTasks;
+
+    public EclipseModel() {
+        synchronizationTasks = new DefaultTaskDependency();
+        autoBuildTasks = new DefaultTaskDependency();
+    }
+
+    /**
+     * Constructor.
+     *
+     * @since 5.4
+     */
+    public EclipseModel(Project project) {
+        this.synchronizationTasks = new DefaultTaskDependency(((ProjectInternal) project).getTasks());
+        this.autoBuildTasks = new DefaultTaskDependency(((ProjectInternal) project).getTasks());
+    }
 
     /**
      * Injects and returns an instance of {@link ObjectFactory}.
@@ -215,6 +240,55 @@ public class EclipseModel {
      */
     public void jdt(Action<? super EclipseJdt> action) {
         action.execute(getJdt());
+    }
+
+    /**
+     * Returns the tasks to be executed before the Eclipse synchronization starts.
+     * <p>
+     * This property doesn't have a direct effect to the Gradle Eclipse plugin's behaviour. It is used, however, by
+     * Buildship to execute the configured tasks each time before the user imports the project or before a project
+     * synchronization starts.
+     *
+     * @return the tasks names
+     * @since 5.4
+     */
+    public TaskDependency getSynchronizationTasks() {
+        return synchronizationTasks;
+    }
+
+    /**
+     * Set tasks to be executed before the Eclipse synchronization.
+     *
+     * @see #getSynchronizationTasks()
+     * @since 5.4
+     */
+    public void synchronizationTasks(Object... synchronizationTasks) {
+        this.synchronizationTasks.add(synchronizationTasks);
+    }
+
+    /**
+     * Returns the tasks to be executed during the Eclipse auto-build.
+     * <p>
+     * This property doesn't have a direct effect to the Gradle Eclipse plugin's behaviour. It is used, however, by
+     * Buildship to execute the configured tasks each time when the Eclipse automatic build is triggered for the project.
+     *
+     * @return the tasks names
+     * @since 5.4
+     */
+
+    public TaskDependency getAutoBuildTasks() {
+        return autoBuildTasks;
+    }
+
+    /**
+     * Set tasks to be executed during the Eclipse auto-build.
+     *
+     * @see #getAutoBuildTasks()
+     * @since 5.4
+     */
+
+    public void autoBuildTasks(Object... autoBuildTasks) {
+        this.autoBuildTasks.add(autoBuildTasks);
     }
 
     /**

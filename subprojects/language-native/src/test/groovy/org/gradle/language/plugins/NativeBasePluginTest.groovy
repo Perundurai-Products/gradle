@@ -21,9 +21,7 @@ import org.gradle.api.artifacts.PublishArtifact
 import org.gradle.api.component.ComponentWithVariants
 import org.gradle.api.component.PublishableComponent
 import org.gradle.api.component.SoftwareComponent
-import org.gradle.api.file.Directory
 import org.gradle.api.file.FileCollection
-import org.gradle.api.file.RegularFile
 import org.gradle.api.internal.artifacts.DefaultModuleVersionIdentifier
 import org.gradle.api.internal.artifacts.configurations.ConfigurationInternal
 import org.gradle.api.internal.component.SoftwareComponentInternal
@@ -61,7 +59,7 @@ import spock.lang.Specification
 
 class NativeBasePluginTest extends Specification {
     @Rule
-    TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
+    TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider(getClass())
     def projectDir = tmpDir.createDir("project")
     def project = ProjectBuilder.builder().withProjectDir(projectDir).withName("testComponent").build()
 
@@ -71,7 +69,7 @@ class NativeBasePluginTest extends Specification {
         def b2 = Stub(SoftwareComponent)
         b2.name >> "b2"
         def component = Stub(ComponentWithBinaries)
-        def binaries = new DefaultBinaryCollection(SoftwareComponent, null)
+        def binaries = new DefaultBinaryCollection(SoftwareComponent)
         component.binaries >> binaries
 
         given:
@@ -111,7 +109,7 @@ class NativeBasePluginTest extends Specification {
     def "assemble task builds outputs of development binary of main component"() {
         def binary1 = binary('debug', 'debugInstall')
         def binary2 = binary('release', 'releaseInstall')
-        def binaries = new DefaultBinaryCollection(SoftwareComponent, null)
+        def binaries = new DefaultBinaryCollection(SoftwareComponent)
         binaries.add(binary1)
         binaries.add(binary2)
         def component = Stub(TestComponent)
@@ -132,7 +130,7 @@ class NativeBasePluginTest extends Specification {
     def "adds assemble task for each binary of main component"() {
         def binary1 = binary('debug', 'installDebug')
         def binary2 = binary('release', 'installRelease')
-        def binaries = new DefaultBinaryCollection(SoftwareComponent, null)
+        def binaries = new DefaultBinaryCollection(SoftwareComponent)
         binaries.add(binary1)
         binaries.add(binary2)
         def component = Stub(TestComponent)
@@ -155,14 +153,14 @@ class NativeBasePluginTest extends Specification {
         def toolProvider = Stub(PlatformToolProvider)
         toolProvider.getStaticLibraryName(_) >> { String p -> p + ".lib" }
 
-        def linkFileProp = project.objects.property(RegularFile)
+        def linkFileProp = project.objects.fileProperty()
         def linkFileTasKProp = project.objects.property(Task)
         def createTaskProp = project.objects.property(CreateStaticLibrary)
 
         def staticLib = Stub(ConfigurableComponentWithStaticLibrary)
         staticLib.name >> "windowsDebug"
         staticLib.names >> Names.of("windowsDebug")
-        staticLib.targetPlatform >> Stub(NativePlatformInternal)
+        staticLib.nativePlatform >> Stub(NativePlatformInternal)
         staticLib.toolChain >> Stub(NativeToolChainInternal)
         staticLib.platformToolProvider >> toolProvider
         staticLib.baseName >> Providers.of("test_lib")
@@ -189,14 +187,14 @@ class NativeBasePluginTest extends Specification {
         def toolProvider = Stub(PlatformToolProvider)
         toolProvider.getSharedLibraryName(_) >> { String p -> p + ".dll" }
 
-        def runtimeFileProp = project.objects.property(RegularFile)
+        def runtimeFileProp = project.objects.fileProperty()
         def linkTaskProp = project.objects.property(LinkSharedLibrary)
         def linkFileTasKProp = project.objects.property(Task)
 
         def sharedLibrary = Stub(ConfigurableComponentWithSharedLibrary)
         sharedLibrary.name >> "windowsDebug"
         sharedLibrary.names >> Names.of("windowsDebug")
-        sharedLibrary.targetPlatform >> Stub(NativePlatformInternal)
+        sharedLibrary.nativePlatform >> Stub(NativePlatformInternal)
         sharedLibrary.toolChain >> Stub(NativeToolChainInternal)
         sharedLibrary.platformToolProvider >> toolProvider
         sharedLibrary.baseName >> Providers.of("test_lib")
@@ -225,7 +223,7 @@ class NativeBasePluginTest extends Specification {
         toolProvider.getLibrarySymbolFileName(_) >> { String p -> p + ".dll.pdb" }
         toolProvider.requiresDebugBinaryStripping() >> true
 
-        def runtimeFileProp = project.objects.property(RegularFile)
+        def runtimeFileProp = project.objects.fileProperty()
         def linkTaskProp = project.objects.property(LinkSharedLibrary)
         def linkFileTasKProp = project.objects.property(Task)
 
@@ -234,7 +232,7 @@ class NativeBasePluginTest extends Specification {
         sharedLibrary.names >> Names.of("windowsDebug")
         sharedLibrary.debuggable >> true
         sharedLibrary.optimized >> true
-        sharedLibrary.targetPlatform >> Stub(NativePlatformInternal)
+        sharedLibrary.nativePlatform >> Stub(NativePlatformInternal)
         sharedLibrary.toolChain >> Stub(NativeToolChainInternal)
         sharedLibrary.platformToolProvider >> toolProvider
         sharedLibrary.baseName >> Providers.of("test_lib")
@@ -271,17 +269,17 @@ class NativeBasePluginTest extends Specification {
         def toolProvider = Stub(PlatformToolProvider)
         toolProvider.getExecutableName(_) >> { String p -> p + ".exe" }
 
-        def exeFileProp = project.objects.property(RegularFile)
+        def exeFileProp = project.objects.fileProperty()
         def exeFileTaskProp = project.objects.property(Task)
-        def debugExeFileProp = project.objects.property(RegularFile)
+        def debugExeFileProp = project.objects.fileProperty()
         def linkTaskProp = project.objects.property(LinkExecutable)
-        def installDirProp = project.objects.property(Directory)
+        def installDirProp = project.objects.directoryProperty()
         def installTaskProp = project.objects.property(InstallExecutable)
 
         def executable = Stub(ConfigurableComponentWithExecutable)
         executable.name >> "windowsDebug"
         executable.names >> Names.of("windowsDebug")
-        executable.targetPlatform >> Stub(NativePlatformInternal)
+        executable.nativePlatform >> Stub(NativePlatformInternal)
         executable.toolChain >> Stub(NativeToolChainInternal)
         executable.platformToolProvider >> toolProvider
         executable.baseName >> Providers.of("test_app")
@@ -324,11 +322,11 @@ class NativeBasePluginTest extends Specification {
         toolProvider.getExecutableSymbolFileName(_) >> { String p -> p + ".exe.pdb" }
         toolProvider.requiresDebugBinaryStripping() >> true
 
-        def exeFileProp = project.objects.property(RegularFile)
+        def exeFileProp = project.objects.fileProperty()
         def exeFileTaskProp = project.objects.property(Task)
-        def debugExeFileProp = project.objects.property(RegularFile)
+        def debugExeFileProp = project.objects.fileProperty()
         def linkTaskProp = project.objects.property(LinkExecutable)
-        def installDirProp = project.objects.property(Directory)
+        def installDirProp = project.objects.directoryProperty()
         def installTaskProp = project.objects.property(InstallExecutable)
 
         def executable = Stub(ConfigurableComponentWithExecutable)
@@ -336,7 +334,7 @@ class NativeBasePluginTest extends Specification {
         executable.names >> Names.of("windowsDebug")
         executable.debuggable >> true
         executable.optimized >> true
-        executable.targetPlatform >> Stub(NativePlatformInternal)
+        executable.nativePlatform >> Stub(NativePlatformInternal)
         executable.toolChain >> Stub(NativeToolChainInternal)
         executable.platformToolProvider >> toolProvider
         executable.baseName >> Providers.of("test_app")

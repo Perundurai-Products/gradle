@@ -15,6 +15,8 @@
  */
 
 package org.gradle.integtests.resource.s3.ivy
+
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.integtests.fixtures.executer.ExecutionResult
 import org.gradle.integtests.resolve.ivy.AbstractIvyRemoteRepoResolveIntegrationTest
 import org.gradle.integtests.resource.s3.fixtures.S3Server
@@ -24,7 +26,7 @@ import org.junit.Rule
 class IvyS3RepoResolveIntegrationTest extends AbstractIvyRemoteRepoResolveIntegrationTest {
 
     @Rule
-    final S3Server server = new S3Server(temporaryFolder)
+    S3Server server = new S3Server(temporaryFolder)
 
     @Override
     RepositoryServer getServer() {
@@ -37,6 +39,7 @@ class IvyS3RepoResolveIntegrationTest extends AbstractIvyRemoteRepoResolveIntegr
         result = executer.withTasks(*tasks).run()
     }
 
+    @ToBeFixedForConfigurationCache
     def "cannot add invalid authentication types for s3 repo"() {
         given:
         def remoteIvyRepo = server.getRemoteIvyRepo()

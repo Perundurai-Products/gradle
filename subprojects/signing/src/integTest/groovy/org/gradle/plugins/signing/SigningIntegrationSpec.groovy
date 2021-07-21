@@ -23,7 +23,7 @@ import org.junit.Rule
 
 import java.nio.file.Path
 
-import static org.gradle.util.TextUtil.escapeString
+import static org.gradle.util.internal.TextUtil.escapeString
 
 abstract class SigningIntegrationSpec extends AbstractIntegrationSpec {
     enum SignMethod {
@@ -43,7 +43,10 @@ abstract class SigningIntegrationSpec extends AbstractIntegrationSpec {
         buildFile << """
             apply plugin: 'java'
             apply plugin: 'signing'
-            archivesBaseName = '$artifactId'
+
+            base {
+                archivesName = '$artifactId'
+            }
             group = 'sign'
             version = '$version'
         """
@@ -108,54 +111,26 @@ abstract class SigningIntegrationSpec extends AbstractIntegrationSpec {
     }
 
     String getJavadocAndSourceJarsScript(String configurationName = null) {
-        def tasks = """
-            task("sourcesJar", type: Jar, dependsOn: classes) { 
-                classifier = 'sources' 
-                from sourceSets.main.allSource
-            } 
-
-            task("javadocJar", type: Jar, dependsOn: javadoc) { 
-                classifier = 'javadoc' 
-                from javadoc.destinationDir 
-            } 
+        def javaPluginConfig = """
+            java {
+                withJavadocJar()
+                withSourcesJar()
+            }
         """
 
         if (configurationName == null) {
-            tasks
+            javaPluginConfig
         } else {
-            tasks + """
+            javaPluginConfig + """
                 configurations {
                     $configurationName
                 }
-                
+
                 artifacts {
                     $configurationName sourcesJar, javadocJar
                 }
             """
         }
-    }
-
-    String uploadArchives() {
-        return """
-            apply plugin: "maven"
-            uploadArchives {
-                repositories {
-                    mavenDeployer {
-                        repository(url: "file://\$buildDir/m2Repo/")
-                    }
-                    flatDir {
-                        name "fileRepo"
-                        dirs "build/fileRepo"
-                    }
-                    ivy {
-                        url "file://\$buildDir/ivyRepo/"
-                        layout "pattern"
-                        artifactPattern "\$buildDir/ivyRepo/[artifact]-[revision](.[ext])"
-                        ivyPattern "\$buildDir/ivyRepo/[artifact]-[revision](.[ext])"
-                    }
-                }
-            }
-        """
     }
 
     TestFile m2RepoFile(String name) {
@@ -195,22 +170,20 @@ abstract class SigningIntegrationSpec extends AbstractIntegrationSpec {
         assert !fileRepoFile("${jarFileName - '.jar'}.asc").exists()
     }
 
-    String signDeploymentPom() {
-        return """
-            uploadArchives {
-                repositories.mavenDeployer {
-                    beforeDeployment { signing.signPom(it) }
-                }
-            }
-        """
-    }
-
     TestFile pom(String name = "sign-1.0") {
         m2RepoFile("${name}.pom")
     }
 
     TestFile pomSignature(String name = "sign-1.0") {
         m2RepoFile("${name}.pom.asc")
+    }
+
+    TestFile module(String name = "sign-1.0") {
+        m2RepoFile("${name}.module")
+    }
+
+    TestFile moduleSignature(String name = "sign-1.0") {
+        m2RepoFile("${name}.module.asc")
     }
 
     SignMethod getSignMethod() {

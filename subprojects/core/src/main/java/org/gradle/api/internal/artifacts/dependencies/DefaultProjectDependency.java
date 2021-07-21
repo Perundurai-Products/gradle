@@ -16,6 +16,7 @@
 
 package org.gradle.api.internal.artifacts.dependencies;
 
+import com.google.common.base.Objects;
 import org.gradle.api.Project;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.artifacts.ConfigurationContainer;
@@ -29,8 +30,10 @@ import org.gradle.api.internal.tasks.AbstractTaskDependency;
 import org.gradle.api.internal.tasks.TaskDependencyInternal;
 import org.gradle.api.internal.tasks.TaskDependencyResolveContext;
 import org.gradle.initialization.ProjectAccessListener;
+import org.gradle.internal.deprecation.DeprecatableConfiguration;
+import org.gradle.internal.deprecation.DeprecationMessageBuilder;
 import org.gradle.internal.exceptions.ConfigurationNotConsumableException;
-import org.gradle.util.GUtil;
+import org.gradle.util.internal.GUtil;
 
 import java.io.File;
 import java.util.Collections;
@@ -53,18 +56,22 @@ public class DefaultProjectDependency extends AbstractModuleDependency implement
         this.buildProjectDependencies = buildProjectDependencies;
     }
 
+    @Override
     public Project getDependencyProject() {
         return dependencyProject;
     }
 
+    @Override
     public String getGroup() {
         return dependencyProject.getGroup().toString();
     }
 
+    @Override
     public String getName() {
         return dependencyProject.getName();
     }
 
+    @Override
     public String getVersion() {
         return dependencyProject.getVersion().toString();
     }
@@ -77,9 +84,18 @@ public class DefaultProjectDependency extends AbstractModuleDependency implement
         if (!selectedConfiguration.isCanBeConsumed()) {
             throw new ConfigurationNotConsumableException(dependencyProject.getDisplayName(), selectedConfiguration.getName());
         }
+        warnIfConfigurationIsDeprecated((DeprecatableConfiguration) selectedConfiguration);
         return selectedConfiguration;
     }
 
+    private void warnIfConfigurationIsDeprecated(DeprecatableConfiguration selectedConfiguration) {
+        DeprecationMessageBuilder.WithDocumentation consumptionDeprecation = selectedConfiguration.getConsumptionDeprecation();
+        if (consumptionDeprecation != null) {
+            consumptionDeprecation.nagUser();
+        }
+    }
+
+    @Override
     public ProjectDependency copy() {
         DefaultProjectDependency copiedProjectDependency = new DefaultProjectDependency(dependencyProject,
             getTargetConfiguration(), projectAccessListener, buildProjectDependencies);
@@ -87,16 +103,19 @@ public class DefaultProjectDependency extends AbstractModuleDependency implement
         return copiedProjectDependency;
     }
 
+    @Override
     public Set<File> resolve() {
         return resolve(true);
     }
 
+    @Override
     public Set<File> resolve(boolean transitive) {
         CachingDependencyResolveContext context = new CachingDependencyResolveContext(transitive, Collections.<String, String>emptyMap());
         context.add(this);
         return context.resolve().getFiles();
     }
 
+    @Override
     public void beforeResolved() {
         projectAccessListener.beforeResolvingProjectDependency(dependencyProject);
     }
@@ -115,10 +134,12 @@ public class DefaultProjectDependency extends AbstractModuleDependency implement
         }
     }
 
+    @Override
     public TaskDependencyInternal getBuildDependencies() {
         return new TaskDependencyImpl();
     }
 
+    @Override
     public boolean contentEquals(Dependency dependency) {
         if (this == dependency) {
             return true;
@@ -155,6 +176,12 @@ public class DefaultProjectDependency extends AbstractModuleDependency implement
         if (this.buildProjectDependencies != that.buildProjectDependencies) {
             return false;
         }
+        if (!Objects.equal(getAttributes(), that.getAttributes())) {
+            return false;
+        }
+        if (!Objects.equal(getRequestedCapabilities(), that.getRequestedCapabilities())) {
+            return false;
+        }
         return true;
     }
 
@@ -166,7 +193,7 @@ public class DefaultProjectDependency extends AbstractModuleDependency implement
     @Override
     public String toString() {
         return "DefaultProjectDependency{" + "dependencyProject='" + dependencyProject + '\'' + ", configuration='"
-                + (getTargetConfiguration() == null ? Dependency.DEFAULT_CONFIGURATION : getTargetConfiguration()) + '\'' + '}';
+            + (getTargetConfiguration() == null ? Dependency.DEFAULT_CONFIGURATION : getTargetConfiguration()) + '\'' + '}';
     }
 
     private class TaskDependencyImpl extends AbstractTaskDependency {

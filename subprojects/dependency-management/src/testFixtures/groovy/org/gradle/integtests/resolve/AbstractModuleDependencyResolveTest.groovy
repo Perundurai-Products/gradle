@@ -17,37 +17,32 @@
 package org.gradle.integtests.resolve
 
 import org.gradle.integtests.fixtures.AbstractHttpDependencyResolutionTest
-import org.gradle.integtests.fixtures.FeaturePreviewsFixture
-import org.gradle.integtests.fixtures.GradleMetadataResolveRunner
+import org.gradle.integtests.fixtures.extensions.GradleMetadataResolveInterceptor
+import org.gradle.integtests.fixtures.extensions.GradleMetadataResolveTest
 import org.gradle.integtests.fixtures.publish.RemoteRepositorySpec
 import org.gradle.integtests.fixtures.resolve.ResolveTestFixture
 import org.gradle.test.fixtures.HttpRepository
-import org.junit.runner.RunWith
 
-@RunWith(GradleMetadataResolveRunner)
+@GradleMetadataResolveTest
 abstract class AbstractModuleDependencyResolveTest extends AbstractHttpDependencyResolutionTest {
     ResolveTestFixture resolve
 
     protected final RemoteRepositorySpec repoSpec = new RemoteRepositorySpec()
 
     boolean useIvy() {
-        GradleMetadataResolveRunner.useIvy()
+        GradleMetadataResolveInterceptor.useIvy()
     }
 
     boolean useMaven() {
         !useIvy()
     }
 
-    boolean isGradleMetadataEnabled() {
-        GradleMetadataResolveRunner.isGradleMetadataEnabled()
-    }
-
-    boolean isExperimentalEnabled() {
-        GradleMetadataResolveRunner.isExperimentalResolveBehaviorEnabled()
+    boolean isGradleMetadataPublished() {
+        GradleMetadataResolveInterceptor.isGradleMetadataPublished()
     }
 
     boolean usesJavaLibraryVariants() {
-        GradleMetadataResolveRunner.isGradleMetadataEnabled() || useMaven()
+        GradleMetadataResolveInterceptor.isGradleMetadataPublished() || useMaven()
     }
 
     String getTestConfiguration() { 'conf' }
@@ -60,11 +55,11 @@ abstract class AbstractModuleDependencyResolveTest extends AbstractHttpDependenc
     }
 
     String versionListingURI(String group, String module) {
-        GradleMetadataResolveRunner.useIvy() ? "${ivyHttpRepo.uri}/$group/$module/" : "${mavenHttpRepo.uri}/${group.replace('.', '/')}/${module}/maven-metadata.xml"
+        GradleMetadataResolveInterceptor.useIvy() ? "${ivyHttpRepo.uri}/$group/$module/" : "${mavenHttpRepo.uri}/${group.replace('.', '/')}/${module}/maven-metadata.xml"
     }
 
     String artifactURI(String group, String module, String version) {
-        if (GradleMetadataResolveRunner.useIvy()) {
+        if (GradleMetadataResolveInterceptor.useIvy()) {
             def httpModule = ivyHttpRepo.module(group, module, version)
             return httpModule.artifact.uri
         } else {
@@ -73,24 +68,24 @@ abstract class AbstractModuleDependencyResolveTest extends AbstractHttpDependenc
         }
     }
 
-    String metadataURI(String group, String module, String version) {
-        getMetadataUri(group, module, version, GradleMetadataResolveRunner.experimentalResolveBehaviorEnabled)
+    String gradleMetadataURI(String group, String module, String version) {
+        getMetadataUri(group, module, version, true)
     }
 
     String legacyMetadataURI(String group, String module, String version) {
         getMetadataUri(group, module, version, false)
     }
 
-    private String getMetadataUri(String group, String module, String version, boolean experimentalResolve) {
-        if (GradleMetadataResolveRunner.useIvy()) {
+    private String getMetadataUri(String group, String module, String version, boolean gradleMetadata) {
+        if (GradleMetadataResolveInterceptor.useIvy()) {
             def ivyModule = ivyHttpRepo.module(group, module, version)
-            if (experimentalResolve) {
+            if (gradleMetadata) {
                 return ivyModule.moduleMetadata.uri
             }
             return ivyModule.ivy.uri
         } else {
             def mavenModule = mavenHttpRepo.module(group, module, version)
-            if (experimentalResolve) {
+            if (gradleMetadata) {
                 return mavenModule.moduleMetadata.uri
             }
             return mavenModule.pom.uri
@@ -100,8 +95,8 @@ abstract class AbstractModuleDependencyResolveTest extends AbstractHttpDependenc
     private String getMavenRepository() {
         """
             repositories {
-                maven { 
-                   url "${mavenHttpRepo.uri}"
+                maven {
+                    url "${mavenHttpRepo.uri}"
                 }
             }
         """
@@ -110,8 +105,8 @@ abstract class AbstractModuleDependencyResolveTest extends AbstractHttpDependenc
     private String getIvyRepository() {
         """
             repositories {
-                ivy { 
-                   url "${ivyHttpRepo.uri}"
+                ivy {
+                    url "${ivyHttpRepo.uri}"
                 }
             }
         """
@@ -149,22 +144,33 @@ abstract class AbstractModuleDependencyResolveTest extends AbstractHttpDependenc
         useIvy() ? ivyRepository : mavenRepository
     }
 
+    boolean isDeclareRepositoriesInSettings() {
+        false
+    }
+
     def setup() {
         resolve = new ResolveTestFixture(buildFile, testConfiguration)
         resolve.expectDefaultConfiguration(usesJavaLibraryVariants() ? "runtime" : "default")
         settingsFile << "rootProject.name = '$rootProjectName'"
-        if (GradleMetadataResolveRunner.experimentalResolveBehaviorEnabled) {
-            FeaturePreviewsFixture.enableGradleMetadata(settingsFile)
+        def repoBlock = repositoryDeclaration
+        if (declareRepositoriesInSettings) {
+            settingsFile << """
+                dependencyResolutionManagement {
+                    $repoBlock
+                }
+            """
+            repoBlock = ''
         }
         resolve.prepare()
         buildFile << """
-            $repositoryDeclaration
+            $repoBlock
 
             configurations {
                 $testConfiguration
             }
         """
         resolve.addDefaultVariantDerivationStrategy()
+        resolve.addJavaEcosystemSchema()
     }
 
     void repository(@DelegatesTo(RemoteRepositorySpec) Closure<Void> spec) {
@@ -172,7 +178,7 @@ abstract class AbstractModuleDependencyResolveTest extends AbstractHttpDependenc
         spec()
     }
 
-    void repositoryInteractions(HttpRepository.MetadataType metadataType = HttpRepository.MetadataType.DEFAULT,
+    void repositoryInteractions(HttpRepository.MetadataType metadataType = getRepositoryMetadataType(),
                                 @DelegatesTo(RemoteRepositorySpec) Closure<Void> spec) {
         RemoteRepositorySpec.DEFINES_INTERACTIONS.set(true)
         try {
@@ -185,14 +191,15 @@ abstract class AbstractModuleDependencyResolveTest extends AbstractHttpDependenc
     }
 
     private HttpRepository getHttpRepository(HttpRepository.MetadataType metadataType) {
-        if (metadataType == HttpRepository.MetadataType.DEFAULT) {
-            return useIvy() ? ivyHttpRepo : mavenHttpRepo
-        }
-        useIvy() ? ivyHttpRepo("repo", metadataType) : mavenHttpRepo("repo", metadataType)
+        return useIvy() ? getIvyHttpRepo(metadataType) : getMavenHttpRepo(metadataType)
     }
 
     HttpRepository getRepository() {
-        getHttpRepository(HttpRepository.MetadataType.DEFAULT)
+        getHttpRepository(getRepositoryMetadataType())
+    }
+
+    HttpRepository.MetadataType getRepositoryMetadataType() {
+        gradleMetadataPublished ? HttpRepository.MetadataType.DEFAULT : HttpRepository.MetadataType.ONLY_ORIGINAL
     }
 
 }

@@ -18,7 +18,6 @@ package org.gradle.api.internal.tasks.options;
 
 import org.gradle.api.tasks.options.Option;
 import org.gradle.internal.reflect.JavaMethod;
-import org.gradle.internal.reflect.JavaReflectionUtil;
 import org.gradle.internal.typeconversion.NotationParser;
 import org.gradle.model.internal.type.ModelType;
 
@@ -41,6 +40,7 @@ abstract class AbstractOptionElement implements OptionElement {
         this.optionType = optionType;
     }
 
+    @Override
     public Class<?> getOptionType() {
         return optionType;
     }
@@ -65,14 +65,16 @@ abstract class AbstractOptionElement implements OptionElement {
     }
 
     protected Object invokeMethod(Object object, Method method, Object... parameterValues) {
-        final JavaMethod<Object, Object> javaMethod = JavaReflectionUtil.method(Object.class, method);
+        final JavaMethod<Object, Object> javaMethod = JavaMethod.of(Object.class, method);
         return javaMethod.invoke(object, parameterValues);
     }
 
+    @Override
     public String getOptionName() {
         return optionName;
     }
 
+    @Override
     public String getDescription() {
         return description;
     }

@@ -30,9 +30,11 @@ import org.gradle.api.reporting.internal.DefaultBuildDashboardReports;
 import org.gradle.api.tasks.Input;
 import org.gradle.api.tasks.Nested;
 import org.gradle.api.tasks.TaskAction;
+import org.gradle.internal.Cast;
 import org.gradle.internal.reflect.Instantiator;
-import org.gradle.util.ClosureBackedAction;
-import org.gradle.util.CollectionUtils;
+import org.gradle.util.internal.ClosureBackedAction;
+import org.gradle.util.internal.CollectionUtils;
+import org.gradle.work.DisableCachingByDefault;
 
 import javax.inject.Inject;
 import java.io.File;
@@ -45,6 +47,7 @@ import java.util.Set;
 /**
  * Generates build dashboard report.
  */
+@DisableCachingByDefault(because = "Not made cacheable, yet")
 public class GenerateBuildDashboard extends DefaultTask implements Reporting<BuildDashboardReports> {
     private final Set<Reporting<? extends ReportContainer<?>>> aggregated = new LinkedHashSet<Reporting<? extends ReportContainer<?>>>();
 
@@ -52,7 +55,7 @@ public class GenerateBuildDashboard extends DefaultTask implements Reporting<Bui
 
     public GenerateBuildDashboard() {
         reports = getInstantiator().newInstance(DefaultBuildDashboardReports.class, this, getCollectionCallbackActionDecorator());
-        reports.getHtml().setEnabled(true);
+        reports.getHtml().getRequired().set(true);
     }
 
     @Inject
@@ -73,7 +76,8 @@ public class GenerateBuildDashboard extends DefaultTask implements Reporting<Bui
                 // A report to be generated, ignore
                 continue;
             }
-            inputs.add(new ReportState(report.getDisplayName(), report.getDestination(), report.getDestination().exists()));
+            File outputLocation = report.getOutputLocation().get().getAsFile();
+            inputs.add(new ReportState(report.getDisplayName(), outputLocation, outputLocation.exists()));
         }
         return inputs;
     }
@@ -84,6 +88,7 @@ public class GenerateBuildDashboard extends DefaultTask implements Reporting<Bui
 
         Set<NamedDomainObjectSet<? extends Report>> enabledReportSets = CollectionUtils.collect(allAggregatedReports,
             new Transformer<NamedDomainObjectSet<? extends Report>, Reporting<? extends ReportContainer<?>>>() {
+            @Override
             public NamedDomainObjectSet<? extends Report> transform(Reporting<? extends ReportContainer<?>> reporting) {
                 return reporting.getReports().getEnabled();
             }
@@ -102,7 +107,7 @@ public class GenerateBuildDashboard extends DefaultTask implements Reporting<Bui
                         if (!(task instanceof Reporting)) {
                             return;
                         }
-                        reports.add((Reporting) task);
+                        reports.add(Cast.uncheckedNonnullCast(task));
                     }
                 });
             }
@@ -154,6 +159,7 @@ public class GenerateBuildDashboard extends DefaultTask implements Reporting<Bui
      * @param closure The configuration
      * @return The reports container
      */
+    @Override
     public BuildDashboardReports reports(Closure closure) {
         return reports(new ClosureBackedAction<BuildDashboardReports>(closure));
     }
@@ -176,6 +182,7 @@ public class GenerateBuildDashboard extends DefaultTask implements Reporting<Bui
      * @param configureAction The configuration
      * @return The reports container
      */
+    @Override
     public BuildDashboardReports reports(Action<? super BuildDashboardReports> configureAction) {
         configureAction.execute(reports);
         return reports;
@@ -183,7 +190,7 @@ public class GenerateBuildDashboard extends DefaultTask implements Reporting<Bui
 
     @TaskAction
     void run() {
-        if (getReports().getHtml().isEnabled()) {
+        if (getReports().getHtml().getRequired().get()) {
             BuildDashboardGenerator generator = new BuildDashboardGenerator();
             generator.render(getEnabledInputReports(), reports.getHtml().getEntryPoint());
         } else {

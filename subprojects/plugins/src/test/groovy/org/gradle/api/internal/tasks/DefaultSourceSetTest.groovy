@@ -19,9 +19,9 @@ import org.gradle.api.Action
 import org.gradle.api.Task
 import org.gradle.api.file.SourceDirectorySet
 import org.gradle.api.internal.file.DefaultSourceDirectorySet
+import org.gradle.api.internal.file.FileCollectionFactory
 import org.gradle.api.internal.file.FileResolver
 import org.gradle.api.internal.file.TestFiles
-import org.gradle.api.internal.file.collections.DefaultConfigurableFileCollection
 import org.gradle.api.tasks.SourceSet
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.gradle.util.TestUtil
@@ -29,20 +29,24 @@ import org.junit.Rule
 import spock.lang.Specification
 
 import static org.gradle.util.Matchers.isEmpty
-import static org.hamcrest.Matchers.equalTo
-import static org.hamcrest.Matchers.hasItem
-import static org.hamcrest.Matchers.instanceOf
-import static org.hamcrest.Matchers.nullValue
-import static org.junit.Assert.assertThat
+import static org.hamcrest.CoreMatchers.equalTo
+import static org.hamcrest.CoreMatchers.hasItem
+import static org.hamcrest.CoreMatchers.instanceOf
+import static org.hamcrest.CoreMatchers.nullValue
+import static org.hamcrest.MatcherAssert.assertThat
 
 class DefaultSourceSetTest extends Specification {
-    public @Rule TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
+    public @Rule TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider(getClass())
     private final TaskResolver taskResolver = [resolveTask: {name -> [getName: {name}] as Task}] as TaskResolver
+    private final TaskDependencyFactory taskDependencyFactory = Stub(TaskDependencyFactory) {
+        _ * configurableDependency() >> new DefaultTaskDependency(taskResolver)
+    }
     private final FileResolver fileResolver = TestFiles.resolver(tmpDir.testDirectory)
+    private final FileCollectionFactory fileCollectionFactory = TestFiles.fileCollectionFactory(tmpDir.testDirectory, taskDependencyFactory)
 
     private DefaultSourceSet sourceSet(String name) {
         def s = TestUtil.instantiatorFactory().decorateLenient().newInstance(DefaultSourceSet, name, TestUtil.objectFactory(tmpDir.testDirectory))
-        s.classes = new DefaultSourceSetOutput(s.displayName, fileResolver, taskResolver)
+        s.classes = new DefaultSourceSetOutput(s.displayName, fileResolver, fileCollectionFactory)
         return s
     }
 
@@ -112,8 +116,6 @@ class DefaultSourceSetTest extends Specification {
         assertThat(sourceSet.jarTaskName, equalTo('setNameJar'))
         assertThat(sourceSet.getTaskName('build', null), equalTo('buildSetName'))
         assertThat(sourceSet.getTaskName(null, 'jar'), equalTo('setNameJar'))
-        assertThat(sourceSet.compileConfigurationName, equalTo("setNameCompile"))
-        assertThat(sourceSet.runtimeConfigurationName, equalTo("setNameRuntime"))
         assertThat(sourceSet.compileOnlyConfigurationName, equalTo("setNameCompileOnly"))
         assertThat(sourceSet.compileClasspathConfigurationName, equalTo("setNameCompileClasspath"))
         assertThat(sourceSet.annotationProcessorConfigurationName, equalTo("setNameAnnotationProcessor"))
@@ -132,8 +134,6 @@ class DefaultSourceSetTest extends Specification {
         assertThat(sourceSet.getTaskName('build', null), equalTo('buildMain'))
         assertThat(sourceSet.getTaskName(null, 'jar'), equalTo('jar'))
         assertThat(sourceSet.getTaskName('build', 'jar'), equalTo('buildJar'))
-        assertThat(sourceSet.compileConfigurationName, equalTo("compile"))
-        assertThat(sourceSet.runtimeConfigurationName, equalTo("runtime"))
         assertThat(sourceSet.compileOnlyConfigurationName, equalTo("compileOnly"))
         assertThat(sourceSet.compileClasspathConfigurationName, equalTo("compileClasspath"))
         assertThat(sourceSet.annotationProcessorConfigurationName, equalTo("annotationProcessor"))
@@ -211,7 +211,7 @@ class DefaultSourceSetTest extends Specification {
         assertThat(dependencies.getDependencies(null), isEmpty())
 
         sourceSet.compiledBy('a')
-        def dirs1 = new DefaultConfigurableFileCollection(fileResolver, taskResolver)
+        def dirs1 = fileCollectionFactory.configurableFiles()
         dirs1.builtBy('b')
         sourceSet.output.dir(dirs1)
         assertThat(dependencies.getDependencies(null)*.name as Set, equalTo(['a', 'b'] as Set))

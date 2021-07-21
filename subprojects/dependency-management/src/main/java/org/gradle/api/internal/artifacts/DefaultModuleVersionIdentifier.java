@@ -38,19 +38,22 @@ public class DefaultModuleVersionIdentifier implements ModuleVersionIdentifier {
         assert version != null : "version cannot be null";
         this.id = id;
         this.version = version;
-        // pre-compule the hashcode as it's going to be used anyway, and this object
+        // pre-compute the hashcode as it's going to be used anyway, and this object
         // is used as a key in several hash maps
         this.hashCode = 31 * id.hashCode() ^ version.hashCode();
     }
 
+    @Override
     public String getGroup() {
         return id.getGroup();
     }
 
+    @Override
     public String getName() {
         return id.getName();
     }
 
+    @Override
     public String getVersion() {
         return version;
     }
@@ -74,10 +77,7 @@ public class DefaultModuleVersionIdentifier implements ModuleVersionIdentifier {
         if (!id.equals(other.id)) {
             return false;
         }
-        if (!version.equals(other.version)) {
-            return false;
-        }
-        return true;
+        return version.equals(other.version);
     }
 
     @Override
@@ -85,6 +85,7 @@ public class DefaultModuleVersionIdentifier implements ModuleVersionIdentifier {
         return hashCode;
     }
 
+    @Override
     public ModuleIdentifier getModule() {
         return id;
     }

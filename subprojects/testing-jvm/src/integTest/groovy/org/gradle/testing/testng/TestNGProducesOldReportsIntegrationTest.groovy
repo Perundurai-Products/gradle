@@ -44,10 +44,10 @@ public class MixedMethodsTest {
         buildFile << """
 apply plugin: 'java'
 ${mavenCentralRepository()}
-dependencies { testCompile 'org.testng:testng:6.3.1' }
+dependencies { testImplementation 'org.testng:testng:6.3.1' }
 
 test {
-    reports.html.enabled = false
+    reports.html.required = false
     useTestNG()
 }
 """
@@ -73,9 +73,9 @@ public class SomeTest {
         buildFile << """
 apply plugin: 'java'
 ${mavenCentralRepository()}
-dependencies { testCompile 'org.testng:testng:6.3.1' }
+dependencies { testImplementation 'org.testng:testng:6.3.1' }
 test {
-  reports.html.enabled = false
+  reports.html.required = false
   $preConfig
   useTestNG(){
     useDefaultListeners = true
@@ -95,11 +95,11 @@ test {
         testNG.hasHtmlResults()
 
         where:
-        preConfig                                | postConfig                                                                           | path
-        ""                                       | ""                                                                                   | TestNGExecutionResult.DEFAULT_TESTNG_REPORT
-        "reports.html.destination = file('xyz')" | "reports.html.destination = file('abc')"                                             | "abc"
-        ""                                       | "reports.html.destination = file('abc')"                                             | "abc"
-        "reports.html.destination = file('abc')" | "options.outputDirectory = file('xyz')"                                              | "xyz"
-        ""                                       | "options.outputDirectory = file('xyz');reports.html.destination = file('ignore me')" | "xyz"
+        preConfig                                   | postConfig                                                                              | path
+        ""                                          | ""                                                                                      | TestNGExecutionResult.DEFAULT_TESTNG_REPORT
+        "reports.html.outputLocation = file('xyz')" | "reports.html.outputLocation = file('abc')"                                             | "abc"
+        ""                                          | "reports.html.outputLocation = file('abc')"                                             | "abc"
+        "reports.html.outputLocation = file('abc')" | "options.outputDirectory = file('xyz')"                                                 | "xyz"
+        ""                                          | "options.outputDirectory = file('xyz');reports.html.outputLocation = file('ignore me')" | "xyz"
     }
 }

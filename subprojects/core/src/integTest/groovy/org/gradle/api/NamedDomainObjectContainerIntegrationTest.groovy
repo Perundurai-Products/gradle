@@ -16,13 +16,15 @@
 
 package org.gradle.api
 
-class NamedDomainObjectContainerIntegrationTest extends AbstractDomainObjectContainerIntegrationTest {
-    @Override
+import groovy.transform.SelfType
+import spock.lang.Issue
+
+@SelfType(AbstractDomainObjectContainerIntegrationTest)
+trait AbstractNamedDomainObjectContainerIntegrationTest {
     String getContainerStringRepresentation() {
         return "SomeType container"
     }
 
-    @Override
     String makeContainer() {
         return "project.container(SomeType)"
     }
@@ -39,12 +41,15 @@ class NamedDomainObjectContainerIntegrationTest extends AbstractDomainObjectCont
                 SomeType(String name) {
                     this.name = name
                 }
-            } 
+            }
         """
     }
+}
 
+
+class NamedDomainObjectContainerIntegrationTest extends AbstractDomainObjectContainerIntegrationTest implements AbstractNamedDomainObjectContainerIntegrationTest {
     def "can mutate the task container from named container"() {
-        buildFile << """
+        buildFile """
             testContainer.configureEach {
                 tasks.create(it.name)
             }
@@ -60,5 +65,36 @@ class NamedDomainObjectContainerIntegrationTest extends AbstractDomainObjectCont
 
         expect:
         succeeds "verify"
+    }
+
+    def "chained lookup of testContainer.withType.matching"() {
+        buildFile << """
+            testContainer.withType(testContainer.type).matching({ it.name.endsWith("foo") }).all { element ->
+                assert element.name in ['foo', 'barfoo']
+            }
+
+            testContainer.register("foo")
+            testContainer.register("bar")
+            testContainer.register("foobar")
+            testContainer.register("barfoo")
+        """
+        expect:
+        succeeds "help"
+    }
+
+    @Issue("https://github.com/gradle/gradle/issues/9446")
+    def "chained lookup of testContainer.matching.withType"() {
+        buildFile << """
+            testContainer.matching({ it.name.endsWith("foo") }).withType(testContainer.type).all { element ->
+                assert element.name in ['foo', 'barfoo']
+            }
+
+            testContainer.register("foo")
+            testContainer.register("bar")
+            testContainer.register("foobar")
+            testContainer.register("barfoo")
+        """
+        expect:
+        succeeds "help"
     }
 }

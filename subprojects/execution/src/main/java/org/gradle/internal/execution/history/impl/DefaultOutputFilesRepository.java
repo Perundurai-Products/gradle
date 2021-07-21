@@ -21,11 +21,12 @@ import org.gradle.cache.PersistentIndexedCache;
 import org.gradle.cache.PersistentIndexedCacheParameters;
 import org.gradle.cache.internal.InMemoryCacheDecoratorFactory;
 import org.gradle.internal.execution.history.OutputFilesRepository;
-import org.gradle.internal.file.FileType;
 import org.gradle.internal.snapshot.DirectorySnapshot;
 import org.gradle.internal.snapshot.FileSystemLocationSnapshot;
+import org.gradle.internal.snapshot.FileSystemLocationSnapshot.FileSystemLocationSnapshotVisitor;
 import org.gradle.internal.snapshot.FileSystemSnapshot;
-import org.gradle.internal.snapshot.FileSystemSnapshotVisitor;
+import org.gradle.internal.snapshot.RegularFileSnapshot;
+import org.gradle.internal.snapshot.SnapshotVisitResult;
 
 import java.io.Closeable;
 import java.io.File;
@@ -50,7 +51,7 @@ public class DefaultOutputFilesRepository implements OutputFilesRepository, Clos
     private boolean isContainedInAnOutput(File absoluteFile) {
         File currentFile = absoluteFile;
         while (currentFile != null) {
-            if (outputFiles.get(currentFile.getPath()) == Boolean.TRUE) {
+            if (outputFiles.getIfPresent(currentFile.getPath()) == Boolean.TRUE) {
                 return true;
             }
             currentFile = currentFile.getParentFile();
@@ -59,44 +60,40 @@ public class DefaultOutputFilesRepository implements OutputFilesRepository, Clos
     }
 
     private boolean containsFilesGeneratedByGradle(File absoluteFile) {
-        return outputFiles.get(absoluteFile.getPath()) != null;
+        return outputFiles.getIfPresent(absoluteFile.getPath()) != null;
     }
 
     @Override
-    public void recordOutputs(Iterable<? extends FileSystemSnapshot> outputFileFingerprints) {
-        for (FileSystemSnapshot outputFileFingerprint : outputFileFingerprints) {
-            outputFileFingerprint.accept(new FileSystemSnapshotVisitor() {
-                @Override
-                public boolean preVisitDirectory(DirectorySnapshot directorySnapshot) {
-                    recordOutputSnapshot(directorySnapshot);
-                    return false;
-                }
+    public void recordOutputs(Iterable<? extends FileSystemSnapshot> outputSnapshots) {
+        for (FileSystemSnapshot outputFileSnapshot : outputSnapshots) {
+            outputFileSnapshot.accept(entrySnapshot -> {
+                entrySnapshot.accept(new FileSystemLocationSnapshotVisitor() {
+                    @Override
+                    public void visitDirectory(DirectorySnapshot directorySnapshot) {
+                        recordOutputSnapshot(directorySnapshot);
+                    }
 
-                @Override
-                public void visit(FileSystemLocationSnapshot fileSnapshot) {
-                    if (fileSnapshot.getType() == FileType.RegularFile) {
+                    @Override
+                    public void visitRegularFile(RegularFileSnapshot fileSnapshot) {
                         recordOutputSnapshot(fileSnapshot);
                     }
-                }
 
-                private void recordOutputSnapshot(FileSystemLocationSnapshot directorySnapshot) {
-                    String outputFilePath = directorySnapshot.getAbsolutePath();
-                    File outputFile = new File(outputFilePath);
-                    outputFiles.put(outputFilePath, Boolean.TRUE);
-                    File outputFileParent = outputFile.getParentFile();
-                    while (outputFileParent != null) {
-                        String parentPath = outputFileParent.getPath();
-                        if (outputFiles.get(parentPath) != null) {
-                            break;
+                    private void recordOutputSnapshot(FileSystemLocationSnapshot snapshot) {
+                        String outputPath = snapshot.getAbsolutePath();
+                        File outputFile = new File(outputPath);
+                        outputFiles.put(outputPath, Boolean.TRUE);
+                        File outputFileParent = outputFile.getParentFile();
+                        while (outputFileParent != null) {
+                            String parentPath = outputFileParent.getPath();
+                            if (outputFiles.getIfPresent(parentPath) != null) {
+                                break;
+                            }
+                            outputFiles.put(parentPath, Boolean.FALSE);
+                            outputFileParent = outputFileParent.getParentFile();
                         }
-                        outputFiles.put(parentPath, Boolean.FALSE);
-                        outputFileParent = outputFileParent.getParentFile();
                     }
-                }
-
-                @Override
-                public void postVisitDirectory(DirectorySnapshot directorySnapshot) {
-                }
+                });
+                return SnapshotVisitResult.SKIP_SUBTREE;
             });
         }
     }

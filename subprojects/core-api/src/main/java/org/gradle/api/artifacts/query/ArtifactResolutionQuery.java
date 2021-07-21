@@ -15,7 +15,6 @@
  */
 package org.gradle.api.artifacts.query;
 
-import org.gradle.api.Incubating;
 import org.gradle.api.artifacts.component.ComponentIdentifier;
 import org.gradle.api.artifacts.result.ArtifactResolutionResult;
 import org.gradle.api.component.Artifact;
@@ -27,11 +26,13 @@ import java.util.Collection;
  * A builder to construct a query that can resolve selected software artifacts of the specified components.
  *
  * <pre class='autoTested'>
- * apply plugin: 'java'
+ * plugins {
+ *     id 'java'
+ * }
  *
  * task resolveCompileSources {
  *     doLast {
- *         def componentIds = configurations.compile.incoming.resolutionResult.allDependencies.collect { it.selected.id }
+ *         def componentIds = configurations.compileClasspath.incoming.resolutionResult.allDependencies.collect { it.selected.id }
  *
  *         def result = dependencies.createArtifactResolutionQuery()
  *                                  .forComponents(componentIds)
@@ -69,7 +70,6 @@ public interface ArtifactResolutionQuery {
      *
      * @since 4.5
      */
-    @Incubating
     ArtifactResolutionQuery forModule(String group, String name, String version);
 
     /**
@@ -92,7 +92,6 @@ public interface ArtifactResolutionQuery {
      * @param artifactTypes The artifacts to retrieve for the queried components.
      * @since 4.5
      */
-    @Incubating
     ArtifactResolutionQuery withArtifacts(Class<? extends Component> componentType, Collection<Class<? extends Artifact>> artifactTypes);
 
     /**

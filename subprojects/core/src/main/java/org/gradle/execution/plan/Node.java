@@ -19,17 +19,23 @@ package org.gradle.execution.plan;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Sets;
 import org.gradle.api.Action;
-import org.gradle.api.Project;
+import org.gradle.api.internal.project.ProjectInternal;
+import org.gradle.internal.resources.ResourceLock;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 import javax.annotation.OverridingMethodsMustInvokeSuper;
+import java.util.List;
 import java.util.NavigableSet;
 import java.util.Set;
+import java.util.function.Consumer;
 
 /**
  * A node in the execution graph that represents some executable code with potential dependencies on other nodes.
  */
 public abstract class Node implements Comparable<Node> {
+    private static final Logger LOGGER = LoggerFactory.getLogger(Node.class);
 
     @VisibleForTesting
     enum ExecutionState {
@@ -38,9 +44,11 @@ public abstract class Node implements Comparable<Node> {
 
     private ExecutionState state;
     private boolean dependenciesProcessed;
+    private boolean allDependenciesComplete;
     private Throwable executionFailure;
     private final NavigableSet<Node> dependencySuccessors = Sets.newTreeSet();
     private final NavigableSet<Node> dependencyPredecessors = Sets.newTreeSet();
+    private final MutationInfo mutationInfo = new MutationInfo(this);
 
     public Node() {
         this.state = ExecutionState.UNKNOWN;
@@ -60,7 +68,7 @@ public abstract class Node implements Comparable<Node> {
     }
 
     public boolean isIncludeInGraph() {
-        return state == ExecutionState.NOT_REQUIRED || state == ExecutionState.UNKNOWN;
+        return state != ExecutionState.NOT_REQUIRED && state != ExecutionState.UNKNOWN;
     }
 
     public boolean isReady() {
@@ -69,6 +77,10 @@ public abstract class Node implements Comparable<Node> {
 
     public boolean isInKnownState() {
         return state != ExecutionState.UNKNOWN;
+    }
+
+    public boolean isExecuting() {
+        return state == ExecutionState.EXECUTING;
     }
 
     public boolean isComplete() {
@@ -89,6 +101,10 @@ public abstract class Node implements Comparable<Node> {
         return getNodeFailure() != null || getExecutionFailure() != null;
     }
 
+    public boolean isExecuted() {
+        return state == ExecutionState.EXECUTED;
+    }
+
     /**
      * Returns any error that happened during the execution of the node itself,
      * i.e. a task action has thrown an exception.
@@ -98,28 +114,36 @@ public abstract class Node implements Comparable<Node> {
 
     public abstract void rethrowNodeFailure();
 
-    public void startExecution() {
+    public void startExecution(Consumer<Node> nodeStartAction) {
         assert isReady();
         state = ExecutionState.EXECUTING;
+        nodeStartAction.accept(this);
     }
 
-    public void finishExecution() {
+    public void finishExecution(Consumer<Node> completionAction) {
         assert state == ExecutionState.EXECUTING;
         state = ExecutionState.EXECUTED;
+        completionAction.accept(this);
     }
 
-    public void skipExecution() {
+    public void skipExecution(Consumer<Node> completionAction) {
         assert state == ExecutionState.SHOULD_RUN;
         state = ExecutionState.SKIPPED;
+        completionAction.accept(this);
     }
 
-    public void abortExecution() {
+    public void abortExecution(Consumer<Node> completionAction) {
         assert isReady();
         state = ExecutionState.SKIPPED;
+        completionAction.accept(this);
     }
 
     public void require() {
-        state = ExecutionState.SHOULD_RUN;
+        if (state != ExecutionState.SHOULD_RUN) {
+            // When the state changes to `SHOULD_RUN`, the dependencies need to be reprocessed since they also may be required now.
+            dependenciesProcessed = false;
+            state = ExecutionState.SHOULD_RUN;
+        }
     }
 
     public void doNotRequire() {
@@ -158,20 +182,42 @@ public abstract class Node implements Comparable<Node> {
         return dependencySuccessors;
     }
 
-    protected void addDependencySuccessor(Node toNode) {
+    public void addDependencySuccessor(Node toNode) {
         dependencySuccessors.add(toNode);
-        toNode.dependencyPredecessors.add(this);
+        toNode.getDependencyPredecessors().add(this);
     }
 
     @OverridingMethodsMustInvokeSuper
-    public boolean allDependenciesComplete() {
+    protected boolean doCheckDependenciesComplete() {
+        LOGGER.debug("Checking if all dependencies are complete for {}", this);
         for (Node dependency : dependencySuccessors) {
             if (!dependency.isComplete()) {
+                LOGGER.debug("Dependency {} for {} not yet completed", dependency, this);
                 return false;
             }
         }
 
+        LOGGER.debug("All dependencies are complete for {}", this);
         return true;
+    }
+
+    /**
+     * Returns if all dependencies completed, but have not been completed in the last check.
+     */
+    public boolean updateAllDependenciesComplete() {
+        if (!allDependenciesComplete) {
+            forceAllDependenciesCompleteUpdate();
+            return allDependenciesComplete;
+        }
+        return false;
+    }
+
+    public void forceAllDependenciesCompleteUpdate() {
+        allDependenciesComplete = doCheckDependenciesComplete();
+    }
+
+    public boolean allDependenciesComplete() {
+        return allDependenciesComplete;
     }
 
     public boolean allDependenciesSuccessful() {
@@ -181,6 +227,11 @@ public abstract class Node implements Comparable<Node> {
             }
         }
         return true;
+    }
+
+    @OverridingMethodsMustInvokeSuper
+    protected Iterable<Node> getAllPredecessors() {
+        return getDependencyPredecessors();
     }
 
     public abstract void prepareForExecution();
@@ -200,6 +251,16 @@ public abstract class Node implements Comparable<Node> {
         return dependencySuccessors;
     }
 
+    /**
+     * Returns all the nodes which are hard successors, i.e. which have a non-removable relationship to the current node.
+     *
+     * For example, for tasks `shouldRunAfter` isn't a hard successor while `mustRunAfter` is.
+     */
+    @OverridingMethodsMustInvokeSuper
+    public Iterable<Node> getHardSuccessors() {
+        return dependencySuccessors;
+    }
+
     @OverridingMethodsMustInvokeSuper
     public Iterable<Node> getAllSuccessorsInReverseOrder() {
         return dependencySuccessors.descendingSet();
@@ -215,13 +276,40 @@ public abstract class Node implements Comparable<Node> {
 
     public abstract Set<Node> getFinalizers();
 
+    public MutationInfo getMutationInfo() {
+        return mutationInfo;
+    }
+
+    public abstract void resolveMutations();
+
+    public abstract boolean isPublicNode();
+
     /**
-     * Returns the project which the node requires access to, if any.
+     * Whether the task needs to be queried if it is completed.
      *
-     * This should return an identifier or the {@link org.gradle.api.internal.project.ProjectState} container, or some abstract resource, rather than the mutable project state itself.
+     * Everything where the value of {@link #isComplete()} depends on some other state, like another task in an included build.
+     */
+    public abstract boolean requiresMonitoring();
+
+    /**
+     * Returns the project state that this node requires mutable access to, if any.
      */
     @Nullable
-    public abstract Project getProject();
+    public abstract ResourceLock getProjectToLock();
+
+    /**
+     * Returns the project which this node belongs to, and requires access to the execution services of.
+     * Returning non-null does not imply that the project must be locked when this node executes. Use {@link #getProjectToLock()} instead for that.
+     *
+     * TODO - this should return some kind of abstract 'action context' instead of a mutable project.
+     */
+    @Nullable
+    public abstract ProjectInternal getOwningProject();
+
+    /**
+     * Returns the resources which should be locked before starting this node.
+     */
+    public abstract List<? extends ResourceLock> getResourcesToLock();
 
     @Override
     public abstract String toString();

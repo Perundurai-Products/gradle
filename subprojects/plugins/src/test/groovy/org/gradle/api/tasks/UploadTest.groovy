@@ -24,9 +24,9 @@ import org.junit.Rule
 import spock.lang.Specification
 
 class UploadTest extends Specification {
-    
+
     @Rule
-    public TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider()
+    public TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider(getClass())
 
     def "can create task"() {
         when:
@@ -45,7 +45,7 @@ class UploadTest extends Specification {
 
         when:
         upload.repositories({ RepositoryHandler repositories ->
-            repositories.jcenter()
+            repositories.mavenCentral()
         } as Action<RepositoryHandler>)
 
         then:

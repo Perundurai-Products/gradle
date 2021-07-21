@@ -17,6 +17,7 @@
 package org.gradle.integtests.fixtures.cache
 
 import groovy.transform.SelfType
+import org.gradle.api.internal.artifacts.ivyservice.CacheLayout
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 import org.gradle.test.fixtures.file.TestFile
 
@@ -26,5 +27,16 @@ import static org.gradle.cache.internal.DefaultCacheScopeMapping.GLOBAL_CACHE_DI
 trait CachingIntegrationFixture {
     TestFile getUserHomeCacheDir() {
         return executer.gradleUserHomeDir.file(GLOBAL_CACHE_DIR_NAME)
+    }
+
+    TestFile getMetadataCacheDir() {
+        return userHomeCacheDir.file(CacheLayout.ROOT.key)
+    }
+
+    void markForArtifactCacheCleanup() {
+        executer.withArgument("-Dorg.gradle.internal.cleanup.external.max.age=-1")
+        TestFile gcFile = metadataCacheDir.file("gc.properties")
+        gcFile.createFile()
+        assert gcFile.setLastModified(0)
     }
 }

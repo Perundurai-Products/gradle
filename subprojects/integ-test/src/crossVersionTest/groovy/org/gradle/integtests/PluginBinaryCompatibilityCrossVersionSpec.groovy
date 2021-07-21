@@ -24,11 +24,21 @@ import org.gradle.util.GradleVersion
 class PluginBinaryCompatibilityCrossVersionSpec extends CrossVersionIntegrationSpec {
     def "plugin implemented in Groovy can use types converted from Groovy to Java"() {
         given:
+        def apiDepConf = "implementation"
+        if (previous.version < GradleVersion.version("7.0-rc-1")) {
+            apiDepConf = "compile"
+        }
+        def groovyDepConf
+        if (previous.version < GradleVersion.version("1.4-rc-1")) {
+            groovyDepConf = "groovy"
+        } else {
+            groovyDepConf = apiDepConf
+        }
         file("producer/build.gradle") << """
             apply plugin: 'groovy'
             dependencies {
-                ${previous.version < GradleVersion.version("1.4-rc-1") ? "groovy" : "compile"} localGroovy()
-                compile gradleApi()
+                ${groovyDepConf} localGroovy()
+                ${apiDepConf} gradleApi()
             }
         """
 
@@ -77,6 +87,6 @@ apply plugin: SomePlugin
 
         expect:
         version previous withTasks 'assemble' inDirectory(file("producer")) run()
-        version current withTasks 'tasks' requireGradleDistribution() run()
+        version current withTasks 'tasks' requireDaemon() requireIsolatedDaemons() run()
     }
 }

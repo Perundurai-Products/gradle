@@ -19,13 +19,9 @@ package org.gradle.integtests.samples
 import org.gradle.integtests.fixtures.AbstractSampleIntegrationTest
 import org.gradle.integtests.fixtures.Sample
 import org.gradle.test.fixtures.file.TestFile
-import org.gradle.util.Requires
 import org.junit.Rule
 import spock.lang.Unroll
 
-import static org.gradle.util.TestPrecondition.KOTLIN_SCRIPT
-
-@Requires(KOTLIN_SCRIPT)
 class SamplesScalaZincIntegrationTest extends AbstractSampleIntegrationTest {
 
     @Rule Sample sample = new Sample(temporaryFolder, 'scala/zinc')
@@ -37,7 +33,7 @@ class SamplesScalaZincIntegrationTest extends AbstractSampleIntegrationTest {
 
         when:
         // Build and test projects
-        executer.inDirectory(projectDir).requireGradleDistribution().withTasks('clean', 'build').run()
+        executer.inDirectory(projectDir).withTasks('clean', 'build').run()
 
         then:
         // Check contents of Jar

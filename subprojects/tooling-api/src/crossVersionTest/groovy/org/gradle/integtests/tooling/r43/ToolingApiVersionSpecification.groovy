@@ -69,16 +69,16 @@ abstract class ToolingApiVersionSpecification extends ToolingApiSpecification {
 
     // since 2.6
     def testExecution() {
-        buildFile << """ 
+        buildFile << """
 apply plugin: 'java'
 repositories {
     maven {
-        url '${buildContext.libsRepo.toURI()}'
+        url '${buildContext.localRepository.toURI()}'
     }
 }
 ${mavenCentralRepository()}
 dependencies {
-    testCompile 'junit:junit:4.12'
+    testImplementation 'junit:junit:4.13'
 }
 """
         file('src/test/java/TestClientTest.java') << '''
@@ -90,6 +90,15 @@ public class TestClientTest{
             def launcher = connection.newTestLauncher().withJvmTestClasses("TestClientTest")
             launcher.standardOutput = outputStream
             launcher.run()
+        }
+    }
+
+    // since 6.1
+    def notifyDaemonsAboutChangedPaths() {
+        build()
+
+        withConnection { ProjectConnection connection ->
+            connection.notifyDaemonsAboutChangedPaths([file("some/file").toPath()])
         }
     }
 }

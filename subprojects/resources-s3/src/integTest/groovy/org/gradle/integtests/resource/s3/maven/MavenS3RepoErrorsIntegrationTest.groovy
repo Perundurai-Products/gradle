@@ -18,6 +18,7 @@
 package org.gradle.integtests.resource.s3.maven
 
 import org.gradle.api.credentials.AwsCredentials
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.integtests.resource.s3.AbstractS3DependencyResolutionTest
 import org.gradle.integtests.resource.s3.fixtures.MavenS3Module
 
@@ -46,11 +47,12 @@ task retrieve(type: Sync) {
 """
     }
 
+    @ToBeFixedForConfigurationCache
     def "should fail with an AWS S3 authentication error"() {
         setup:
         buildFile << mavenAwsRepoDsl()
         when:
-        module.pom.expectDownloadAuthencicationError()
+        module.pom.expectDownloadAuthenticationError()
         then:
         fails 'retrieve'
         and:
@@ -61,6 +63,7 @@ task retrieve(type: Sync) {
                 .assertHasCause("The AWS Access Key Id you provided does not exist in our records.")
     }
 
+    @ToBeFixedForConfigurationCache
     def "fails when providing PasswordCredentials with decent error"() {
         setup:
         buildFile << """
@@ -84,6 +87,7 @@ repositories {
                 .assertHasCause("Credentials must be an instance of '${AwsCredentials.class.getName()}'.")
     }
 
+    @ToBeFixedForConfigurationCache
     def "fails when no credentials provided"() {
         setup:
         buildFile << """
@@ -103,12 +107,12 @@ repositories {
 
     }
 
+    @ToBeFixedForConfigurationCache
     def "should include resource uri when file not found"() {
         setup:
         buildFile << mavenAwsRepoDsl()
         when:
         module.pom.expectDownloadMissing()
-        module.artifact.expectMetadataRetrieveMissing()
         then:
         fails 'retrieve'
 
@@ -119,11 +123,12 @@ repositories {
                 """Could not find org.gradle:test:1.85.
 Searched in the following locations:
   - ${module.pom.uri}
-  - ${module.artifact.uri}
+If the artifact you are trying to retrieve can be found in the repository but without metadata in 'Maven POM' format, you need to adjust the 'metadataSources { ... }' of the repository declaration.
 Required by:
 """)
     }
 
+    @ToBeFixedForConfigurationCache
     def "cannot add invalid authentication types for s3 repo"() {
         given:
         module.publish()

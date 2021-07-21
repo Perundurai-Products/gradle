@@ -16,61 +16,36 @@
 
 package org.gradle.api.internal.tasks;
 
-import com.google.common.collect.ImmutableSortedSet;
-import com.google.common.collect.Sets;
 import org.gradle.api.NonNullApi;
 import org.gradle.api.internal.TaskInternal;
-import org.gradle.api.internal.project.ProjectInternal;
 import org.gradle.api.internal.tasks.properties.PropertyVisitor;
 import org.gradle.api.internal.tasks.properties.PropertyWalker;
-
-import java.util.Iterator;
-import java.util.Set;
+import org.gradle.internal.reflect.validation.TypeValidationContext;
+import org.gradle.internal.scan.UsedByScanPlugin;
 
 @NonNullApi
 public class TaskPropertyUtils {
-
     /**
      * Visits both properties declared via annotations on the properties of the task type as well as
      * properties declared via the runtime API ({@link org.gradle.api.tasks.TaskInputs} etc.).
      */
-    public static void visitProperties(PropertyWalker propertyWalker, final TaskInternal task, PropertyVisitor visitor) {
-        final PropertySpecFactory specFactory = new DefaultPropertySpecFactory(task, ((ProjectInternal) task.getProject()).getFileResolver());
-        propertyWalker.visitProperties(specFactory, visitor, task);
-        if (!visitor.visitOutputFilePropertiesOnly()) {
-            task.getInputs().visitRegisteredProperties(visitor);
-        }
-        task.getOutputs().visitRegisteredProperties(visitor);
-        if (visitor.visitOutputFilePropertiesOnly()) {
-            return;
-        }
-        int destroyableCount = 0;
-        for (Object path : ((TaskDestroyablesInternal) task.getDestroyables()).getRegisteredPaths()) {
-            visitor.visitDestroyableProperty(new DefaultTaskDestroyablePropertySpec("$" + ++destroyableCount, path));
-        }
-        int localStateCount = 0;
-        for (Object path : ((TaskLocalStateInternal) task.getLocalState()).getRegisteredPaths()) {
-            visitor.visitLocalStateProperty(new DefaultTaskLocalStatePropertySpec("$" + ++localStateCount, path));
-        }
+    @UsedByScanPlugin("test-distribution")
+    public static void visitProperties(PropertyWalker propertyWalker, TaskInternal task, PropertyVisitor visitor) {
+        visitProperties(propertyWalker, task, TypeValidationContext.NOOP, visitor);
     }
 
     /**
-     * Collects property specs in a sorted set to ensure consistent ordering.
+     * Visits both properties declared via annotations on the properties of the task type as well as
+     * properties declared via the runtime API ({@link org.gradle.api.tasks.TaskInputs} etc.).
      *
-     * @throws IllegalArgumentException if there are multiple properties declared with the same name.
+     * Reports errors and warnings to the given validation context.
      */
-    public static <T extends TaskFilePropertySpec> ImmutableSortedSet<T> collectFileProperties(String displayName, Iterator<? extends T> fileProperties) {
-        Set<String> names = Sets.newHashSet();
-        ImmutableSortedSet.Builder<T> builder = ImmutableSortedSet.naturalOrder();
-        while (fileProperties.hasNext()) {
-            T propertySpec = fileProperties.next();
-            String propertyName = propertySpec.getPropertyName();
-            if (!names.add(propertyName)) {
-                throw new IllegalArgumentException(String.format("Multiple %s file properties with name '%s'", displayName, propertyName));
-            }
-            builder.add(propertySpec);
-        }
-        return builder.build();
+    public static void visitProperties(PropertyWalker propertyWalker, TaskInternal task, TypeValidationContext validationContext, PropertyVisitor visitor) {
+        propertyWalker.visitProperties(task, validationContext, visitor);
+        task.getInputs().visitRegisteredProperties(visitor);
+        task.getOutputs().visitRegisteredProperties(visitor);
+        ((TaskDestroyablesInternal) task.getDestroyables()).visitRegisteredProperties(visitor);
+        ((TaskLocalStateInternal) task.getLocalState()).visitRegisteredProperties(visitor);
     }
 
     /**

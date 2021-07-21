@@ -16,9 +16,11 @@
 
 package org.gradle.test.fixtures.server.http
 
-import org.gradle.internal.hash.HashUtil
+import org.gradle.internal.hash.HashCode
+import org.gradle.internal.hash.Hashing
 import org.gradle.test.fixtures.file.TestFile
 import org.gradle.test.fixtures.resource.RemoteArtifact
+import org.gradle.test.fixtures.resource.RemoteResource
 
 abstract class HttpArtifact extends HttpResource implements RemoteArtifact {
 
@@ -37,6 +39,16 @@ abstract class HttpArtifact extends HttpResource implements RemoteArtifact {
         return new BasicHttpResource(server, getSha1File(), "${path}.sha1")
     }
 
+    @Override
+    RemoteResource getSha256() {
+        new BasicHttpResource(server, getSha256File(), "${path}.sha256")
+    }
+
+    @Override
+    RemoteResource getSha512() {
+        new BasicHttpResource(server, getSha512File(), "${path}.sha512")
+    }
+
     String getPath() {
         return "${modulePath}/${file.name}"
     }
@@ -45,24 +57,28 @@ abstract class HttpArtifact extends HttpResource implements RemoteArtifact {
 
     protected abstract TestFile getMd5File();
 
+    protected abstract TestFile getSha256File()
+
+    protected abstract TestFile getSha512File()
+
     abstract TestFile getFile();
 
     void verifyChecksums() {
         def sha1File = getSha1File()
         sha1File.assertIsFile()
-        assert new BigInteger(sha1File.text, 16) == new BigInteger(getHash(getFile(), "sha1"), 16)
+        assert HashCode.fromString(sha1File.text) == Hashing.sha1().hashFile(getFile())
         def md5File = getMd5File()
         md5File.assertIsFile()
-        assert new BigInteger(md5File.text, 16) == new BigInteger(getHash(getFile(), "md5"), 16)
+        assert HashCode.fromString(md5File.text) == Hashing.md5().hashFile(getFile())
     }
 
-    void expectPublish() {
+    void expectPublish(boolean extraChecksums = true) {
         expectPut()
         sha1.expectPut()
+        if (extraChecksums) {
+            sha256.expectPut()
+            sha512.expectPut()
+        }
         md5.expectPut()
-    }
-
-    protected String getHash(TestFile file, String algorithm) {
-        HashUtil.createHash(file, algorithm.toUpperCase()).asHexString()
     }
 }

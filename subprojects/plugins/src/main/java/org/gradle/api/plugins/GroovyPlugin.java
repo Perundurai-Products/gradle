@@ -16,21 +16,23 @@
 
 package org.gradle.api.plugins;
 
-import org.gradle.api.Action;
 import org.gradle.api.Plugin;
 import org.gradle.api.Project;
-import org.gradle.api.internal.plugins.DslObject;
-import org.gradle.api.tasks.GroovySourceSet;
+import org.gradle.api.file.SourceDirectorySet;
+import org.gradle.api.tasks.GroovySourceDirectorySet;
 import org.gradle.api.tasks.SourceSet;
 import org.gradle.api.tasks.javadoc.Groovydoc;
 
 /**
  * <p>A {@link Plugin} which extends the {@link JavaPlugin} to provide support for compiling and documenting Groovy
  * source files.</p>
+ *
+ * @see <a href="https://docs.gradle.org/current/userguide/groovy_plugin.html">Groovy plugin reference</a>
  */
 public class GroovyPlugin implements Plugin<Project> {
     public static final String GROOVYDOC_TASK_NAME = "groovydoc";
 
+    @Override
     public void apply(Project project) {
         project.getPluginManager().apply(GroovyBasePlugin.class);
         project.getPluginManager().apply(JavaPlugin.class);
@@ -38,19 +40,15 @@ public class GroovyPlugin implements Plugin<Project> {
     }
 
     private void configureGroovydoc(final Project project) {
-        project.getTasks().register(GROOVYDOC_TASK_NAME, Groovydoc.class, new Action<Groovydoc>() {
-            @Override
-            public void execute(Groovydoc groovyDoc) {
-                groovyDoc.setDescription("Generates Groovydoc API documentation for the main source code.");
-                groovyDoc.setGroup(JavaBasePlugin.DOCUMENTATION_GROUP);
+        project.getTasks().register(GROOVYDOC_TASK_NAME, Groovydoc.class, groovyDoc -> {
+            groovyDoc.setDescription("Generates Groovydoc API documentation for the main source code.");
+            groovyDoc.setGroup(JavaBasePlugin.DOCUMENTATION_GROUP);
 
-                JavaPluginConvention convention = project.getConvention().getPlugin(JavaPluginConvention.class);
-                SourceSet sourceSet = convention.getSourceSets().getByName(SourceSet.MAIN_SOURCE_SET_NAME);
-                groovyDoc.setClasspath(sourceSet.getOutput().plus(sourceSet.getCompileClasspath()));
+            SourceSet sourceSet = project.getExtensions().getByType(JavaPluginExtension.class).getSourceSets().getByName(SourceSet.MAIN_SOURCE_SET_NAME);
+            groovyDoc.setClasspath(sourceSet.getOutput().plus(sourceSet.getCompileClasspath()));
 
-                GroovySourceSet groovySourceSet = new DslObject(sourceSet).getConvention().getPlugin(GroovySourceSet.class);
-                groovyDoc.setSource(groovySourceSet.getGroovy());
-            }
+            SourceDirectorySet groovySourceSet = sourceSet.getExtensions().getByType(GroovySourceDirectorySet.class);
+            groovyDoc.setSource(groovySourceSet);
         });
     }
 }

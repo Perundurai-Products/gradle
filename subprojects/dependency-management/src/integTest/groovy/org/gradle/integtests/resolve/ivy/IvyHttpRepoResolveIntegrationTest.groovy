@@ -16,6 +16,7 @@
 package org.gradle.integtests.resolve.ivy
 
 import org.gradle.api.credentials.PasswordCredentials
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.test.fixtures.server.RepositoryServer
 import org.gradle.test.fixtures.server.http.RepositoryHttpServer
 import org.junit.Rule
@@ -25,13 +26,14 @@ import static org.gradle.internal.resource.transport.http.JavaSystemPropertiesHt
 class IvyHttpRepoResolveIntegrationTest extends AbstractIvyRemoteRepoResolveIntegrationTest {
 
     @Rule
-    final RepositoryHttpServer server = new RepositoryHttpServer(temporaryFolder)
+    RepositoryHttpServer server = new RepositoryHttpServer(temporaryFolder)
 
     @Override
     RepositoryServer getServer() {
         return server
     }
 
+    @ToBeFixedForConfigurationCache(because = "broken file collection")
     void "fails when configured with AwsCredentials"() {
         given:
         def remoteIvyRepo = server.remoteIvyRepo
@@ -67,6 +69,7 @@ class IvyHttpRepoResolveIntegrationTest extends AbstractIvyRemoteRepoResolveInte
         failure.assertHasCause("Credentials must be an instance of: ${PasswordCredentials.canonicalName}")
     }
 
+    @ToBeFixedForConfigurationCache
     public void "can resolve and cache dependencies with missing status and publication date"() {
         given:
         def module = server.remoteIvyRepo.module('group', 'projectA', '1.2')
@@ -110,6 +113,7 @@ class IvyHttpRepoResolveIntegrationTest extends AbstractIvyRemoteRepoResolveInte
         succeeds 'listJars'
     }
 
+    @ToBeFixedForConfigurationCache
     void "skip subsequent Ivy repositories on timeout and recovers for later resolution"() {
         given:
         executer.withArgument("-D${SOCKET_TIMEOUT_SYSTEM_PROPERTY}=1000")
@@ -156,7 +160,6 @@ class IvyHttpRepoResolveIntegrationTest extends AbstractIvyRemoteRepoResolveInte
         when:
         server.resetExpectations()
         module1.ivy.expectGetMissing()
-        module1.jar.expectHeadMissing()
         module2.ivy.expectGet()
         module2.jar.expectDownload()
 
@@ -178,13 +181,13 @@ class IvyHttpRepoResolveIntegrationTest extends AbstractIvyRemoteRepoResolveInte
                 }
             }
             configurations { compile }
-            dependencies { 
-                compile ':name1:1.0' 
-                compile ':name1:1.0' 
-                compile ':name2:[1.0, 2.0]' 
+            dependencies {
+                compile ':name1:1.0'
+                compile ':name1:1.0'
+                compile ':name2:[1.0, 2.0]'
                 compile ':name3:1.0-SNAPSHOT'
                 compile 'group1::1.0'
-                compile 'group2::[1.0, 2.0]' 
+                compile 'group2::[1.0, 2.0]'
                 compile 'group3::1.0-SNAPSHOT'
                 compile 'group:name'
             }

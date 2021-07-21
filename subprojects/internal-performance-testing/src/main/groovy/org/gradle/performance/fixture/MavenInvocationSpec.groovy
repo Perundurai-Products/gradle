@@ -31,21 +31,19 @@ class MavenInvocationSpec implements InvocationSpec {
     final File mavenHome
     final File workingDirectory
     final List<String> tasksToRun
-    final List<String> jvmOpts
+    final List<String> jvmArguments
     final List<String> mavenOpts
     final List<String> args
-    final List<String> cleanTasks
 
-    MavenInvocationSpec(MavenInstallation installation, File workingDirectory, List<String> tasksToRun, List<String> jvmOpts, List<String> mavenOpts, List<String> args, List<String> cleanTasks) {
+    MavenInvocationSpec(MavenInstallation installation, File workingDirectory, List<String> tasksToRun, List<String> jvmOpts, List<String> mavenOpts, List<String> args) {
         this.installation = installation
         this.mavenVersion = installation.version
         this.mavenHome = installation.home
         this.workingDirectory = workingDirectory
         this.tasksToRun = tasksToRun
-        this.jvmOpts = jvmOpts
+        this.jvmArguments = jvmOpts
         this.mavenOpts = mavenOpts
         this.args = args
-        this.cleanTasks = cleanTasks
     }
 
     @Override
@@ -63,10 +61,9 @@ class MavenInvocationSpec implements InvocationSpec {
         builder.mavenHome(mavenHome)
         builder.workingDirectory(workingDirectory)
         builder.tasksToRun.addAll(this.tasksToRun)
-        builder.jvmOpts(this.jvmOpts)
+        builder.jvmOpts(this.jvmArguments)
         builder.mavenOpts(this.mavenOpts)
         builder.args(this.args)
-        builder.cleanTasks.addAll(cleanTasks)
         builder
     }
 
@@ -78,7 +75,6 @@ class MavenInvocationSpec implements InvocationSpec {
         List<String> jvmOpts = []
         List<String> mavenOpts = []
         List<String> args = []
-        List<String> cleanTasks = []
 
         InvocationBuilder mavenVersion(String mavenVersion) {
             this.mavenVersion = mavenVersion
@@ -135,22 +131,13 @@ class MavenInvocationSpec implements InvocationSpec {
             this
         }
 
-        InvocationBuilder cleanTasks(String... cleanTasks) {
-            this.cleanTasks(Arrays.asList(cleanTasks))
-        }
-
-        InvocationBuilder cleanTasks(Iterable<String> cleanTasks) {
-            this.cleanTasks.addAll(cleanTasks)
-            this
-        }
-
         @Override
         InvocationSpec.Builder expectFailure() {
             throw new UnsupportedOperationException()
         }
 
         MavenInvocationSpec build() {
-            def mavenInstallation
+            MavenInstallation mavenInstallation = null
             if (mavenVersion != null && mavenHome != null) {
                 assertMavenHomeAndVersionMatch()
             } else if (mavenHome != null) {
@@ -164,7 +151,7 @@ class MavenInvocationSpec implements InvocationSpec {
             assert mavenHome != null
             assert workingDirectory != null
             mavenInstallation = mavenInstallation ?: new MavenInstallation(mavenVersion, mavenHome)
-            return new MavenInvocationSpec(mavenInstallation, workingDirectory, tasksToRun.asImmutable(), jvmOpts.asImmutable(), mavenOpts.asImmutable(), args.asImmutable(), cleanTasks.asImmutable())
+            return new MavenInvocationSpec(mavenInstallation, workingDirectory, tasksToRun.asImmutable(), jvmOpts.asImmutable(), mavenOpts.asImmutable(), args.asImmutable())
         }
 
         private void assertMavenHomeAndVersionMatch() {

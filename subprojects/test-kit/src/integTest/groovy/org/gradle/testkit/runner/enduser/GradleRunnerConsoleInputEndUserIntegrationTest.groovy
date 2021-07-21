@@ -16,8 +16,13 @@
 
 package org.gradle.testkit.runner.enduser
 
+import org.gradle.integtests.fixtures.JUnitXmlTestExecutionResult
+import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
+import spock.lang.IgnoreIf
+
 import static org.gradle.integtests.fixtures.BuildScanUserInputFixture.*
 
+@IgnoreIf({ GradleContextualExecuter.embedded }) // These tests run builds that themselves run a build in a test worker with 'gradleTestKit()' dependency, which needs to pick up Gradle modules from a real distribution
 class GradleRunnerConsoleInputEndUserIntegrationTest extends BaseTestKitEndUserIntegrationTest {
 
     def setup() {
@@ -25,14 +30,17 @@ class GradleRunnerConsoleInputEndUserIntegrationTest extends BaseTestKitEndUserI
             apply plugin: 'groovy'
 
             dependencies {
-                testCompile localGroovy()
-                testCompile gradleTestKit()
-                testCompile('org.spockframework:spock-core:1.0-groovy-2.4') {
-                    exclude module: 'groovy-all'
-                }
+                testImplementation localGroovy()
+                testImplementation gradleTestKit()
+                testImplementation(platform("org.spockframework:spock-bom:2.0-groovy-3.0"))
+                testImplementation("org.spockframework:spock-core")
+                testImplementation("org.spockframework:spock-junit4")
+                testImplementation 'junit:junit:4.13.1'
             }
 
-            ${jcenterRepository()}
+            test.useJUnitPlatform()
+
+            ${mavenCentralRepository()}
         """
     }
 
@@ -43,6 +51,7 @@ class GradleRunnerConsoleInputEndUserIntegrationTest extends BaseTestKitEndUserI
         then:
         succeeds 'build'
         executedAndNotSkipped ':test'
+        new JUnitXmlTestExecutionResult(projectDir).totalNumberOfTestClassesExecuted > 0
     }
 
     def "cannot capture user input if standard in was not provided"() {
@@ -52,6 +61,7 @@ class GradleRunnerConsoleInputEndUserIntegrationTest extends BaseTestKitEndUserI
         then:
         succeeds 'build'
         executedAndNotSkipped ':test'
+        new JUnitXmlTestExecutionResult(projectDir).totalNumberOfTestClassesExecuted > 0
     }
 
     static String functionalTest(boolean providesStandardInput, Boolean expectedAnswer) {

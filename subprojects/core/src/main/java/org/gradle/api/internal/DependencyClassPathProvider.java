@@ -16,12 +16,14 @@
 
 package org.gradle.api.internal;
 
+import com.google.common.collect.ImmutableSet;
 import org.gradle.api.internal.classpath.Module;
 import org.gradle.api.internal.classpath.ModuleRegistry;
 import org.gradle.api.internal.classpath.PluginModuleRegistry;
 import org.gradle.internal.classpath.ClassPath;
 
 import java.util.Arrays;
+import java.util.Set;
 
 import static org.gradle.api.internal.artifacts.dsl.dependencies.DependencyFactory.ClassPathNotation.GRADLE_API;
 import static org.gradle.api.internal.artifacts.dsl.dependencies.DependencyFactory.ClassPathNotation.GRADLE_KOTLIN_DSL;
@@ -39,6 +41,7 @@ public class DependencyClassPathProvider implements ClassPathProvider {
         this.pluginModuleRegistry = pluginModuleRegistry;
     }
 
+    @Override
     public ClassPath findClassPath(String name) {
         if (name.equals(GRADLE_API.name())) {
             return gradleApi();
@@ -63,16 +66,21 @@ public class DependencyClassPathProvider implements ClassPathProvider {
     }
 
     private ClassPath initGradleApi() {
+        // This gradleApi() method creates a Gradle API classpath based on real jars for embedded test running.
+        // Currently this leaks additional dependencies that may cause unexpected issues.
+        // This method is NOT involved in generating the gradleApi() Jar which is used in a real Gradle run.
         ClassPath classpath = ClassPath.EMPTY;
-        for (String moduleName : Arrays.asList("gradle-core", "gradle-workers", "gradle-dependency-management", "gradle-plugin-use", "gradle-tooling-api")) {
-            for (Module module : moduleRegistry.getModule(moduleName).getAllRequiredModules()) {
-                classpath = classpath.plus(module.getClasspath());
-            }
+        for (String moduleName : Arrays.asList("gradle-worker-processes", "gradle-launcher", "gradle-workers", "gradle-dependency-management", "gradle-plugin-use", "gradle-tooling-api", "gradle-configuration-cache")) {
+            classpath = classpath.plus(moduleRegistry.getModule(moduleName).getAllRequiredModulesClasspath());
         }
         for (Module pluginModule : pluginModuleRegistry.getApiModules()) {
             classpath = classpath.plus(pluginModule.getClasspath());
         }
-        return classpath;
+        return classpath.removeIf(f ->
+            // Remove dependencies that are not part of the API and cause trouble when they leak.
+            // 'kotlin-sam-with-receiver-compiler-plugin' clashes with 'kotlin-sam-with-receiver' causing a 'SamWithReceiverComponentRegistrar is not compatible with this version of compiler' exception
+            f.getName().startsWith("kotlin-sam-with-receiver-compiler-plugin")
+        );
     }
 
     private ClassPath gradleTestKit() {
@@ -80,10 +88,28 @@ public class DependencyClassPathProvider implements ClassPathProvider {
     }
 
     private ClassPath localGroovy() {
-        return moduleRegistry.getExternalModule("groovy-all").getClasspath();
+        Set<String> groovyModules = ImmutableSet.of(
+            "groovy-ant",
+            "groovy-astbuilder",
+            "groovy-console",
+            "groovy-datetime",
+            "groovy-dateutil",
+            "groovy-groovydoc",
+            "groovy-json",
+            "groovy-nio",
+            "groovy-sql",
+            "groovy-templates",
+            "groovy-test",
+            "groovy-xml",
+            "javaparser-core");
+        ClassPath groovy = moduleRegistry.getExternalModule("groovy").getClasspath();
+        for (String groovyModule : groovyModules) {
+            groovy = groovy.plus(moduleRegistry.getExternalModule(groovyModule).getClasspath());
+        }
+        return groovy;
     }
 
     private ClassPath gradleKotlinDsl() {
-        return moduleRegistry.getModule("gradle-kotlin-dsl").getClasspath();
+        return moduleRegistry.getModule("gradle-kotlin-dsl").getAllRequiredModulesClasspath();
     }
 }

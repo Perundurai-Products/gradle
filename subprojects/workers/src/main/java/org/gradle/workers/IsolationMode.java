@@ -16,14 +16,12 @@
 
 package org.gradle.workers;
 
-import org.gradle.api.Incubating;
-
 /**
  * Isolation mode for workers.
  *
  * @since 4.0
  */
-@Incubating
+@Deprecated
 public enum IsolationMode {
     /**
      * Let Gradle decide, this is the default.

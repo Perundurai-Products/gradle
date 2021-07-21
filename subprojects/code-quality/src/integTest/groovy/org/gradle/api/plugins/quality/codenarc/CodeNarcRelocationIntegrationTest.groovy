@@ -16,10 +16,11 @@
 
 package org.gradle.api.plugins.quality.codenarc
 
+import org.gradle.api.JavaVersion
 import org.gradle.integtests.fixtures.AbstractProjectRelocationIntegrationTest
 import org.gradle.test.fixtures.file.TestFile
 
-import static org.gradle.util.TextUtil.normaliseLineSeparators
+import static org.gradle.util.internal.TextUtil.normaliseLineSeparators
 
 class CodeNarcRelocationIntegrationTest extends AbstractProjectRelocationIntegrationTest {
 
@@ -54,9 +55,16 @@ class CodeNarcRelocationIntegrationTest extends AbstractProjectRelocationIntegra
             task codenarc(type: CodeNarc) {
                 source "src/main/groovy"
                 ignoreFailures = true
-                reports.html.enabled = false
-                reports.text.enabled = true
+                reports.html.required = false
+                reports.text.required = true
             }
+
+            ${JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_14) ?
+            """
+            configurations.codenarc {
+                resolutionStrategy.force 'org.codehaus.groovy:groovy:${GroovySystem.version}'
+            }
+            """ : ""}
         """
     }
 

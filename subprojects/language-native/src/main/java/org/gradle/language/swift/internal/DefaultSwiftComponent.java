@@ -17,7 +17,6 @@
 package org.gradle.language.swift.internal;
 
 import org.gradle.api.file.FileCollection;
-import org.gradle.api.internal.file.FileOperations;
 import org.gradle.api.model.ObjectFactory;
 import org.gradle.api.provider.Property;
 import org.gradle.api.provider.SetProperty;
@@ -33,8 +32,8 @@ import org.gradle.nativeplatform.TargetMachine;
 
 import java.util.Collections;
 
-public abstract class DefaultSwiftComponent extends DefaultNativeComponent implements SwiftComponent, ComponentWithNames {
-    private final DefaultBinaryCollection<SwiftBinary> binaries;
+public abstract class DefaultSwiftComponent<T extends SwiftBinary> extends DefaultNativeComponent implements SwiftComponent, ComponentWithNames {
+    private final DefaultBinaryCollection<T> binaries;
     private final FileCollection swiftSource;
     private final Property<String> module;
     private final String name;
@@ -42,16 +41,20 @@ public abstract class DefaultSwiftComponent extends DefaultNativeComponent imple
     private final Property<SwiftVersion> sourceCompatibility;
     private final SetProperty<TargetMachine> targetMachines;
 
-    public DefaultSwiftComponent(String name, FileOperations fileOperations, ObjectFactory objectFactory) {
-        super(fileOperations);
-        this.name = name;
-        swiftSource = createSourceView("src/"+ name + "/swift", Collections.singletonList("swift"));
-        module = objectFactory.property(String.class);
-        sourceCompatibility = objectFactory.property(SwiftVersion.class);
+    public DefaultSwiftComponent(String name, ObjectFactory objectFactory) {
+        this(name, SwiftBinary.class, objectFactory);
+    }
 
-        names = Names.of(name);
-        binaries = Cast.uncheckedCast(objectFactory.newInstance(DefaultBinaryCollection.class, SwiftBinary.class));
-        targetMachines = objectFactory.setProperty(TargetMachine.class);
+    public DefaultSwiftComponent(String name, Class<? extends SwiftBinary> binaryType, ObjectFactory objectFactory) {
+        super(objectFactory);
+        this.name = name;
+        this.swiftSource = createSourceView("src/"+ name + "/swift", Collections.singletonList("swift"));
+        this.module = objectFactory.property(String.class);
+        this.sourceCompatibility = objectFactory.property(SwiftVersion.class);
+
+        this.names = Names.of(name);
+        this.binaries = Cast.uncheckedCast(objectFactory.newInstance(DefaultBinaryCollection.class, binaryType));
+        this.targetMachines = objectFactory.setProperty(TargetMachine.class);
     }
 
     @Override
@@ -75,7 +78,7 @@ public abstract class DefaultSwiftComponent extends DefaultNativeComponent imple
     }
 
     @Override
-    public DefaultBinaryCollection<SwiftBinary> getBinaries() {
+    public DefaultBinaryCollection<T> getBinaries() {
         return binaries;
     }
 

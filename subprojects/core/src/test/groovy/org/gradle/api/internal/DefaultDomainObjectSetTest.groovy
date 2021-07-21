@@ -17,7 +17,7 @@ package org.gradle.api.internal
 
 import org.gradle.api.Action
 
-import static org.gradle.util.WrapUtil.toList
+import static org.gradle.util.internal.WrapUtil.toList
 
 class DefaultDomainObjectSetTest extends AbstractDomainObjectCollectionSpec<CharSequence> {
     DefaultDomainObjectSet<CharSequence> set = new DefaultDomainObjectSet<CharSequence>(CharSequence, callbackActionDecorator)
@@ -27,7 +27,9 @@ class DefaultDomainObjectSetTest extends AbstractDomainObjectCollectionSpec<Char
     StringBuffer c = new StringBuffer("c")
     StringBuilder d = new StringBuilder("d")
     boolean externalProviderAllowed = true
-    final boolean supportsBuildOperations = true
+    boolean directElementAdditionAllowed = true
+    boolean elementRemovalAllowed = true
+    boolean supportsBuildOperations = true
 
     def "findAll() filters elements and retains iteration order"() {
         set.add("a")

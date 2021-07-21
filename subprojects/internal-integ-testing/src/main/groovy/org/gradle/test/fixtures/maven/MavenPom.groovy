@@ -29,14 +29,18 @@ class MavenPom {
             def scopesByDependency = ArrayListMultimap.create()
 
             pom.dependencies.dependency.each { dep ->
-                def scope = createScope(dep.scope)
+                def scope = createScope(dep.scope, 'compile')
                 MavenDependency mavenDependency = createDependency(dep)
-                scope.dependencies[mavenDependency.getKey()] = mavenDependency
+                if (mavenDependency.optional) {
+                    scope.optionalDependencies[mavenDependency.getKey()] = mavenDependency
+                } else {
+                    scope.dependencies[mavenDependency.getKey()] = mavenDependency
+                }
                 scopesByDependency.put(mavenDependency.getKey(), scope.name)
             }
 
             pom.dependencyManagement.dependencies.dependency.each { dep ->
-                def scope = createScope(dep.scope)
+                def scope = createScope(dep.scope, 'no_scope')
                 MavenDependency mavenDependency = createDependency(dep)
                 scope.dependencyManagement[mavenDependency.getKey()] = mavenDependency
             }
@@ -119,8 +123,16 @@ class MavenPom {
         return pom?.mailingLists?.mailingList
     }
 
+    Node getProperties() {
+        return pom?.properties[0]
+    }
+
     private MavenDependency createDependency(def dep) {
         def exclusions = []
+        boolean optional = false
+        if (dep.optional) {
+            optional = "true"==dep.optional.text()
+        }
         if (dep.exclusions) {
             dep.exclusions.exclusion.each { excl ->
                 MavenDependencyExclusion exclusion = new MavenDependencyExclusion(
@@ -138,11 +150,12 @@ class MavenPom {
             classifier: dep.classifier ? dep.classifier.text() : null,
             type: dep.type ? dep.type.text() : null,
             exclusions: exclusions,
+            optional: optional
         )
     }
 
-    private MavenScope createScope(def scopeElement) {
-        def scopeName = scopeElement ? scopeElement.text() : 'runtime'
+    private MavenScope createScope(def scopeElement, String defaultScope) {
+        def scopeName = scopeElement ? scopeElement.text() : defaultScope
         def scope = scopes[scopeName]
         if (!scope) {
             scope = new MavenScope(name: scopeName)

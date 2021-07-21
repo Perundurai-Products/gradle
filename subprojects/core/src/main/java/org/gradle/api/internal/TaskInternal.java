@@ -19,18 +19,21 @@ package org.gradle.api.internal;
 import org.gradle.api.Action;
 import org.gradle.api.Task;
 import org.gradle.api.internal.project.taskfactory.TaskIdentity;
-import org.gradle.api.internal.tasks.ContextAwareTaskAction;
+import org.gradle.api.internal.tasks.InputChangesAwareTaskAction;
 import org.gradle.api.internal.tasks.TaskStateInternal;
-import org.gradle.api.logging.Logger;
+import org.gradle.api.provider.Provider;
+import org.gradle.api.services.BuildService;
 import org.gradle.api.specs.Spec;
 import org.gradle.api.tasks.Internal;
 import org.gradle.internal.Factory;
-import org.gradle.logging.StandardOutputCapture;
+import org.gradle.internal.logging.StandardOutputCapture;
+import org.gradle.internal.resources.ResourceLock;
 import org.gradle.util.Configurable;
 import org.gradle.util.Path;
 
 import java.io.File;
 import java.util.List;
+import java.util.Set;
 
 public interface TaskInternal extends Task, Configurable<Task> {
 
@@ -40,7 +43,7 @@ public interface TaskInternal extends Task, Configurable<Task> {
      * once they start executing.
      */
     @Internal
-    List<ContextAwareTaskAction> getTaskActions();
+    List<InputChangesAwareTaskAction> getTaskActions();
 
     @Internal
     boolean hasTaskActions();
@@ -49,7 +52,6 @@ public interface TaskInternal extends Task, Configurable<Task> {
     Spec<? super TaskInternal> getOnlyIf();
 
     @Internal
-    @SuppressWarnings("deprecation")
     StandardOutputCapture getStandardOutputCapture();
 
     @Override
@@ -87,13 +89,12 @@ public interface TaskInternal extends Task, Configurable<Task> {
     @Internal
     TaskIdentity<?> getTaskIdentity();
 
+    @Internal
+    Set<Provider<? extends BuildService<?>>> getRequiredServices();
+
     /**
-     * Replace this task's logger.
-     *
-     * Callers of {@link #getLogger()} will get the replacement logger after this method invocation.
-     *
-     * @param logger the replacement logger
+     * <p>Gets the shared resources required by this task.</p>
      */
-    @Deprecated
-    void replaceLogger(Logger logger);
+    @Internal
+    List<? extends ResourceLock> getSharedResources();
 }

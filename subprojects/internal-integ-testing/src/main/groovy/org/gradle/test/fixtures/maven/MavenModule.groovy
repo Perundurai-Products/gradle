@@ -43,11 +43,17 @@ interface MavenModule extends Module {
 
     MavenModule withNoPom()
 
+    MavenModule withoutExtraChecksums()
+
+    MavenModule withExtraChecksums()
+
     /**
      * Include the Gradle module metadata file in the published module.
      * @return this
      */
     MavenModule withModuleMetadata()
+
+    MavenModule withoutGradleMetadataRedirection();
 
     MavenModule parent(String group, String artifactId, String version)
 
@@ -81,6 +87,11 @@ interface MavenModule extends Module {
      * Define a variant with attributes. Variants are only published when using {@link #withModuleMetadata()}.
      */
     MavenModule variant(String variant, Map<String, String> attributes, @DelegatesTo(value= VariantMetadataSpec, strategy=Closure.DELEGATE_FIRST) Closure<?> variantConfiguration)
+
+    /**
+     * Clears all predefined variants
+     */
+    MavenModule adhocVariants()
 
     String getPublishArtifactVersion()
 

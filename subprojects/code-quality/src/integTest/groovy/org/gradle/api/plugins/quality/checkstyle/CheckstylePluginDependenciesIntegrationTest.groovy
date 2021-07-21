@@ -16,6 +16,7 @@
 package org.gradle.api.plugins.quality.checkstyle
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 
 class CheckstylePluginDependenciesIntegrationTest extends AbstractIntegrationSpec {
     def setup() {
@@ -24,14 +25,16 @@ class CheckstylePluginDependenciesIntegrationTest extends AbstractIntegrationSpe
         badCode()
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencies")
     def "allows configuring tool dependencies explicitly"() {
+        //Language has to be English, because the error message is localised
+        defaultLocale('en')
+
         expect:
         succeeds("dependencies", "--configuration", "checkstyle")
         output.contains "com.puppycrawl.tools:checkstyle:"
 
         when:
-        //Language has to be English, because the error message is localised
-        defaultLocale('en')
         buildFile << """
             dependencies {
                 //downgrade version:
@@ -56,7 +59,7 @@ apply plugin: "checkstyle"
 ${mavenCentralRepository()}
 
 dependencies {
-    compile localGroovy()
+    implementation localGroovy()
 }
         """
     }

@@ -17,6 +17,7 @@
 package org.gradle.integtests.fixtures.resolve
 
 import com.google.common.base.Joiner
+import groovy.transform.Canonical
 import org.gradle.api.DefaultTask
 import org.gradle.api.artifacts.Configuration
 import org.gradle.api.artifacts.ModuleVersionIdentifier
@@ -29,6 +30,7 @@ import org.gradle.api.internal.artifacts.DefaultModuleVersionIdentifier
 import org.gradle.api.internal.artifacts.ivyservice.resolveengine.result.ComponentSelectionReasonInternal
 import org.gradle.api.tasks.Internal
 import org.gradle.api.tasks.TaskAction
+import org.gradle.configurationcache.problems.DisableConfigurationCacheFieldTypeCheck
 import org.gradle.internal.classloader.ClasspathUtil
 import org.gradle.test.fixtures.file.TestFile
 import org.junit.ComparisonFailure
@@ -38,18 +40,24 @@ import org.junit.ComparisonFailure
  * ensure that the old and new dependency graphs plus the artifacts and files are as expected and well-formed.
  */
 class ResolveTestFixture {
-    private final TestFile buildFile
-    private final String config
+    final TestFile buildFile
+    final String config
     private String defaultConfig = "default"
     private boolean buildArtifacts = true
+    private boolean strictReasonsCheck
 
-    ResolveTestFixture(TestFile buildFile, String config = "compile") {
+    ResolveTestFixture(TestFile buildFile, String config = "runtimeClasspath") {
         this.config = config
         this.buildFile = buildFile
     }
 
     ResolveTestFixture withoutBuildingArtifacts() {
         buildArtifacts = false
+        return this
+    }
+
+    ResolveTestFixture withStrictReasonsCheck() {
+        strictReasonsCheck = true
         return this
     }
 
@@ -109,7 +117,15 @@ allprojects {
         def expectedRoot = "[id:${graph.root.id}][mv:${graph.root.moduleVersionId}][reason:${graph.root.reason}]".toString()
         assert actualRoot.startsWith(expectedRoot)
 
-        def expectedFirstLevel = graph.root.deps.findAll { !it.constraint }.collect { "[${it.selected.moduleVersionId}:${it.selected.configuration}]" } as Set
+        def expectedFirstLevel = graph.root.deps.findAll { !it.constraint }.collect { d ->
+            def configs = d.selected.firstLevelConfigurations.collect {
+                "[${d.selected.moduleVersionId}:${it}]"
+            }
+            if (configs.empty) {
+                configs = ["[${d.selected.moduleVersionId}:$defaultConfig"]
+            }
+            configs
+        }.flatten() as Set
 
         def actualFirstLevel = findLines(configDetails, 'first-level')
         compare("first level dependencies", actualFirstLevel, expectedFirstLevel)
@@ -124,13 +140,19 @@ allprojects {
         compare("lenient filtered first level dependencies", actualFirstLevel, expectedFirstLevel)
 
         def actualConfigurations = findLines(configDetails, 'configuration') as Set
-        def expectedConfigurations = graph.nodesWithoutRoot.collect { "[${it.moduleVersionId}]".toString() } - graph.virtualConfigurations.collect { "[${it}]".toString() }
+        def expectedConfigurations = graph.nodesWithoutRoot.collect { "[${it.moduleVersionId}]".toString() } - graph.virtualConfigurations.collect { "[${it}]".toString() } as Set
         compare("configurations in graph", actualConfigurations, expectedConfigurations)
 
         def actualComponents = findLines(configDetails, 'component')
-        def expectedComponents = graph.nodes.collect {
-            def variantDetails = it.checkVariant ? "[variant:name:${it.variantName} attributes:${it.variantAttributes}]" : ''
-            "[id:${it.id}][mv:${it.moduleVersionId}][reason:${it.reason}]$variantDetails"
+        def expectedComponents = graph.nodes.collect { baseNode ->
+            def variantDetails = ''
+            def variants = baseNode.variants.collect { variant ->
+                "variant:name:${variant.name} attributes:${variant.attributes}"
+            }
+            if (variants) {
+                variantDetails = "[${variants.join('@@')}]"
+            }
+            "[id:${baseNode.id}][mv:${baseNode.moduleVersionId}][reason:${baseNode.reason}]$variantDetails"
         }
         compareNodes("components in graph", parseNodes(actualComponents), parseNodes(expectedComponents))
 
@@ -197,11 +219,11 @@ allprojects {
         return lines.findAll { it.startsWith(prefix + ":") }.collect { it.substring(prefix.length() + 1) }
     }
 
-    static List<ParsedNode> parseNodes(List<String> nodes) {
+    List<ParsedNode> parseNodes(List<String> nodes) {
         nodes.collect { parseNode(it) }
     }
 
-    static ParsedNode parseNode(String line) {
+    ParsedNode parseNode(String line) {
         int start = 4
         // we look for ][ instead of just ], because of that one test that checks that we can have random characters in id
         // see IvyDynamicRevisionRemoteResolveIntegrationTest. uses latest version from version range with punctuation characters
@@ -222,28 +244,32 @@ allprojects {
             throw new IllegalArgumentException("Missing reasons in '$line'")
         }
         List<String> reasons = line.substring(start, idx).split('!!') as List<String>
+        Set<Variant> variants = []
         start = idx + 15
-        String variant = null
-        Map<String, String> attributes = [:]
-        if (start<line.length()) {
+        while (start < line.length()) {
             idx = line.indexOf(' attributes:', start) // [variant name:
-            variant = line.substring(start, idx)
+            String variant = line.substring(start, idx)
             start = idx + 12
-            idx = line.indexOf(']', start) // attributes:
-            attributes = line.substring(start, idx)
-                .split(',') // attributes are separated by commas
-                .findAll() // only keep non empty entries (thank you, split!)
-                .collectEntries { it.split('=') as List }
+            idx = line.indexOf('@@', start)
+            if (idx < 0) {
+                idx = line.indexOf(']', start) // attributes:
+            }
+            Map<String, String> attributes = line.substring(start, idx)
+                    .split(',') // attributes are separated by commas
+                    .findAll() // only keep non empty entries (thank you, split!)
+                    .collectEntries { it.split('=') as List }
+            start = idx + 15 // '@@'
+            variants << new Variant(name: variant, attributes: attributes)
         }
-        new ParsedNode(id: id, module:module, reasons: reasons, variant: variant, attributes: attributes)
+        new ParsedNode(id: id, module: module, reasons: reasons, variants: variants, strictReasonsCheck: strictReasonsCheck)
     }
 
     static class ParsedNode {
         String id
         String module
         List<String> reasons
-        String variant
-        Map<String, String> attributes
+        Set<Variant> variants = []
+        boolean strictReasonsCheck
 
         boolean diff(ParsedNode actual, StringBuilder sb) {
             List<String> errors = []
@@ -260,12 +286,17 @@ allprojects {
                     }
                 }
             }
-            if (variant) {
-                if (variant != actual.variant) {
-                    errors << "Expected variant name $variant, but was: $actual.variant"
-                }
-                if (attributes != actual.attributes) {
-                    errors << "Expected variant attributes $attributes, but was: $actual.attributes"
+            if (strictReasonsCheck && actual.reasons.size() != reasons.size()) {
+                errors << "Unexpected reason. Expected: $reasons Actual: ${actual.reasons}"
+            }
+            variants.each { variant ->
+                def actualVariant = actual.variants.find { it.name == variant.name }
+                if (!actualVariant) {
+                    errors << "Expected variant name $variant, but wasn't found in: $actual.variants.name"
+                } else {
+                    if (variant.attributes != actualVariant.attributes) {
+                        errors << "On variant $variant.name, expected attributes $variant.attributes, but was: $actualVariant.attributes"
+                    }
                 }
             }
 
@@ -280,7 +311,7 @@ allprojects {
         }
 
         String toString() {
-            "id: $id, module: $module, reasons: ${reasons}${variant?', variant ' + variant:''}${attributes?', variant attributes' + attributes:''}"
+            "id: $id, module: $module, reasons: ${reasons}${variants}"
         }
     }
 
@@ -299,11 +330,11 @@ allprojects {
             }
         }
         actualSorted.each { node ->
-            if (!expectedSorted.find { it.id == node.id } ) {
+            if (!expectedSorted.find { it.id == node.id }) {
                 errors.append("Found unexpected node $node")
             }
         }
-        if (errors.length()>0) {
+        if (errors.length() > 0) {
             throw new AssertionError("Result contains unexpected $compType\n${errors}\nMatched $compType:\n${matched}")
         }
     }
@@ -326,7 +357,7 @@ allprojects {
     }
 
     static class GraphBuilder {
-        private final Map<String, NodeBuilder> nodes = new LinkedHashMap<>()
+        private final Map<String, NodeBuilder> nodes = [:]
         private NodeBuilder root
         private String defaultConfig
 
@@ -458,11 +489,11 @@ allprojects {
         def node(String id, String moduleVersion, Map attrs) {
             def node = nodes[moduleVersion]
             if (!node) {
-                if (!attrs.configuration) {
-                    attrs.configuration = defaultConfig
-                }
                 node = new NodeBuilder(id, moduleVersion, attrs, this)
                 nodes[moduleVersion] = node
+            }
+            if (attrs.configuration) {
+                node.configuration(attrs.configuration)
             }
             return node
         }
@@ -493,6 +524,7 @@ allprojects {
         String classifier
         String type
         String name
+        boolean noType
 
         String getType() {
             return type ?: 'jar'
@@ -507,11 +539,24 @@ allprojects {
         }
 
         String getArtifactName() {
-            return "${getName()}${classifier ? '-' + classifier : ''}.${getType()}"
+            return "${getName()}${classifier ? '-' + classifier : ''}${noType ? '' : '.' + getType()}"
         }
 
         String getFileName() {
+            if (noType) {
+                return getName()
+            }
             return "${getName()}${version ? '-' + version : ''}${classifier ? '-' + classifier : ''}.${getType()}"
+        }
+    }
+
+    @Canonical
+    static class Variant {
+        String name
+        String attributes
+
+        String toString() {
+            "variant $name, variant attributes $attributes"
         }
     }
 
@@ -523,13 +568,13 @@ allprojects {
         final String group
         final String module
         final String version
-        String configuration
+        final Set<String> configurations = []
+        Set<String> firstLevelConfigurations
         private boolean implicitArtifact = true
         final List<String> files = []
         private final Set<ExpectedArtifact> artifacts = new LinkedHashSet<>()
         private final Set<String> reasons = new TreeSet<String>()
-        String variantName
-        String variantAttributes
+        Set<Variant> variants = []
 
         boolean checkVariant
 
@@ -538,11 +583,11 @@ allprojects {
             this.group = attrs.group
             this.module = attrs.module
             this.version = attrs.version
-            this.configuration = attrs.configuration
             this.moduleVersionId = moduleVersionId
             this.id = id
-            this.variantName = attrs.variantName
-            this.variantAttributes = attrs.variantAttributes
+            if (attrs.variantName) {
+                variant(attrs.variantName, attrs.variantAttributes)
+            }
         }
 
         Set<ExpectedArtifact> getArtifacts() {
@@ -587,7 +632,7 @@ allprojects {
             def (group, name, version) = parts
             def attrs = [group: group, module: name, version: version]
             def node = graph.node(id, moduleVersionId, attrs)
-            deps << new EdgeBuilder(this, requestedVersion?"${group}:${name}:${requestedVersion}":moduleVersionId, node)
+            deps << new EdgeBuilder(this, requestedVersion ? "${group}:${name}:${requestedVersion}" : moduleVersionId, node)
             return node
         }
 
@@ -607,6 +652,17 @@ allprojects {
          */
         NodeBuilder constraint(String requested, String selectedModuleVersionId = requested, @DelegatesTo(NodeBuilder) Closure cl = {}) {
             def node = graph.node(selectedModuleVersionId, selectedModuleVersionId)
+            def edge = new EdgeBuilder(this, requested, node)
+            edge.constraint = true
+            deps << edge
+            cl.resolveStrategy = Closure.DELEGATE_ONLY
+            cl.delegate = node
+            cl.call()
+            return node
+        }
+
+        NodeBuilder constraint(String requested, String id, String selectedModuleVersionId, @DelegatesTo(NodeBuilder) Closure cl = {}) {
+            def node = graph.node(id, selectedModuleVersionId)
             def edge = new EdgeBuilder(this, requested, node)
             edge.constraint = true
             deps << edge
@@ -669,7 +725,7 @@ allprojects {
          * Specifies an artifact for this node. A default is assumed when none specified
          */
         NodeBuilder artifact(Map attributes) {
-            def artifact = new ExpectedArtifact(group: group, module: module, version: version, name: attributes.name, classifier: attributes.classifier, type: attributes.type)
+            def artifact = new ExpectedArtifact(group: group, module: module, version: version, name: attributes.name, classifier: attributes.classifier, type: attributes.type, noType: attributes.noType?:false)
             artifacts << artifact
             return this
         }
@@ -731,6 +787,11 @@ allprojects {
             this
         }
 
+        NodeBuilder byRequest() {
+            reasons << 'requested'
+            this
+        }
+
         NodeBuilder byConstraint(String reason = null) {
             if (reason == null) {
                 reasons << ComponentSelectionCause.CONSTRAINT.defaultReason
@@ -738,6 +799,14 @@ allprojects {
                 reasons << "${ComponentSelectionCause.CONSTRAINT.defaultReason}: $reason".toString()
             }
             this
+        }
+
+        NodeBuilder byAncestor() {
+            byReason(ComponentSelectionCause.BY_ANCESTOR.defaultReason)
+        }
+
+        NodeBuilder byConsistentResolution(String source) {
+            byConstraint("version resolved in configuration ':$source' by consistent resolution")
         }
 
         /**
@@ -749,13 +818,29 @@ allprojects {
         }
 
         NodeBuilder variant(String name, Map<String, ?> attributes = [:]) {
+            configuration(name)
             checkVariant = true
-            variantName = name
-            variantAttributes = attributes.collect { "$it.key=$it.value" }.sort().join(',')
-            if (id.startsWith("project ")) {
-                configuration = variantName
-            }
+            String variantName = name
+            String variantAttributes = attributes.collect { "$it.key=$it.value" }.sort().join(',')
+            variants << new Variant(name: variantName, attributes: variantAttributes)
             this
+        }
+
+        void setConfiguration(String configuration) {
+            configurations.clear()
+            configurations.add(configuration)
+        }
+
+        void configuration(String configuration) {
+            configurations << configuration
+        }
+
+        void setFirstLevelConfigurations(Collection<String> firstLevelConfigurations) {
+            this.firstLevelConfigurations = firstLevelConfigurations as Set
+        }
+
+        Set<String> getFirstLevelConfigurations() {
+            firstLevelConfigurations == null ? configurations : firstLevelConfigurations
         }
     }
 
@@ -767,15 +852,31 @@ allprojects {
             allprojects { dependencies.components.variantDerivationStrategy = new org.gradle.internal.component.external.model.JavaEcosystemVariantDerivationStrategy() }
         """
     }
+
+    void addJavaEcosystemSchema() {
+        buildFile << """
+            allprojects {
+                org.gradle.api.internal.artifacts.JavaEcosystemSupport.configureSchema(
+                    dependencies.attributesSchema,
+                    project.objects
+                )
+            }
+        """
+    }
 }
 
 class GenerateGraphTask extends DefaultTask {
     @Internal
     File outputFile
     @Internal
+    @DisableConfigurationCacheFieldTypeCheck
     Configuration configuration
     @Internal
     boolean buildArtifacts
+
+    GenerateGraphTask() {
+        outputs.upToDateWhen { false }
+    }
 
     @TaskAction
     def generateOutput() {
@@ -802,7 +903,7 @@ class GenerateGraphTask extends DefaultTask {
                 writer.println("component:${formatComponent(it)}")
             }
             configuration.incoming.resolutionResult.allDependencies.each {
-                writer.println("dependency:${it.constraint ? '[constraint]' : '' }[from:${it.from.id}][${it.requested}->${it.selected.id}]")
+                writer.println("dependency:${it.constraint ? '[constraint]' : ''}[from:${it.from.id}][${it.requested}->${it.selected.id}]")
             }
             if (buildArtifacts) {
                 configuration.files.each {
@@ -844,13 +945,13 @@ class GenerateGraphTask extends DefaultTask {
             }
 
             configuration.resolvedConfiguration.resolvedArtifacts.each {
-                writer.println("artifact:[${it.moduleVersion.id}][${it.name}${it.classifier ? "-" + it.classifier : ""}.${it.extension}]")
+                writer.println("artifact:[${it.moduleVersion.id}][${it.name}${it.classifier ? "-" + it.classifier : ""}${it.extension?'.' + it.extension : ''}]")
             }
             configuration.resolvedConfiguration.lenientConfiguration.artifacts.each {
-                writer.println("lenient-artifact:[${it.moduleVersion.id}][${it.name}${it.classifier ? "-" + it.classifier : ""}.${it.extension}]")
+                writer.println("lenient-artifact:[${it.moduleVersion.id}][${it.name}${it.classifier ? "-" + it.classifier : ""}${it.extension?'.' + it.extension : ''}]")
             }
             configuration.resolvedConfiguration.lenientConfiguration.getArtifacts { true }.each {
-                writer.println("filtered-lenient-artifact:[${it.moduleVersion.id}][${it.name}${it.classifier ? "-" + it.classifier : ""}.${it.extension}]")
+                writer.println("filtered-lenient-artifact:[${it.moduleVersion.id}][${it.name}${it.classifier ? "-" + it.classifier : ""}${it.extension?'.' + it.extension : ''}]")
             }
         }
     }
@@ -866,7 +967,10 @@ class GenerateGraphTask extends DefaultTask {
     }
 
     def formatComponent(ResolvedComponentResult result) {
-        return "[id:${result.id}][mv:${result.moduleVersion}][reason:${formatReason(result.selectionReason)}][variant:${formatVariant(result.variant)}]"
+        String variants = result.variants.collect { variant ->
+            "variant:${formatVariant(variant)}"
+        }.join('@@')
+        "[id:${result.id}][mv:${result.moduleVersion}][reason:${formatReason(result.selectionReason)}][$variants]"
     }
 
     def formatVariant(ResolvedVariantResult variant) {

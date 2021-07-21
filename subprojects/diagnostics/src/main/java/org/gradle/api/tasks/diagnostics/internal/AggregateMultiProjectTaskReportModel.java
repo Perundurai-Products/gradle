@@ -26,7 +26,7 @@ import java.util.List;
 import java.util.Set;
 
 public class AggregateMultiProjectTaskReportModel implements TaskReportModel {
-    private List<TaskReportModel> projects = new ArrayList<TaskReportModel>();
+    private final List<TaskReportModel> projects = new ArrayList<>();
     private SetMultimap<String, TaskDetails> groups;
     private final boolean mergeTasksWithSameName;
     private final boolean detail;
@@ -43,24 +43,23 @@ public class AggregateMultiProjectTaskReportModel implements TaskReportModel {
     }
 
     public void build() {
-        groups = TreeMultimap.create(new Comparator<String>() {
-            public int compare(String string1, String string2) {
-                return string1.compareToIgnoreCase(string2);
-            }
-        }, new Comparator<TaskDetails>() {
-            public int compare(TaskDetails task1, TaskDetails task2) {
-                return task1.getPath().compareTo(task2.getPath());
-            }
-        });
+        groups = TreeMultimap.create(String::compareToIgnoreCase, Comparator.comparing(TaskDetails::getPath));
         for (TaskReportModel project : projects) {
             for (String group : project.getGroups()) {
                 if (isVisible(group)) {
                     for (final TaskDetails task : project.getTasksForGroup(group)) {
-                        groups.put(group, mergeTasksWithSameName ? new MergedTaskDetails(task) : task);
+                        groups.put(group, mergeTasksWithSameName ? mergedTaskDetails(task) : task);
                     }
                 }
             }
         }
+    }
+
+    private TaskDetails mergedTaskDetails(TaskDetails task) {
+        return TaskDetails.of(
+            Path.path(task.getPath().getName()),
+            task.getDescription()
+        );
     }
 
     private boolean isVisible(String group) {
@@ -79,27 +78,5 @@ public class AggregateMultiProjectTaskReportModel implements TaskReportModel {
     @Override
     public Set<TaskDetails> getTasksForGroup(String group) {
         return groups.get(group);
-    }
-
-    private static class MergedTaskDetails implements TaskDetails {
-        private final TaskDetails task;
-        private Path cachedPath;
-
-        public MergedTaskDetails(TaskDetails task) {
-            this.task = task;
-        }
-
-        @Override
-        public Path getPath() {
-            if (cachedPath == null) {
-                cachedPath = Path.path(task.getPath().getName());
-            }
-            return cachedPath;
-        }
-
-        @Override
-        public String getDescription() {
-            return task.getDescription();
-        }
     }
 }

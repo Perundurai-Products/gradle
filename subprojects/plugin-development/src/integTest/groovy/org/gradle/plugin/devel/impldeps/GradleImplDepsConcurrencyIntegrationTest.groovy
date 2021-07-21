@@ -20,15 +20,11 @@ import org.gradle.api.Plugin
 import org.gradle.util.Requires
 import org.gradle.util.TestPrecondition
 
-@Requires(TestPrecondition.JDK8_OR_LATER)
+@Requires(TestPrecondition.HIGH_PERFORMANCE)
 class GradleImplDepsConcurrencyIntegrationTest extends BaseGradleImplDepsIntegrationTest {
 
     private static final int CONCURRENT_BUILDS_PROJECT_COUNT = 4
     private static final int CONCURRENT_TASKS_PROJECT_COUNT = 4
-
-    def setup() {
-        requireOwnGradleUserHomeDir()
-    }
 
     def "Gradle API and TestKit dependency can be resolved and used by concurrent Gradle builds"() {
         given:
@@ -90,7 +86,7 @@ class GradleImplDepsConcurrencyIntegrationTest extends BaseGradleImplDepsIntegra
                 doLast {
                     def files = configurations.gradleImplDeps.resolve()
                     file('deps.txt').text = files.collect {
-                        org.gradle.internal.hash.HashUtil.createHash(it, 'MD5').asByteArray().encodeHex().toString()
+                        org.gradle.internal.hash.Hashing.md5().hashFile(it).toString()
                     }.join(',')
                 }
             }

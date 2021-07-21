@@ -16,7 +16,6 @@
 package org.gradle.language.nativeplatform.tasks;
 
 import org.gradle.api.DefaultTask;
-import org.gradle.api.Incubating;
 import org.gradle.api.Transformer;
 import org.gradle.api.file.ConfigurableFileCollection;
 import org.gradle.api.file.DirectoryProperty;
@@ -33,9 +32,9 @@ import org.gradle.api.tasks.Nested;
 import org.gradle.api.tasks.OutputDirectory;
 import org.gradle.api.tasks.PathSensitive;
 import org.gradle.api.tasks.PathSensitivity;
+import org.gradle.api.tasks.SkipWhenEmpty;
 import org.gradle.api.tasks.TaskAction;
 import org.gradle.api.tasks.WorkResult;
-import org.gradle.api.tasks.incremental.IncrementalTaskInputs;
 import org.gradle.internal.Cast;
 import org.gradle.internal.operations.logging.BuildOperationLogger;
 import org.gradle.internal.operations.logging.BuildOperationLoggerFactory;
@@ -50,6 +49,9 @@ import org.gradle.nativeplatform.toolchain.NativeToolChain;
 import org.gradle.nativeplatform.toolchain.internal.NativeCompileSpec;
 import org.gradle.nativeplatform.toolchain.internal.NativeToolChainInternal;
 import org.gradle.nativeplatform.toolchain.internal.PlatformToolProvider;
+import org.gradle.work.DisableCachingByDefault;
+import org.gradle.work.Incremental;
+import org.gradle.work.InputChanges;
 
 import javax.inject.Inject;
 import java.util.LinkedHashMap;
@@ -58,7 +60,7 @@ import java.util.Map;
 /**
  * Compiles native source files into object files.
  */
-@Incubating
+@DisableCachingByDefault(because = "Abstract super-class, not to be instantiated directly")
 public abstract class AbstractNativeCompileTask extends DefaultTask {
     private final Property<NativePlatform> targetPlatform;
     private final Property<NativeToolChain> toolChain;
@@ -114,7 +116,7 @@ public abstract class AbstractNativeCompileTask extends DefaultTask {
     }
 
     @TaskAction
-    public void compile(IncrementalTaskInputs inputs) {
+    protected void compile(InputChanges inputs) {
         BuildOperationLogger operationLogger = getOperationLoggerFactory().newOperationLogger(getName(), getTemporaryDir());
         NativeCompileSpec spec = createCompileSpec();
         spec.setTargetPlatform(targetPlatform.get());
@@ -260,6 +262,7 @@ public abstract class AbstractNativeCompileTask extends DefaultTask {
     /**
      * Returns the source files to be compiled.
      */
+    @SkipWhenEmpty
     @InputFiles
     @PathSensitive(PathSensitivity.RELATIVE)
     public ConfigurableFileCollection getSource() {
@@ -301,6 +304,7 @@ public abstract class AbstractNativeCompileTask extends DefaultTask {
      *
      * @since 4.3
      */
+    @Incremental
     @InputFiles
     @PathSensitive(PathSensitivity.NAME_ONLY)
     protected FileCollection getHeaderDependencies() {

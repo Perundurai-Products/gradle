@@ -16,21 +16,23 @@
 package org.gradle.integtests.tooling
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.integtests.fixtures.IntegrationTestHint
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.integtests.fixtures.Sample
 import org.gradle.integtests.fixtures.UsesSample
 import org.gradle.integtests.fixtures.executer.ExecutionResult
 import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
 import org.gradle.test.fixtures.file.LeaksFileHandles
-import org.gradle.util.TextUtil
+import org.gradle.util.internal.TextUtil
 import org.junit.Rule
+import spock.lang.IgnoreIf
 
 @LeaksFileHandles
+@IgnoreIf({ GradleContextualExecuter.embedded }) // These test run independent applications that connect to a Gradle distribution through the Tooling API
 class SamplesToolingApiIntegrationTest extends AbstractIntegrationSpec {
 
     @Rule public final Sample sample = new Sample(temporaryFolder)
 
-    @UsesSample('toolingApi/eclipse')
+    @UsesSample('toolingApi/eclipse/groovy')
     def "can use tooling API to build Eclipse model"() {
         tweakProject()
 
@@ -53,7 +55,7 @@ class SamplesToolingApiIntegrationTest extends AbstractIntegrationSpec {
         outputContains("Welcome to Gradle")
     }
 
-    @UsesSample('toolingApi/idea')
+    @UsesSample('toolingApi/idea/groovy')
     def "can use tooling API to build IDEA model"() {
         tweakProject()
 
@@ -64,7 +66,7 @@ class SamplesToolingApiIntegrationTest extends AbstractIntegrationSpec {
         noExceptionThrown()
     }
 
-    @UsesSample('toolingApi/model')
+    @UsesSample('toolingApi/model/groovy')
     def "can use tooling API to build general model"() {
         tweakProject()
 
@@ -76,7 +78,8 @@ class SamplesToolingApiIntegrationTest extends AbstractIntegrationSpec {
         outputContains("    build")
     }
 
-    @UsesSample('toolingApi/customModel')
+    @UsesSample('toolingApi/customModel/groovy')
+    @ToBeFixedForConfigurationCache
     def "can use tooling API to register custom model"() {
         tweakPluginProject(sample.dir.file('plugin'))
         tweakProject(sample.dir.file('tooling'))
@@ -100,7 +103,7 @@ class SamplesToolingApiIntegrationTest extends AbstractIntegrationSpec {
         assert index >= 0
         buildScript = buildScript.substring(0, index) + """
 repositories {
-    maven { url "${buildContext.libsRepo.toURI()}" }
+    maven { url "${buildContext.localRepository.toURI()}" }
 }
 run {
     args = ["${TextUtil.escapeString(buildContext.gradleHomeDir.absolutePath)}", "${TextUtil.escapeString(executer.gradleUserHomeDir.absolutePath)}"]
@@ -108,6 +111,8 @@ run {
     systemProperty 'org.gradle.daemon.registry.base', "${TextUtil.escapeString(projectDir.file("daemon").absolutePath)}"
 }
 """ + buildScript.substring(index)
+
+        buildScript = buildScript.replace("def toolingApiVersion = gradle.gradleVersion", "def toolingApiVersion = \"${distribution.version.baseVersion.version}\"")
 
         buildFile.text = buildScript
     }
@@ -120,7 +125,7 @@ run {
         assert index >= 0
         buildScript = buildScript.substring(0, index) + """
 repositories {
-    maven { url "${buildContext.libsRepo.toURI()}" }
+    maven { url "${buildContext.localRepository.toURI()}" }
 }
 """ + buildScript.substring(index)
 
@@ -128,15 +133,9 @@ repositories {
     }
 
     private ExecutionResult run(String task = 'run', File dir = sample.dir) {
-        try {
-            result = new GradleContextualExecuter(distribution, temporaryFolder, getBuildContext())
-                    .requireGradleDistribution()
-                    .inDirectory(dir)
-                    .withTasks(task)
-                    .run()
-            return result
-        } catch (Exception e) {
-            throw new IntegrationTestHint(e);
-        }
+        result = new GradleContextualExecuter(distribution, temporaryFolder, getBuildContext())
+                .inDirectory(dir)
+                .withTasks(task)
+                .run()
     }
 }

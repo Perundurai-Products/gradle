@@ -67,7 +67,11 @@ public interface MavenPomInternal extends MavenPom {
 
     Set<MavenDependencyInternal> getRuntimeDependencies();
 
+    Set<MavenDependencyInternal> getOptionalDependencies();
+
     Action<XmlProvider> getXmlAction();
 
     VersionMappingStrategyInternal getVersionMappingStrategy();
+
+    boolean writeGradleMetadataMarker();
 }

@@ -16,11 +16,17 @@
 
 package org.gradle.internal.event;
 
+import org.gradle.internal.Cast;
 import org.gradle.internal.dispatch.Dispatch;
 import org.gradle.internal.dispatch.MethodInvocation;
 import org.gradle.internal.dispatch.ProxyDispatchAdapter;
 import org.gradle.internal.dispatch.ReflectionDispatch;
+import org.gradle.internal.service.AnnotatedServiceLifecycleHandler;
+import org.gradle.internal.service.scopes.EventScope;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.StatefulListener;
 
+import java.lang.annotation.Annotation;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -33,20 +39,51 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 
-@SuppressWarnings({"unchecked"})
-public class DefaultListenerManager implements ListenerManager {
+public class DefaultListenerManager implements ListenerManager, AnnotatedServiceLifecycleHandler {
     private final Map<Object, ListenerDetails> allListeners = new LinkedHashMap<Object, ListenerDetails>();
     private final Map<Object, ListenerDetails> allLoggers = new LinkedHashMap<Object, ListenerDetails>();
-    private final Map<Class<?>, EventBroadcast> broadcasters = new ConcurrentHashMap<Class<?>, EventBroadcast>();
+    private final Map<Class<?>, EventBroadcast<?>> broadcasters = new ConcurrentHashMap<Class<?>, EventBroadcast<?>>();
+    private final List<Registration> pendingRegistrations = new ArrayList<Registration>();
     private final Object lock = new Object();
+    private final Class<? extends Scope> scope;
     private final DefaultListenerManager parent;
 
-    public DefaultListenerManager() {
-        this(null);
+    public DefaultListenerManager(Class<? extends Scope> scope) {
+        this(scope, null);
     }
 
-    private DefaultListenerManager(DefaultListenerManager parent) {
+    private DefaultListenerManager(Class<? extends Scope> scope, DefaultListenerManager parent) {
+        this.scope = scope;
         this.parent = parent;
+    }
+
+    @Override
+    public Class<? extends Annotation> getAnnotation() {
+        return StatefulListener.class;
+    }
+
+    @Override
+    public void whenRegistered(Registration registration) {
+        synchronized (lock) {
+            pendingRegistrations.add(registration);
+            for (EventBroadcast<?> broadcast : broadcasters.values()) {
+                broadcast.checkRegistration(registration);
+            }
+        }
+    }
+
+    private void maybeAddPendingRegistrations(Class<?> type) {
+        synchronized (lock) {
+            for (int i = 0; i < pendingRegistrations.size();) {
+                Registration registration = pendingRegistrations.get(i);
+                if (type.isAssignableFrom(registration.getDeclaredType())) {
+                    addListener(registration.getInstance());
+                    pendingRegistrations.remove(i);
+                } else {
+                    i++;
+                }
+            }
+        }
     }
 
     @Override
@@ -92,20 +129,28 @@ public class DefaultListenerManager implements ListenerManager {
     }
 
     @Override
+    public <T> boolean hasListeners(Class<T> listenerClass) {
+        EventBroadcast<T> broadcaster = getBroadcasterInternal(listenerClass);
+        return !broadcaster.listeners.isEmpty();
+    }
+
+    @Override
     public <T> T getBroadcaster(Class<T> listenerClass) {
+        assertCanBroadcast(listenerClass);
         return getBroadcasterInternal(listenerClass).getBroadcaster();
     }
 
     @Override
-    public <T> ListenerBroadcast<T> createAnonymousBroadcaster(Class<T> listenerClass) {
-        ListenerBroadcast<T> broadcast = new ListenerBroadcast(listenerClass);
+    public <T> AnonymousListenerBroadcast<T> createAnonymousBroadcaster(Class<T> listenerClass) {
+        assertCanBroadcast(listenerClass);
+        AnonymousListenerBroadcast<T> broadcast = new AnonymousListenerBroadcast<T>(listenerClass);
         broadcast.add(getBroadcasterInternal(listenerClass).getDispatch(true));
         return broadcast;
     }
 
     private <T> EventBroadcast<T> getBroadcasterInternal(Class<T> listenerClass) {
         synchronized (lock) {
-            EventBroadcast<T> broadcaster = broadcasters.get(listenerClass);
+            EventBroadcast<T> broadcaster = Cast.uncheckedCast(broadcasters.get(listenerClass));
             if (broadcaster == null) {
                 broadcaster = new EventBroadcast<T>(listenerClass);
                 broadcasters.put(listenerClass, broadcaster);
@@ -120,9 +165,25 @@ public class DefaultListenerManager implements ListenerManager {
         }
     }
 
-    @Override
-    public ListenerManager createChild() {
-        return new DefaultListenerManager(this);
+    private <T> void assertCanBroadcast(Class<T> listenerClass) {
+        EventScope scope = listenerClass.getAnnotation(EventScope.class);
+        if (scope == null) {
+            throw new IllegalArgumentException(String.format("Listener type %s is not annotated with @EventScope.", listenerClass.getName()));
+        }
+        if (!scope.value().equals(this.scope)) {
+            throw new IllegalArgumentException(String.format("Listener type %s with scope %s cannot be used to generate events in scope %s.", listenerClass.getName(), scope.value().getSimpleName(), this.scope.getSimpleName()));
+        }
+    }
+
+    /**
+     * Creates a child {@code ListenerManager}. All events broadcast in the child will be received by the listeners
+     * registered in the parent. However, the reverse is not true: events broadcast in the parent are not received
+     * by the listeners in the children. The child inherits the loggers of its parent, though these can be replaced.
+     *
+     * @return The child
+     */
+    public DefaultListenerManager createChild(Class<? extends Scope> scope) {
+        return new DefaultListenerManager(scope, this);
     }
 
     /**
@@ -132,6 +193,7 @@ public class DefaultListenerManager implements ListenerManager {
         private final Class<T> type;
         private final ListenerDispatch dispatch;
         private final ListenerDispatch dispatchNoLogger;
+        private final boolean stateful;
 
         private volatile ProxyDispatchAdapter<T> source;
         private final Set<ListenerDetails> listeners = new LinkedHashSet<ListenerDetails>();
@@ -141,9 +203,11 @@ public class DefaultListenerManager implements ListenerManager {
         private Dispatch<MethodInvocation> parentDispatch;
         private List<Dispatch<MethodInvocation>> allWithLogger = Collections.emptyList();
         private List<Dispatch<MethodInvocation>> allWithNoLogger = Collections.emptyList();
+        private boolean notified;
 
         EventBroadcast(Class<T> type) {
             this.type = type;
+            stateful = type.getAnnotation(StatefulListener.class) != null;
             dispatch = new ListenerDispatch(type, true);
             dispatchNoLogger = new ListenerDispatch(type, false);
             if (parent != null) {
@@ -181,6 +245,7 @@ public class DefaultListenerManager implements ListenerManager {
             if (type.isInstance(listener.listener)) {
                 if (broadcasterLock.tryLock()) {
                     try {
+                        checkListenersCanBeAdded();
                         listeners.add(listener);
                         invalidateDispatchCache();
                     } finally {
@@ -242,6 +307,24 @@ public class DefaultListenerManager implements ListenerManager {
             }
         }
 
+        public void checkRegistration(Registration registration) {
+            if (type.isAssignableFrom(registration.getDeclaredType())) {
+                broadcasterLock.lock();
+                try {
+                    checkListenersCanBeAdded();
+                } finally {
+                    broadcasterLock.unlock();
+                }
+
+            }
+        }
+
+        private void checkListenersCanBeAdded() {
+            if (stateful && notified) {
+                throw new IllegalStateException(String.format("Cannot add listener of type %s after events have been broadcast.", type.getSimpleName()));
+            }
+        }
+
         private void doSetLogger(ListenerDetails candidate) {
             if (logger == null && parent != null) {
                 parentDispatch = parent.getBroadcasterInternal(type).getDispatch(false);
@@ -251,6 +334,11 @@ public class DefaultListenerManager implements ListenerManager {
 
         private List<Dispatch<MethodInvocation>> startNotification(boolean includeLogger) {
             takeOwnership();
+
+            if (!notified) {
+                maybeAddPendingRegistrations(type);
+                notified = true;
+            }
 
             // Take a snapshot while holding lock
             List<Dispatch<MethodInvocation>> result = includeLogger ? allWithLogger : allWithNoLogger;

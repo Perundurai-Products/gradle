@@ -17,7 +17,6 @@
 package org.gradle.api.reporting.internal;
 
 import groovy.lang.Closure;
-import org.gradle.api.Action;
 import org.gradle.api.InvalidUserDataException;
 import org.gradle.api.NamedDomainObjectSet;
 import org.gradle.api.internal.CollectionCallbackActionDecorator;
@@ -25,46 +24,46 @@ import org.gradle.api.internal.DefaultNamedDomainObjectSet;
 import org.gradle.api.reporting.Report;
 import org.gradle.api.reporting.ReportContainer;
 import org.gradle.api.specs.Spec;
+import org.gradle.api.tasks.Internal;
 import org.gradle.internal.reflect.Instantiator;
-import org.gradle.util.ConfigureUtil;
+import org.gradle.util.internal.ConfigureUtil;
 
 import javax.annotation.Nullable;
 import java.util.Map;
 import java.util.SortedMap;
 
 public class DefaultReportContainer<T extends Report> extends DefaultNamedDomainObjectSet<T> implements ReportContainer<T> {
-    private static final Action<Object> IMMUTABLE_VIOLATION_EXCEPTION = new Action<Object>() {
-        public void execute(Object arg) {
-            throw new ImmutableViolationException();
-        }
-    };
     private NamedDomainObjectSet<T> enabled;
 
     public DefaultReportContainer(Class<? extends T> type, Instantiator instantiator, CollectionCallbackActionDecorator callbackActionDecorator) {
         super(type, instantiator, Report.NAMER, callbackActionDecorator);
 
         enabled = matching(new Spec<T>() {
+            @Override
             public boolean isSatisfiedBy(T element) {
-                return element.isEnabled();
+                return element.getRequired().get();
             }
         });
     }
 
     @Override
     protected void assertMutableCollectionContents() {
-        IMMUTABLE_VIOLATION_EXCEPTION.execute(null);
+        throw new ImmutableViolationException();
     }
 
+    @Override
     public NamedDomainObjectSet<T> getEnabled() {
         return enabled;
     }
 
+    @Override
     public ReportContainer<T> configure(Closure cl) {
         ConfigureUtil.configureSelf(cl, this);
         return this;
     }
 
     @Nullable
+    @Internal
     public T getFirstEnabled() {
         SortedMap<String, T> map = enabled.getAsMap();
         if (map.isEmpty()) {

@@ -17,13 +17,11 @@
 package org.gradle.integtests
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.test.fixtures.file.LeaksFileHandles
 import org.gradle.test.fixtures.server.http.HttpServer
-import org.gradle.util.Requires
+import spock.lang.Issue
 
-import static org.gradle.util.TestPrecondition.KOTLIN_SCRIPT
-
-@Requires([KOTLIN_SCRIPT])
 class GradleKotlinDslIntegrationTest extends AbstractIntegrationSpec {
 
     @Override
@@ -40,7 +38,7 @@ class GradleKotlinDslIntegrationTest extends AbstractIntegrationSpec {
         buildFile << """
             import org.gradle.api.*
             import org.gradle.api.tasks.*
-            
+
             open class SimpleTask : DefaultTask() {
                 @TaskAction fun run() = println("it works!")
             }
@@ -71,8 +69,8 @@ class GradleKotlinDslIntegrationTest extends AbstractIntegrationSpec {
         """
 
         buildFile << """
-            apply { 
-                from("http://localhost:${server.port}/script.gradle") 
+            apply {
+                from("${server.uri}/script.gradle")
             }
         """
 
@@ -106,15 +104,15 @@ class GradleKotlinDslIntegrationTest extends AbstractIntegrationSpec {
         def scriptFile = file("script.gradle.kts") << """
             tasks {
                 register("hello") {
-                    doLast { 
-                        println("Hello!") 
+                    doLast {
+                        println("Hello!")
                     }
                 }
             }
         """
         server.expectGet('/script.gradle.kts', scriptFile)
 
-        buildFile << """apply { from("http://localhost:${server.port}/script.gradle.kts") }"""
+        buildFile << """apply { from("${server.uri}/script.gradle.kts") }"""
 
         when:
         succeeds 'hello'
@@ -134,6 +132,7 @@ class GradleKotlinDslIntegrationTest extends AbstractIntegrationSpec {
         executer.cleanup()
     }
 
+    @ToBeFixedForConfigurationCache(because = "Task.getProject() during execution")
     def 'can query KotlinBuildScriptModel'() {
         given:
         // TODO Remove this once the Kotlin DSL upgrades 'pattern("layout") {' to 'patternLayout {
@@ -166,6 +165,7 @@ task("dumpKotlinBuildScriptModelClassPath") {
         outputContains("gradle-kotlin-dsl!")
     }
 
+    @ToBeFixedForConfigurationCache(because = "Task.getProject() during execution")
     def 'can use Kotlin lambda as path notation'() {
         given:
         buildFile << """
@@ -187,7 +187,7 @@ task("dumpKotlinBuildScriptModelClassPath") {
                         // nested both
                         { { file({ { "bazar" } }) } }
                     )
-                    println(collection.files.map { it.name })                    
+                    println(collection.files.map { it.name })
                 }
             }
         """
@@ -196,5 +196,78 @@ task("dumpKotlinBuildScriptModelClassPath") {
         then:
         outputContains 'cathedral'
         outputContains '[foo, bar, baz, bazar]'
+    }
+
+    @ToBeFixedForConfigurationCache(because = "Task.getProject() during execution")
+    def 'can use Kotlin lambda as input property'() {
+        given:
+        buildFile << """
+            import org.gradle.api.*
+            import org.gradle.api.tasks.*
+
+            open class PrintInputToFile @Inject constructor(objects: ObjectFactory): DefaultTask() {
+                @get:Input
+                val input = { project.property("inputString") }
+                @get:OutputFile
+                val outputFile: RegularFileProperty = objects.fileProperty()
+
+                @TaskAction fun run() {
+                    outputFile.get().asFile.writeText(input() as String)
+                }
+            }
+
+            task<PrintInputToFile>("writeInputToFile") {
+                outputFile.set(project.layout.buildDirectory.file("output.txt"))
+            }
+
+        """
+        def taskName = ":writeInputToFile"
+
+        when:
+        run taskName, '-PinputString=string1'
+        then:
+        executedAndNotSkipped(taskName)
+
+        when:
+        run taskName, '-PinputString=string1'
+        then:
+        skipped(taskName)
+
+        when:
+        run taskName, '-PinputString=string2'
+        then:
+        executedAndNotSkipped(taskName)
+    }
+
+    @Issue("https://youtrack.jetbrains.com/issue/KT-36297")
+    def 'can use Kotlin lambda as provider'() {
+        given:
+        buildFile << '''
+            tasks {
+                register<Task>("broken") {
+                    val prop = objects.property(String::class.java)
+                    // broken by https://youtrack.jetbrains.com/issue/KT-36297
+                    prop.set(provider { "abc" })
+                    doLast { println("-> value = ${prop.get()}") }
+                }
+                register<Task>("ok1") {
+                    val prop = objects.property(String::class.java)
+                    val function = { "abc" }
+                    prop.set(provider(function))
+                    doLast { println("-> value = ${prop.get()}") }
+                }
+            }
+            tasks.register<Task>("ok2") {
+                val prop = objects.property(String::class.java)
+                prop.set(provider { "abc" })
+                doLast { println("-> value = ${prop.get()}") }
+            }
+        '''
+
+        when:
+        succeeds 'broken', 'ok1', 'ok2'
+
+        then:
+        result.output.count('-> value = abc') == 3
     }
 }

@@ -18,12 +18,11 @@ package org.gradle.api.internal.artifacts.configurations;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import org.gradle.api.Transformer;
 import org.gradle.api.internal.artifacts.configurations.ResolveConfigurationDependenciesBuildOperationType.Repository;
 import org.gradle.api.internal.artifacts.repositories.ResolutionAwareRepository;
 import org.gradle.api.internal.artifacts.repositories.descriptor.RepositoryDescriptor;
 import org.gradle.internal.operations.trace.CustomOperationTraceSerialization;
-import org.gradle.util.CollectionUtils;
+import org.gradle.util.internal.CollectionUtils;
 
 import javax.annotation.Nullable;
 import java.io.File;
@@ -47,9 +46,9 @@ class ResolveConfigurationResolutionBuildOperationDetails implements ResolveConf
     ResolveConfigurationResolutionBuildOperationDetails(
         String configurationName,
         boolean isScriptConfiguration,
-        String configurationDescription,
+        @Nullable String configurationDescription,
         String buildPath,
-        String projectPath,
+        @Nullable String projectPath,
         boolean isConfigurationVisible,
         boolean isConfigurationTransitive,
         List<ResolutionAwareRepository> repositories
@@ -107,7 +106,7 @@ class ResolveConfigurationResolutionBuildOperationDetails implements ResolveConf
 
     @Override
     public Object getCustomOperationTraceSerializableModel() {
-        Map<String, Object> model = new HashMap<String, Object>();
+        Map<String, Object> model = new HashMap<>();
         model.put("configurationName", configurationName);
         model.put("scriptConfiguration", isScriptConfiguration);
         model.put("configurationDescription", configurationDescription);
@@ -115,17 +114,17 @@ class ResolveConfigurationResolutionBuildOperationDetails implements ResolveConf
         model.put("projectPath", projectPath);
         model.put("configurationVisible", isConfigurationVisible);
         model.put("configurationTransitive", isConfigurationTransitive);
-        ImmutableList.Builder<Object> repoBuilder = new ImmutableList.Builder<Object>();
+        ImmutableList.Builder<Object> repoBuilder = new ImmutableList.Builder<>();
         for (Repository repository : repositories) {
-            ImmutableMap.Builder<String, Object> repoMapBuilder = new ImmutableMap.Builder<String, Object>();
+            ImmutableMap.Builder<String, Object> repoMapBuilder = new ImmutableMap.Builder<>();
             repoMapBuilder.put("id", repository.getId());
             repoMapBuilder.put("name", repository.getName());
             repoMapBuilder.put("type", repository.getType());
-            ImmutableMap.Builder<String, Object> propertiesMapBuilder = new ImmutableMap.Builder<String, Object>();
+            ImmutableMap.Builder<String, Object> propertiesMapBuilder = new ImmutableMap.Builder<>();
             for (Map.Entry<String, ?> property : repository.getProperties().entrySet()) {
                 Object propertyValue;
                 if (property.getValue() instanceof Collection) {
-                    ImmutableList.Builder<Object> listBuilder = new ImmutableList.Builder<Object>();
+                    ImmutableList.Builder<Object> listBuilder = new ImmutableList.Builder<>();
                     for (Object inner : (Collection<?>) property.getValue()) {
                         doSerialize(inner, listBuilder);
                     }
@@ -162,12 +161,7 @@ class ResolveConfigurationResolutionBuildOperationDetails implements ResolveConf
         private final RepositoryDescriptor descriptor;
 
         private static List<Repository> transform(List<ResolutionAwareRepository> repositories) {
-            return CollectionUtils.collect(repositories, new Transformer<Repository, ResolutionAwareRepository>() {
-                @Override
-                public Repository transform(ResolutionAwareRepository repository) {
-                    return new RepositoryImpl(repository.getDescriptor());
-                }
-            });
+            return CollectionUtils.collect(repositories, repository -> new RepositoryImpl(repository.getDescriptor()));
         }
 
         private RepositoryImpl(RepositoryDescriptor descriptor) {

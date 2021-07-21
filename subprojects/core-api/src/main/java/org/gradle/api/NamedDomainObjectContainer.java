@@ -20,7 +20,7 @@ import org.gradle.api.provider.Provider;
 import org.gradle.util.Configurable;
 
 /**
- * <p>A named domain object container is a specialisation of {@link NamedDomainObjectSet} that adds the ability to create
+ * <p>A named domain object container is a specialization of {@link NamedDomainObjectSet} that adds the ability to create
  * instances of the element type.</p>
  *
  * <p>Implementations may use different strategies for creating new object instances.</p>
@@ -28,10 +28,9 @@ import org.gradle.util.Configurable;
  * <p>Note that a container is an implementation of {@link java.util.SortedSet}, which means that the container is guaranteed
  * to only contain elements with unique names within this container. Furthermore, items are ordered by their name.</p>
  *
- * @param <T> The type of domain objects in this container.
- * @see NamedDomainObjectSet
- * @see Project#container(Class) Creating a container.
- * @see Project#container(Class, NamedDomainObjectFactory) Creating a container with a custom factory.
+ * <p>You can create an instance of this type using the factory method {@link org.gradle.api.model.ObjectFactory#domainObjectContainer(Class)}.</p>
+ *
+ * @param <T> The type of objects in this container.
  */
 public interface NamedDomainObjectContainer<T> extends NamedDomainObjectSet<T>, Configurable<NamedDomainObjectContainer<T>> {
 
@@ -80,6 +79,7 @@ public interface NamedDomainObjectContainer<T> extends NamedDomainObjectSet<T>, 
      * @param configureClosure The closure to configure this container with
      * @return This.
      */
+    @Override
     NamedDomainObjectContainer<T> configure(Closure configureClosure);
 
     /**
@@ -98,7 +98,7 @@ public interface NamedDomainObjectContainer<T> extends NamedDomainObjectSet<T>, 
     /**
      * Defines a new object, which will be created when it is required. A object is 'required' when the object is located using query methods such as {@link NamedDomainObjectCollection#getByName(java.lang.String)} or when {@link Provider#get()} is called on the return value of this method.
      *
-     * <p>It is generally more efficient to use this method instead of {@link #create(java.lang.String)}, as that methods will eagerly create he object, regardless of whether that object is required for the current build or not. This method, on the other hand, will defer creation until required.</p>
+     * <p>It is generally more efficient to use this method instead of {@link #create(java.lang.String)}, as that method will eagerly create the object, regardless of whether that object is required for the current build or not. This method, on the other hand, will defer creation until required.</p>
      *
      * @param name The name of the object.
      * @return A {@link Provider} that whose value will be the object, when queried.

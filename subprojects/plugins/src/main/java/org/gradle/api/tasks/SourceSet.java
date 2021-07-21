@@ -25,13 +25,18 @@ import org.gradle.api.plugins.ExtensionAware;
 import javax.annotation.Nullable;
 
 /**
- * A {@code SourceSet} represents a logical group of Java source and resources.
+ * A {@code SourceSet} represents a logical group of Java source and resource files. They
+ * are covered in more detail in the
+ * <a href="https://docs.gradle.org/current/userguide/building_java_projects.html#sec:java_source_sets">user manual</a>.
  * <p>
- * See the example below how {@link SourceSet} 'main' is accessed and how the {@link SourceDirectorySet} 'java'
- * is configured to exclude some package from compilation.
+ * The following example shows how you can configure the 'main' source set, which in this
+ * case involves excluding classes whose package begins 'some.unwanted.package' from
+ * compilation of the source files in the 'java' {@link SourceDirectorySet}:
  *
  * <pre class='autoTested'>
- * apply plugin: 'java'
+ * plugins {
+ *     id 'java'
+ * }
  *
  * sourceSets {
  *   main {
@@ -83,7 +88,6 @@ public interface SourceSet extends ExtensionAware {
      * @return The annotation processor path. Never returns null.
      * @since 4.6
      */
-    @Incubating
     FileCollection getAnnotationProcessorPath();
 
     /**
@@ -95,7 +99,6 @@ public interface SourceSet extends ExtensionAware {
      * @param annotationProcessorPath The annotation processor path. Should not be null.
      * @since 4.6
      */
-    @Incubating
     void setAnnotationProcessorPath(FileCollection annotationProcessorPath);
 
     /**
@@ -112,9 +115,9 @@ public interface SourceSet extends ExtensionAware {
      */
     void setRuntimeClasspath(FileCollection classpath);
 
-   /**
+    /**
      * {@link SourceSetOutput} is a {@link FileCollection} of all output directories (compiled classes, processed resources, etc.)
-     *  and it provides means to configure the default output dirs and register additional output dirs. See examples in {@link SourceSetOutput}
+     * and it provides means to configure the default output dirs and register additional output dirs. See examples in {@link SourceSetOutput}
      *
      * @return The output dirs, as a {@link SourceSetOutput}.
      */
@@ -228,11 +231,38 @@ public interface SourceSet extends ExtensionAware {
     String getCompileTaskName(String language);
 
     /**
+     * Returns the name of the Javadoc task for this source set.
+     *
+     * @return The task name. Never returns null.
+     *
+     * @since 6.0
+     */
+    String getJavadocTaskName();
+
+    /**
      * Returns the name of the Jar task for this source set.
      *
      * @return The task name. Never returns null.
      */
     String getJarTaskName();
+
+    /**
+     * Returns the name of the Javadoc Jar task for this source set.
+     *
+     * @return The task name. Never returns null.
+     *
+     * @since 6.0
+     */
+    String getJavadocJarTaskName();
+
+    /**
+     * Returns the name of the Source Jar task for this source set.
+     *
+     * @return The task name. Never returns null.
+     *
+     * @since 6.0
+     */
+    String getSourcesJarTaskName();
 
     /**
      * Returns the name of a task for this source set.
@@ -244,19 +274,8 @@ public interface SourceSet extends ExtensionAware {
     String getTaskName(@Nullable String verb, @Nullable String target);
 
     /**
-     * Returns the name of the compile configuration for this source set.
-     * @return The configuration name
-     */
-    String getCompileConfigurationName();
-
-    /**
-     * Returns the name of the runtime configuration for this source set.
-     * @return The runtime configuration name
-     */
-    String getRuntimeConfigurationName();
-
-    /**
      * Returns the name of the compile only configuration for this source set.
+     *
      * @return The compile only configuration name
      *
      * @since 2.12
@@ -264,7 +283,17 @@ public interface SourceSet extends ExtensionAware {
     String getCompileOnlyConfigurationName();
 
     /**
+     * Returns the name of the 'compile only api' configuration for this source set.
+     *
+     * @return The 'compile only api' configuration name
+     *
+     * @since 6.7
+     */
+    String getCompileOnlyApiConfigurationName();
+
+    /**
      * Returns the name of the compile classpath configuration for this source set.
+     *
      * @return The compile classpath configuration
      *
      * @since 2.12
@@ -278,7 +307,6 @@ public interface SourceSet extends ExtensionAware {
      * @return the name of the annotation processor configuration.
      * @since 4.6
      */
-    @Incubating
     String getAnnotationProcessorConfigurationName();
 
     /**
@@ -297,6 +325,7 @@ public interface SourceSet extends ExtensionAware {
      * Returns the name of the implementation configuration for this source set. The implementation
      * configuration should contain dependencies which are specific to the implementation of the component
      * (internal APIs).
+     *
      * @return The configuration name
      * @since 3.4
      */
@@ -341,4 +370,32 @@ public interface SourceSet extends ExtensionAware {
      * @since 3.4
      */
     String getRuntimeElementsConfigurationName();
+
+    /**
+     * Returns the name of the configuration that represents the variant that carries the
+     * Javadoc for this source set in packaged form. Used to publish a variant with a '-javadoc' zip.
+     *
+     * @return the name of the javadoc elements configuration.
+     * @since 6.0
+     */
+    String getJavadocElementsConfigurationName();
+
+    /**
+     * Returns the name of the configuration that represents the variant that carries the
+     * original source code in packaged form. Used to publish a variant with a '-sources' zip.
+     *
+     * @return the name of the sources elements configuration.
+     * @since 6.0
+     */
+    String getSourcesElementsConfigurationName();
+
+    /**
+     * Determines if this source set is the main source set
+     *
+     * @since 6.7
+     */
+    @Incubating
+    static boolean isMain(SourceSet sourceSet) {
+        return MAIN_SOURCE_SET_NAME.equals(sourceSet.getName());
+    }
 }

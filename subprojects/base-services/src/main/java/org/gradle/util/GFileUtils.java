@@ -17,6 +17,7 @@ package org.gradle.util;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang.ArrayUtils;
+import org.apache.commons.lang.StringUtils;
 import org.gradle.api.UncheckedIOException;
 import org.gradle.internal.IoActions;
 import org.gradle.util.internal.LimitedDescription;
@@ -33,12 +34,21 @@ import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.zip.Checksum;
 
+/**
+ * This class is only here to maintain binary compatibility with existing plugins.
+ * <p>
+ * Plugins should prefer java.io, java.nio or external packages over this class.
+ *
+ * @deprecated Will be removed in Gradle 8.0.
+ */
+@Deprecated
 public class GFileUtils {
 
     public static FileInputStream openInputStream(File file) {
@@ -109,6 +119,11 @@ public class GFileUtils {
         }
     }
 
+    /**
+     * If the destination file exists, then this method will overwrite it.
+     *
+     * @see FileUtils#copyFile(File, File)
+     */
     public static void copyFile(File source, File destination) {
         try {
             FileUtils.copyFile(source, destination);
@@ -207,26 +222,14 @@ public class GFileUtils {
         }
     }
 
-    public static void cleanDirectory(File directory) {
-        try {
-            FileUtils.cleanDirectory(directory);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
-
     public static boolean deleteQuietly(@Nullable File file) {
         return FileUtils.deleteQuietly(file);
     }
 
-    public static boolean deleteFileQuietly(@Nullable File file) {
-        if (file != null) {
-            return file.delete();
-        } else {
-            return false;
-        }
-    }
-
+    /**
+     * Tail reading exception.
+     */
+    @Deprecated
     public static class TailReadingException extends RuntimeException {
         public TailReadingException(Throwable throwable) {
             super(throwable);
@@ -234,6 +237,8 @@ public class GFileUtils {
     }
 
     /**
+     * Returns the tail of a file.
+     *
      * @param file to read from tail
      * @param maxLines max lines to read
      * @return tail content
@@ -331,5 +336,39 @@ public class GFileUtils {
         if (!dir.mkdir() && !dir.isDirectory()) {
             throw new UncheckedIOException(String.format("Failed to create directory '%s'", dir));
         }
+    }
+
+    /**
+     * Returns the path of target relative to base.
+     *
+     * @param target target file or directory
+     * @param base base directory
+     * @return the path of target relative to base.
+     */
+    public static String relativePathOf(File target, File base) {
+        String separatorChars = "/" + File.separator;
+        List<String> basePath = splitAbsolutePathOf(base, separatorChars);
+        List<String> targetPath = new ArrayList<String>(splitAbsolutePathOf(target, separatorChars));
+
+        // Find and remove common prefix
+        int maxDepth = Math.min(basePath.size(), targetPath.size());
+        int prefixLen = 0;
+        while (prefixLen < maxDepth && basePath.get(prefixLen).equals(targetPath.get(prefixLen))) {
+            prefixLen++;
+        }
+        basePath = basePath.subList(prefixLen, basePath.size());
+        targetPath = targetPath.subList(prefixLen, targetPath.size());
+
+        for (int i = 0; i < basePath.size(); i++) {
+            targetPath.add(0, "..");
+        }
+        if (targetPath.isEmpty()) {
+            return ".";
+        }
+        return CollectionUtils.join(File.separator, targetPath);
+    }
+
+    private static List<String> splitAbsolutePathOf(File baseDir, String separatorChars) {
+        return Arrays.asList(StringUtils.split(baseDir.getAbsolutePath(), separatorChars));
     }
 }

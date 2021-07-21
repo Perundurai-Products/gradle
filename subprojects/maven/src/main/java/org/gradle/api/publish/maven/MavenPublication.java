@@ -17,7 +17,6 @@
 package org.gradle.api.publish.maven;
 
 import org.gradle.api.Action;
-import org.gradle.api.Incubating;
 import org.gradle.api.component.SoftwareComponent;
 import org.gradle.api.publish.Publication;
 import org.gradle.api.publish.VersionMappingStrategy;
@@ -58,12 +57,14 @@ import org.gradle.internal.HasInternalProtocol;
  * </p>
  * <h4>Example of publishing a Java module with a source artifact and a customized POM</h4>
  * <pre class='autoTested'>
- * apply plugin: "java"
- * apply plugin: "maven-publish"
+ * plugins {
+ *     id 'java'
+ *     id 'maven-publish'
+ * }
  *
  * task sourceJar(type: Jar) {
  *   from sourceSets.main.allJava
- *   classifier "sources"
+ *   archiveClassifier = "sources"
  * }
  *
  * publishing {
@@ -130,13 +131,15 @@ public interface MavenPublication extends Publication {
      *
      * Currently 3 types of component are supported: 'components.java' (added by the JavaPlugin), 'components.web' (added by the WarPlugin)
      * and `components.javaPlatform` (added by the JavaPlatformPlugin).
-     * 
+     *
      * For any individual MavenPublication, only a single component can be provided in this way.
      *
      * The following example demonstrates how to publish the 'java' component to a Maven repository.
      * <pre class='autoTested'>
-     * apply plugin: "java"
-     * apply plugin: "maven-publish"
+     * plugins {
+     *     id 'java'
+     *     id 'maven-publish'
+     * }
      *
      * publishing {
      *   publications {
@@ -166,10 +169,12 @@ public interface MavenPublication extends Publication {
      *
      * The following example demonstrates the addition of various custom artifacts.
      * <pre class='autoTested'>
-     * apply plugin: "maven-publish"
+     * plugins {
+     *     id 'maven-publish'
+     * }
      *
      * task sourceJar(type: Jar) {
-     *   classifier "sources"
+     *   archiveClassifier = "sources"
      * }
      *
      * publishing {
@@ -195,10 +200,12 @@ public interface MavenPublication extends Publication {
      * This method also accepts the configure action as a closure argument, by type coercion.
      *
      * <pre class='autoTested'>
-     * apply plugin: "maven-publish"
+     * plugins {
+     *     id 'maven-publish'
+     * }
      *
      * task sourceJar(type: Jar) {
-     *   classifier "sources"
+     *   archiveClassifier = "sources"
      * }
      *
      * publishing {
@@ -229,11 +236,13 @@ public interface MavenPublication extends Publication {
      *
      * For example, to exclude the dependencies declared by a component and instead use a custom set of artifacts:
      * <pre class='autoTested'>
-     * apply plugin: "java"
-     * apply plugin: "maven-publish"
+     * plugins {
+     *     id 'java'
+     *     id 'maven-publish'
+     * }
      *
      * task sourceJar(type: Jar) {
-     *   classifier "sources"
+     *   archiveClassifier = "sources"
      * }
 
      * publishing {
@@ -291,8 +300,10 @@ public interface MavenPublication extends Publication {
      *
      * For example, to use resolved versions for runtime dependencies:
      * <pre class='autoTested'>
-     * apply plugin: "java"
-     * apply plugin: "maven-publish"
+     * plugins {
+     *     id 'java'
+     *     id 'maven-publish'
+     * }
      *
      * publishing {
      *   publications {
@@ -312,6 +323,26 @@ public interface MavenPublication extends Publication {
      *
      * @since 5.2
      */
-    @Incubating
     void versionMapping(Action<? super VersionMappingStrategy> configureAction);
+
+    /**
+     * Silences the compatibility warnings for the Maven publication for the specified variant.
+     *
+     * Warnings are emitted when Gradle features are used that cannot be mapped completely to Maven POM.
+     *
+     * @param variantName the variant to silence warning for
+     *
+     * @since 6.0
+     */
+    void suppressPomMetadataWarningsFor(String variantName);
+
+
+    /**
+     * Silences all the compatibility warnings for the Maven publication.
+     *
+     * Warnings are emitted when Gradle features are used that cannot be mapped completely to Maven POM.
+     *
+     * @since 6.0
+     */
+    void suppressAllPomMetadataWarnings();
 }

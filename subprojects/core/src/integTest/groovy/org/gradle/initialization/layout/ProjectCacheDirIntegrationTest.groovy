@@ -33,7 +33,7 @@ class ProjectCacheDirIntegrationTest extends AbstractIntegrationSpec implements 
         def currentCacheDir = createVersionSpecificCacheDir(GradleVersion.current(), NOT_USED_WITHIN_7_DAYS)
 
         when:
-        succeeds("tasks")
+        succeeds("help")
 
         then:
         oldButRecentlyUsedCacheDir.assertExists()

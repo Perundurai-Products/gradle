@@ -52,35 +52,6 @@ class LoadBuildStructureBuildOperationIntegrationTest extends AbstractIntegratio
         verifyProject(project(':a:c:d'), 'd', ':a:c:d', [], testDirectory.file('d'), 'd.gradle')
     }
 
-    def "settings with master folder are exposed correctly"() {
-
-        def customSettingsFile = file("master/settings.gradle")
-        customSettingsFile << """
-        rootProject.name = "root"
-        rootProject.buildFileName = 'root.gradle'
-
-        includeFlat "a"
-        """
-
-        def projectDirectory = testDirectory.createDir("a")
-
-        when:
-        projectDir(projectDirectory)
-        succeeds('help')
-
-        then:
-        operation().result.buildPath == ":"
-        operation().result.rootProject.name == "root"
-        operation().result.rootProject.path == ":"
-        operation().result.rootProject.projectDir == customSettingsFile.parentFile.absolutePath
-        operation().result.rootProject.buildFile == customSettingsFile.parentFile.file("root.gradle").absolutePath
-
-        opResult.buildPath == ":"
-        opResult.rootProject.path == ":"
-        verifyProject(opResult.rootProject, 'root', ':', [':a'], customSettingsFile.parentFile, 'root.gradle')
-        verifyProject(project(':a'), 'a')
-    }
-
     def "settings set via cmdline flag are exposed correctly"() {
         def customSettingsDir = file("custom")
         customSettingsDir.mkdirs()
@@ -93,7 +64,8 @@ class LoadBuildStructureBuildOperationIntegrationTest extends AbstractIntegratio
         """
 
         when:
-        executer.withArguments("--settings-file", customSettingsFile.absolutePath)
+        executer.expectDocumentedDeprecationWarning("Specifying custom settings file location has been deprecated. This is scheduled to be removed in Gradle 8.0. Consult the upgrading guide for further information: https://docs.gradle.org/current/userguide/upgrading_version_7.html#configuring_custom_build_layout")
+        executer.usingSettingsFile(customSettingsFile)
         succeeds('help')
 
         then:
@@ -134,6 +106,9 @@ class LoadBuildStructureBuildOperationIntegrationTest extends AbstractIntegratio
 
 
         then:
+        def buildOperations = operations()
+        buildOperations.size() == 2
+
         def rootBuildOperation = operations()[0]
         rootBuildOperation.result.buildPath == ":"
         rootBuildOperation.result.rootProject.path == ":"

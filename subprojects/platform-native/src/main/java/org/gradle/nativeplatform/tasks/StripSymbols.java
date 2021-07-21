@@ -17,7 +17,6 @@
 package org.gradle.nativeplatform.tasks;
 
 import org.gradle.api.DefaultTask;
-import org.gradle.api.Incubating;
 import org.gradle.api.file.RegularFileProperty;
 import org.gradle.api.model.ObjectFactory;
 import org.gradle.api.provider.Property;
@@ -41,13 +40,14 @@ import org.gradle.nativeplatform.platform.internal.NativePlatformInternal;
 import org.gradle.nativeplatform.toolchain.NativeToolChain;
 import org.gradle.nativeplatform.toolchain.internal.NativeToolChainInternal;
 import org.gradle.nativeplatform.toolchain.internal.PlatformToolProvider;
+import org.gradle.work.DisableCachingByDefault;
 
 /**
  * Strips the debug symbols from a binary
  *
  * @since 4.5
  */
-@Incubating
+@DisableCachingByDefault(because = "Not made cacheable, yet")
 public class StripSymbols extends DefaultTask {
     private final RegularFileProperty binaryFile;
     private final RegularFileProperty outputFile;
@@ -104,7 +104,7 @@ public class StripSymbols extends DefaultTask {
     // TODO: Need to track version/implementation of symbol strip tool.
 
     @TaskAction
-    public void stripSymbols() {
+    protected void stripSymbols() {
         BuildOperationLogger operationLogger = getServices().get(BuildOperationLoggerFactory.class).newOperationLogger(getName(), getTemporaryDir());
 
         StripperSpec spec = new DefaultStripperSpec();

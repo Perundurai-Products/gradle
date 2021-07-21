@@ -37,9 +37,6 @@ package org.gradle.tooling;
  * try {
  *    ModelBuilder&lt;GradleProject&gt; builder = connection.model(GradleProject.class);
  *
- *    //if you use a different than usual build file name:
- *    builder.withArguments("--build-file", "theBuild.gradle");
- *
  *    //configure the standard input in case your build is interactive:
  *    builder.setStandardInput(new ByteArrayInputStream("consume this!".getBytes()));
  *
@@ -63,9 +60,12 @@ package org.gradle.tooling;
 public interface ModelBuilder<T> extends ConfigurableLauncher<ModelBuilder<T>> {
 
     /**
-     * Specifies the tasks to execute before building the model.
+     * <p>Specifies the tasks to execute before building the model.</p>
      *
-     * If not configured, null, or an empty array is passed, then no tasks will be executed.
+     * <p>If not configured, null, or an empty array is passed, then no tasks will be executed.</p>
+     *
+     * <p>If the target Gradle version is &gt;=6.8 then you can execute tasks from included builds. You can target tasks from included builds by specifying the task identity path (i.e. {@code
+     * ':included-build-name:subproject-name:taskName'}).</p>
      *
      * @param tasks The paths of the tasks to be executed. Relative paths are evaluated relative to the project for which this launcher was created.
      * @return this
@@ -74,9 +74,12 @@ public interface ModelBuilder<T> extends ConfigurableLauncher<ModelBuilder<T>> {
     ModelBuilder<T> forTasks(String... tasks);
 
     /**
-     * Specifies the tasks to execute before building the model.
+     * <p>Specifies the tasks to execute before building the model.</p>
      *
-     * If not configured, null, or an empty array is passed, then no tasks will be executed.
+     * <p>If not configured, null, or an empty array is passed, then no tasks will be executed.</p>
+     *
+     * <p>If the target Gradle version is &gt;=6.8 then you can execute tasks from included builds. You can target tasks from included builds by specifying the task identity path (i.e. {@code
+     * ':included-build-name:subproject-name:taskName'}).</p>
      *
      * @param tasks The paths of the tasks to be executed. Relative paths are evaluated relative to the project for which this launcher was created.
      * @return this

@@ -34,7 +34,7 @@ import org.gradle.internal.component.model.DefaultIvyArtifactName;
 import org.gradle.internal.component.model.ExcludeMetadata;
 import org.gradle.internal.component.model.IvyArtifactName;
 import org.gradle.internal.component.model.LocalOriginDependencyMetadata;
-import org.gradle.util.CollectionUtils;
+import org.gradle.util.internal.CollectionUtils;
 
 import java.io.File;
 import java.util.Collection;
@@ -49,9 +49,9 @@ public class DefaultIvyModulePublishMetadata implements IvyModulePublishMetadata
     private static final Transformer<String, String> VERSION_TRANSFORMER = new IvyVersionTransformer();
     private final ModuleComponentIdentifier id;
     private final String status;
-    private final Map<ModuleComponentArtifactIdentifier, IvyModuleArtifactPublishMetadata> artifactsById = new LinkedHashMap<ModuleComponentArtifactIdentifier, IvyModuleArtifactPublishMetadata>();
-    private final Map<String, Configuration> configurations = new LinkedHashMap<String, Configuration>();
-    private final Set<LocalOriginDependencyMetadata> dependencies = new LinkedHashSet<LocalOriginDependencyMetadata>();
+    private final Map<ModuleComponentArtifactIdentifier, IvyModuleArtifactPublishMetadata> artifactsById = new LinkedHashMap<>();
+    private final Map<String, Configuration> configurations = new LinkedHashMap<>();
+    private final Set<LocalOriginDependencyMetadata> dependencies = new LinkedHashSet<>();
     private final List<Pair<ExcludeMetadata, String>> excludes = Lists.newArrayList();
 
     public DefaultIvyModulePublishMetadata(ModuleComponentIdentifier id, String status) {
@@ -59,6 +59,7 @@ public class DefaultIvyModulePublishMetadata implements IvyModulePublishMetadata
         this.status = status;
     }
 
+    @Override
     public ModuleComponentIdentifier getComponentId() {
         return id;
     }
@@ -103,8 +104,9 @@ public class DefaultIvyModulePublishMetadata implements IvyModulePublishMetadata
                     VERSION_TRANSFORMER.transform(versionConstraint.getPreferredVersion()),
                     VERSION_TRANSFORMER.transform(versionConstraint.getRequiredVersion()),
                     VERSION_TRANSFORMER.transform(versionConstraint.getStrictVersion()),
-                    CollectionUtils.collect(versionConstraint.getRejectedVersions(), VERSION_TRANSFORMER));
-            ModuleComponentSelector newSelector = DefaultModuleComponentSelector.newSelector(selector.getModuleIdentifier(), transformedConstraint, selector.getAttributes());
+                    CollectionUtils.collect(versionConstraint.getRejectedVersions(), VERSION_TRANSFORMER),
+                    versionConstraint.getBranch());
+            ModuleComponentSelector newSelector = DefaultModuleComponentSelector.newSelector(selector.getModuleIdentifier(), transformedConstraint, selector.getAttributes(), selector.getRequestedCapabilities());
             return dependency.withTarget(newSelector);
         }
         return dependency;
@@ -131,6 +133,7 @@ public class DefaultIvyModulePublishMetadata implements IvyModulePublishMetadata
         return artifact;
     }
 
+    @Override
     public Collection<IvyModuleArtifactPublishMetadata> getArtifacts() {
         return artifactsById.values();
     }

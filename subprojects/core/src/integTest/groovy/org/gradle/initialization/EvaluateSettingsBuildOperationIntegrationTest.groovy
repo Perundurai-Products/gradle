@@ -35,34 +35,17 @@ class EvaluateSettingsBuildOperationIntegrationTest extends AbstractIntegrationS
         operation().details.buildPath == ":"
     }
 
-    def "settings with master folder are exposed"() {
-
-        def customSettingsFile = file("master/settings.gradle")
-        customSettingsFile << """
-        includeFlat "a"
-        """
-
-        def projectDirectory = testDirectory.createDir("a")
-
-        when:
-        projectDir(projectDirectory)
-        succeeds('help')
-
-        then:
-        verifySettings(operation(), customSettingsFile)
-        operation().details.buildPath == ":"
-    }
-
     def "settings set via cmdline flag are exposed"() {
         def customSettingsDir = file("custom")
         customSettingsDir.mkdirs()
         def customSettingsFile = new File(customSettingsDir, "settings.gradle")
         customSettingsFile << """
-        
+
         include "a"
         """
 
         when:
+        executer.expectDocumentedDeprecationWarning("Specifying custom settings file location has been deprecated. This is scheduled to be removed in Gradle 8.0. Consult the upgrading guide for further information: https://docs.gradle.org/current/userguide/upgrading_version_7.html#configuring_custom_build_layout")
         executer.withArguments("--settings-file", customSettingsFile.absolutePath)
         succeeds('help')
 
@@ -75,15 +58,15 @@ class EvaluateSettingsBuildOperationIntegrationTest extends AbstractIntegrationS
         settingsFile << """
             include "a"
             includeBuild "nested"
-            
+
             rootProject.name = "root"
             rootProject.buildFileName = 'root.gradle'
-            
+
         """
 
         def nestedSettingsFile = file("nested/settings.gradle")
         nestedSettingsFile << """
-            rootProject.name = "nested"    
+            rootProject.name = "nested"
         """
         file("nested/build.gradle") << """
         group = "org.acme"
@@ -104,7 +87,7 @@ class EvaluateSettingsBuildOperationIntegrationTest extends AbstractIntegrationS
     def 'can configure feature preview in settings'() {
         given:
         settingsFile << '''
-enableFeaturePreview('GRADLE_METADATA')
+enableFeaturePreview('GROOVY_COMPILATION_AVOIDANCE')
 '''
         expect:
         succeeds('help')

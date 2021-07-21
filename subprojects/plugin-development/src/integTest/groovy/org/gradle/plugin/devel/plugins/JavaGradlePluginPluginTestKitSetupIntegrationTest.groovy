@@ -18,19 +18,18 @@ package org.gradle.plugin.devel.plugins
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 import org.gradle.test.fixtures.maven.MavenModule
-import org.gradle.util.GUtil
+import org.gradle.util.internal.GUtil
 
 import static org.gradle.plugin.devel.plugins.JavaGradlePluginPlugin.PLUGIN_UNDER_TEST_METADATA_TASK_NAME
 import static org.gradle.plugin.devel.tasks.PluginUnderTestMetadata.IMPLEMENTATION_CLASSPATH_PROP_KEY
 import static org.gradle.plugin.devel.tasks.PluginUnderTestMetadata.METADATA_FILE_NAME
-import static org.gradle.util.TextUtil.normaliseFileAndLineSeparators
+import static org.gradle.util.internal.TextUtil.normaliseFileAndLineSeparators
 
 class JavaGradlePluginPluginTestKitSetupIntegrationTest extends AbstractIntegrationSpec {
 
     private static final String PLUGIN_UNDER_TEST_METADATA_TASK_PATH = ":$PLUGIN_UNDER_TEST_METADATA_TASK_NAME"
 
     def setup() {
-        requireGradleDistribution()
         buildFile << """
             apply plugin: 'java-gradle-plugin'
         """
@@ -39,21 +38,24 @@ class JavaGradlePluginPluginTestKitSetupIntegrationTest extends AbstractIntegrat
     def "has default conventions"() {
         buildFile << """
             task assertHasTestKit() {
+                def testRuntimeClasspath = project.sourceSets.test.runtimeClasspath
+                def testKit = dependencies.gradleTestKit().files
                 doLast {
-                    assert project.sourceSets.test.runtimeClasspath.files.containsAll(dependencies.gradleTestKit().files.files)
+                    assert testRuntimeClasspath.files.containsAll(testKit.files)
                 }
             }
         """
         expect:
         succeeds("assertHasTestKit")
         succeeds("test")
-        result.executedTasks.containsAll(":pluginUnderTestMetadata", ":pluginDescriptors")
+        result.assertTaskExecuted(":pluginUnderTestMetadata")
+        result.assertTaskExecuted(":pluginDescriptors")
     }
 
     def "wires creation of plugin under test metadata into build lifecycle"() {
         given:
         def module = mavenRepo.module('org.gradle.test', 'a', '1.3').publish()
-        buildFile << compileDependency('compile', module)
+        buildFile << compileDependency('implementation', module)
 
         when:
         succeeds 'build'
@@ -72,6 +74,7 @@ class JavaGradlePluginPluginTestKitSetupIntegrationTest extends AbstractIntegrat
                 custom {
                     java {
                         srcDir 'src'
+                        compileClasspath = configurations.compileClasspath
                     }
                     resources {
                         srcDir 'resources'
@@ -101,7 +104,7 @@ class JavaGradlePluginPluginTestKitSetupIntegrationTest extends AbstractIntegrat
             }
         """
         def module = mavenRepo.module('org.gradle.test', 'a', '1.3').publish()
-        buildFile << compileDependency('customCompile', module)
+        buildFile << compileDependency('customImplementation', module)
 
         when:
         succeeds 'build'

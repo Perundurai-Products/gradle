@@ -19,33 +19,45 @@ package org.gradle.api.publish.maven.tasks;
 import org.gradle.api.InvalidUserDataException;
 import org.gradle.api.publish.internal.PublishOperation;
 import org.gradle.api.publish.maven.internal.publication.MavenPublicationInternal;
-import org.gradle.api.publish.maven.internal.publisher.MavenLocalPublisher;
+import org.gradle.api.publish.maven.internal.publisher.MavenNormalizedPublication;
 import org.gradle.api.publish.maven.internal.publisher.MavenPublisher;
-import org.gradle.api.publish.maven.internal.publisher.StaticLockingMavenPublisher;
 import org.gradle.api.publish.maven.internal.publisher.ValidatingMavenPublisher;
 import org.gradle.api.tasks.TaskAction;
+import org.gradle.internal.serialization.Cached;
+import org.gradle.work.DisableCachingByDefault;
 
 /**
  * Publishes a {@link org.gradle.api.publish.maven.MavenPublication} to the Maven Local repository.
  *
  * @since 1.4
  */
+@DisableCachingByDefault(because = "Not worth caching")
 public class PublishToMavenLocal extends AbstractPublishToMaven {
+    private final Cached<MavenNormalizedPublication> normalizedPublication = Cached.of(this::computeNormalizedPublication);
 
-    @TaskAction
-    public void publish() {
-        final MavenPublicationInternal publication = getPublicationInternal();
-        if (publication == null) {
+    private MavenNormalizedPublication computeNormalizedPublication() {
+        MavenPublicationInternal publicationInternal = getPublicationInternal();
+        if (publicationInternal == null) {
             throw new InvalidUserDataException("The 'publication' property is required");
         }
 
-        new PublishOperation(publication, "mavenLocal") {
+        getDuplicatePublicationTracker().checkCanPublishToMavenLocal(publicationInternal);
+        return publicationInternal.asNormalisedPublication();
+    }
+
+    @TaskAction
+    public void publish() {
+        MavenNormalizedPublication normalizedPublication = this.normalizedPublication.get();
+        doPublish(normalizedPublication);
+    }
+
+    private void doPublish(MavenNormalizedPublication normalizedPublication) {
+        new PublishOperation(normalizedPublication.getName(), "mavenLocal") {
             @Override
-            protected void publish() throws Exception {
-                MavenPublisher localPublisher = new MavenLocalPublisher(getMavenRepositoryLocator());
-                MavenPublisher staticLockingPublisher = new StaticLockingMavenPublisher(localPublisher);
-                MavenPublisher validatingPublisher = new ValidatingMavenPublisher(staticLockingPublisher);
-                validatingPublisher.publish(publication.asNormalisedPublication(), null);
+            protected void publish() {
+                MavenPublisher localPublisher = getMavenPublishers().getLocalPublisher(getTemporaryDirFactory());
+                MavenPublisher validatingPublisher = new ValidatingMavenPublisher(localPublisher);
+                validatingPublisher.publish(normalizedPublication, null);
             }
         }.run();
     }

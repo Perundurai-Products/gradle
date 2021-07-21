@@ -22,14 +22,14 @@ import org.gradle.api.internal.artifacts.ivyservice.resolveengine.result.Compone
 import org.gradle.api.internal.artifacts.metadata.ComponentArtifactMetadataSerializer;
 import org.gradle.cache.PersistentIndexedCache;
 import org.gradle.internal.component.model.ComponentArtifactMetadata;
+import org.gradle.internal.hash.HashCode;
 import org.gradle.internal.serialize.AbstractSerializer;
 import org.gradle.internal.serialize.Decoder;
 import org.gradle.internal.serialize.Encoder;
 import org.gradle.internal.serialize.Serializer;
 import org.gradle.internal.serialize.SetSerializer;
-import org.gradle.util.BuildCommencedTimeProvider;
+import org.gradle.util.internal.BuildCommencedTimeProvider;
 
-import java.math.BigInteger;
 import java.util.Set;
 
 public class DefaultModuleArtifactsCache extends AbstractArtifactsCache {
@@ -60,18 +60,20 @@ public class DefaultModuleArtifactsCache extends AbstractArtifactsCache {
 
     @Override
     protected ModuleArtifactsCacheEntry get(ArtifactsAtRepositoryKey key) {
-        return getCache().get(key);
+        return getCache().getIfPresent(key);
     }
 
     private static class ModuleArtifactsKeySerializer extends AbstractSerializer<ArtifactsAtRepositoryKey> {
         private final ComponentIdentifierSerializer identifierSerializer = new ComponentIdentifierSerializer();
 
+        @Override
         public void write(Encoder encoder, ArtifactsAtRepositoryKey value) throws Exception {
             encoder.writeString(value.repositoryId);
             identifierSerializer.write(encoder, value.componentId);
             encoder.writeString(value.context);
         }
 
+        @Override
         public ArtifactsAtRepositoryKey read(Decoder decoder) throws Exception {
             String resolverId = decoder.readString();
             ComponentIdentifier componentId = identifierSerializer.read(decoder);
@@ -97,7 +99,8 @@ public class DefaultModuleArtifactsCache extends AbstractArtifactsCache {
 
     private static class ModuleArtifactsCacheEntrySerializer extends AbstractSerializer<ModuleArtifactsCacheEntry> {
         private final Serializer<Set<ComponentArtifactMetadata>> artifactsSerializer =
-                new SetSerializer<ComponentArtifactMetadata>(new ComponentArtifactMetadataSerializer());
+            new SetSerializer<>(new ComponentArtifactMetadataSerializer());
+        @Override
         public void write(Encoder encoder, ModuleArtifactsCacheEntry value) throws Exception {
             encoder.writeLong(value.createTimestamp);
             byte[] hash = value.moduleDescriptorHash.toByteArray();
@@ -105,10 +108,11 @@ public class DefaultModuleArtifactsCache extends AbstractArtifactsCache {
             artifactsSerializer.write(encoder, value.artifacts);
         }
 
+        @Override
         public ModuleArtifactsCacheEntry read(Decoder decoder) throws Exception {
             long createTimestamp = decoder.readLong();
             byte[] encodedHash = decoder.readBinary();
-            BigInteger hash = new BigInteger(encodedHash);
+            HashCode hash = HashCode.fromBytes(encodedHash);
             Set<ComponentArtifactMetadata> artifacts = artifactsSerializer.read(decoder);
             return new ModuleArtifactsCacheEntry(artifacts, createTimestamp, hash);
         }

@@ -14,31 +14,30 @@
  * limitations under the License.
  */
 
-package org.gradle.performance.regression.corefeature;
+package org.gradle.performance.regression.corefeature
 
 import org.gradle.performance.AbstractCrossVersionPerformanceTest
-import spock.lang.Unroll
+import org.gradle.performance.annotations.RunFor
+import org.gradle.performance.annotations.Scenario
 
+import static org.gradle.performance.annotations.ScenarioType.PER_DAY
+import static org.gradle.performance.results.OperatingSystem.LINUX
+
+@RunFor(
+    @Scenario(type = PER_DAY, operatingSystems = [LINUX], testProjects = ["withVerboseTestNG", "withVerboseJUnit"])
+)
 class VerboseTestOutputPerformanceTest extends AbstractCrossVersionPerformanceTest {
 
-    @Unroll
-    def "cleanTest test on #testProject with verbose test output"() {
+    def "cleanTest test with verbose test output"() {
         given:
-        runner.testProject = testProject
         runner.tasksToRun = ['cleanTest', 'test']
         runner.args = ['-q']
-        runner.gradleOpts = ["-Xms256m", "-Xmx256m"]
-        runner.targetVersions = ["5.2-20181218000039+0000"]
+        runner.targetVersions = ["7.2-20210713113638+0000"]
 
         when:
         def result = runner.run()
 
         then:
         result.assertCurrentVersionHasNotRegressed()
-
-        where:
-        testProject         | _
-        "withVerboseTestNG" | _
-        "withVerboseJUnit"  | _
     }
 }

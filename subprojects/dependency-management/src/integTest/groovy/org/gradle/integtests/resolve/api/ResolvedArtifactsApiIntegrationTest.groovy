@@ -17,10 +17,10 @@
 package org.gradle.integtests.resolve.api
 
 import org.gradle.integtests.fixtures.AbstractHttpDependencyResolutionTest
-import org.gradle.integtests.fixtures.FluidDependenciesResolveRunner
-import org.junit.runner.RunWith
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
+import org.gradle.integtests.fixtures.extensions.FluidDependenciesResolveTest
 
-@RunWith(FluidDependenciesResolveRunner)
+@FluidDependenciesResolveTest
 class ResolvedArtifactsApiIntegrationTest extends AbstractHttpDependencyResolutionTest {
     def setup() {
         settingsFile << """
@@ -107,12 +107,12 @@ task show {
 
         then:
         outputContains("files: [test-lib.jar, a.jar, a-lib.jar, test-1.0.jar, b.jar, b-lib.jar, test2-1.0.jar]")
-        outputContains("ids: [test-lib.jar, a.jar (project :a), a-lib.jar, test.jar (org:test:1.0), b.jar (project :b), b-lib.jar, test2.jar (org:test2:1.0)]")
-        outputContains("unique ids: [test-lib.jar, a.jar (project :a), a-lib.jar, test.jar (org:test:1.0), b.jar (project :b), b-lib.jar, test2.jar (org:test2:1.0)]")
-        outputContains("display-names: [test-lib.jar, a.jar (project :a), a-lib.jar, test.jar (org:test:1.0), b.jar (project :b), b-lib.jar, test2.jar (org:test2:1.0)]")
+        outputContains("ids: [test-lib.jar, a.jar (project :a), a-lib.jar, test-1.0.jar (org:test:1.0), b.jar (project :b), b-lib.jar, test2-1.0.jar (org:test2:1.0)]")
+        outputContains("unique ids: [test-lib.jar, a.jar (project :a), a-lib.jar, test-1.0.jar (org:test:1.0), b.jar (project :b), b-lib.jar, test2-1.0.jar (org:test2:1.0)]")
+        outputContains("display-names: [test-lib.jar, a.jar (project :a), a-lib.jar, test-1.0.jar (org:test:1.0), b.jar (project :b), b-lib.jar, test2-1.0.jar (org:test2:1.0)]")
         outputContains("components: [test-lib.jar, project :a, a-lib.jar, org:test:1.0, project :b, b-lib.jar, org:test2:1.0]")
         outputContains("unique components: [test-lib.jar, project :a, a-lib.jar, org:test:1.0, project :b, b-lib.jar, org:test2:1.0]")
-        outputContains("variants: [{artifactType=jar}, {artifactType=jar}, {artifactType=jar}, {artifactType=jar}, {artifactType=jar}, {artifactType=jar}, {artifactType=jar}]")
+        outputContains("variants: [{artifactType=jar}, {artifactType=jar}, {artifactType=jar}, {artifactType=jar, org.gradle.status=release}, {artifactType=jar}, {artifactType=jar}, {artifactType=jar, org.gradle.status=release}]")
 
         where:
         expression                                                     | _
@@ -220,9 +220,9 @@ configurations.compile.attributes.attribute(flavor, 'preview')
 
 project(':a') {
     dependencies.attributesSchema.attribute(flavor).compatibilityRules.add(OneRule)
-    task oneJar(type: Jar) { baseName = 'a1' }
-    task twoJar(type: Jar) { baseName = 'a2' }
-    tasks.withType(Jar) { destinationDir = buildDir }
+    task oneJar(type: Jar) { archiveBaseName = 'a1' }
+    task twoJar(type: Jar) { archiveBaseName = 'a2' }
+    tasks.withType(Jar) { destinationDirectory = buildDir }
     configurations {
         compile {
             attributes.attribute(buildType, 'debug')
@@ -246,9 +246,9 @@ project(':a') {
 }
 project(':b') {
     dependencies.attributesSchema.attribute(flavor).compatibilityRules.add(TwoRule)
-    task oneJar(type: Jar) { baseName = 'b1' }
-    task twoJar(type: Jar) { baseName = 'b2' }
-    tasks.withType(Jar) { destinationDir = buildDir }
+    task oneJar(type: Jar) { archiveBaseName = 'b1' }
+    task twoJar(type: Jar) { archiveBaseName = 'b2' }
+    tasks.withType(Jar) { destinationDirectory = buildDir }
     configurations {
         compile {
             outgoing {
@@ -322,9 +322,9 @@ dependencies {
 
 project(':a') {
     dependencies.attributesSchema.attribute(flavor).disambiguationRules.add(OneRule)
-    task oneJar(type: Jar) { baseName = 'a1' }
-    task twoJar(type: Jar) { baseName = 'a2' }
-    tasks.withType(Jar) { destinationDir = buildDir }
+    task oneJar(type: Jar) { archiveBaseName = 'a1' }
+    task twoJar(type: Jar) { archiveBaseName = 'a2' }
+    tasks.withType(Jar) { destinationDirectory = buildDir }
     configurations {
         compile {
             attributes.attribute(buildType, 'debug')
@@ -348,9 +348,9 @@ project(':a') {
 }
 project(':b') {
     dependencies.attributesSchema.attribute(flavor).disambiguationRules.add(TwoRule)
-    task oneJar(type: Jar) { baseName = 'b1' }
-    task twoJar(type: Jar) { baseName = 'b2' }
-    tasks.withType(Jar) { destinationDir = buildDir }
+    task oneJar(type: Jar) { archiveBaseName = 'b1' }
+    task twoJar(type: Jar) { archiveBaseName = 'b2' }
+    tasks.withType(Jar) { destinationDirectory = buildDir }
     configurations {
         compile {
             outgoing {
@@ -412,8 +412,8 @@ dependencies {
 }
 
 project(':a') {
-    task oneJar(type: Jar) { baseName = 'a1' }
-    task twoJar(type: Jar) { baseName = 'a2' }
+    task oneJar(type: Jar) { archiveBaseName = 'a1' }
+    task twoJar(type: Jar) { archiveBaseName = 'a2' }
     configurations {
         compile {
             attributes.attribute(buildType, 'debug')
@@ -436,8 +436,8 @@ project(':a') {
     }
 }
 project(':b') {
-    task oneJar(type: Jar) { baseName = 'b1' }
-    task twoJar(type: Jar) { baseName = 'b2' }
+    task oneJar(type: Jar) { archiveBaseName = 'b1' }
+    task twoJar(type: Jar) { archiveBaseName = 'b2' }
     configurations {
         compile {
             outgoing {
@@ -472,17 +472,17 @@ task show {
         fails 'show'
 
         then:
-        failure.assertHasCause("""More than one variant of project :a matches the consumer attributes:
-  - Configuration ':a:compile' variant var1:
-      - Found artifactType 'jar' but wasn't required.
-      - Found buildType 'debug' but wasn't required.
-      - Found flavor 'one' but wasn't required.
-      - Required usage 'compile' and found compatible value 'compile'.
-  - Configuration ':a:compile' variant var2:
-      - Found artifactType 'jar' but wasn't required.
-      - Found buildType 'debug' but wasn't required.
-      - Found flavor 'two' but wasn't required.
-      - Required usage 'compile' and found compatible value 'compile'.""")
+        failure.assertHasCause("""The consumer was configured to find attribute 'usage' with value 'compile'. However we cannot choose between the following variants of project :a:
+  - Configuration ':a:compile' variant var1 declares attribute 'usage' with value 'compile':
+      - Unmatched attributes:
+          - Provides artifactType 'jar' but the consumer didn't ask for it
+          - Provides buildType 'debug' but the consumer didn't ask for it
+          - Provides flavor 'one' but the consumer didn't ask for it
+  - Configuration ':a:compile' variant var2 declares attribute 'usage' with value 'compile':
+      - Unmatched attributes:
+          - Provides artifactType 'jar' but the consumer didn't ask for it
+          - Provides buildType 'debug' but the consumer didn't ask for it
+          - Provides flavor 'two' but the consumer didn't ask for it""")
 
         where:
         expression                                                    | _
@@ -496,11 +496,15 @@ task show {
 
         buildFile << """
 
-class VariantArtifactTransform extends ArtifactTransform {
-    List<File> transform(File input) {
-        def output = new File(outputDirectory, "transformed-" + input.name)
+import org.gradle.api.artifacts.transform.TransformParameters
+
+abstract class VariantArtifactTransform implements TransformAction<TransformParameters.None> {
+    @InputArtifact
+    abstract Provider<FileSystemLocation> getInputArtifact()
+
+    void transform(TransformOutputs outputs) {
+        def output = outputs.file("transformed-" + inputArtifact.get().asFile.name)
         output << "transformed"
-        return [output]         
     }
 }
 
@@ -514,10 +518,9 @@ dependencies {
     compile project(':a')
     compile project(':b')
     compile 'org:test:1.0'
-    registerTransform {
+    registerTransform(VariantArtifactTransform) {
         from.attribute(usage, "compile")
         to.attribute(usage, "transformed")
-        artifactTransform(VariantArtifactTransform)
     }
 }
 
@@ -563,7 +566,7 @@ task show {
         then:
         outputContains("files: [test-lib.jar, transformed-a1.jar, transformed-b2.jar, test-1.0.jar]")
         outputContains("components: [test-lib.jar, project :a, project :b, org:test:1.0]")
-        outputContains("variants: [{artifactType=jar}, {artifactType=jar, buildType=debug, flavor=one, usage=transformed}, {artifactType=jar, usage=transformed}, {artifactType=jar}]")
+        outputContains("variants: [{artifactType=jar}, {artifactType=jar, buildType=debug, flavor=one, usage=transformed}, {artifactType=jar, usage=transformed}, {artifactType=jar, org.gradle.status=release}]")
     }
 
     def "more than one local file can have a given base name"() {
@@ -632,7 +635,15 @@ task show {
     def "reports failure to resolve components when artifacts are queried"() {
         buildFile << """
 allprojects {
-    repositories { maven { url '$mavenHttpRepo.uri' } }
+    repositories {
+        maven {
+            url '$mavenHttpRepo.uri'
+            metadataSources {
+                mavenPom()
+                artifact()
+            }
+        }
+    }
 }
 dependencies {
     compile 'org:test:1.0+'
@@ -693,12 +704,12 @@ ${showFailuresTask(expression)}
 
         then:
         failure.assertHasCause("Could not resolve all artifacts for configuration ':compile'.")
-        failure.assertHasCause("""Unable to find a matching variant of project :a:
-  - Variant 'compile':
-      - Required volume '11' and found incompatible value '8'.""")
-        failure.assertHasCause("""Unable to find a matching variant of project :b:
-  - Variant 'compile':
-      - Required volume '11' and found incompatible value '9'.""")
+        failure.assertHasCause("""No matching variant of project :a was found. The consumer was configured to find attribute 'volume' with value '11' but:
+  - Variant 'compile' capability test:a:unspecified:
+      - Incompatible because this component declares attribute 'volume' with value '8' and the consumer needed attribute 'volume' with value '11'""")
+        failure.assertHasCause("""No matching variant of project :b was found. The consumer was configured to find attribute 'volume' with value '11' but:
+  - Variant 'compile' capability test:b:unspecified:
+      - Incompatible because this component declares attribute 'volume' with value '9' and the consumer needed attribute 'volume' with value '11'""")
 
         where:
         expression                                                    | _
@@ -734,7 +745,7 @@ ${showFailuresTask(expression)}
 
         then:
         failure.assertHasCause("Could not resolve all artifacts for configuration ':compile'.")
-        failure.assertHasCause("Could not find test.jar (org:test:1.0).")
+        failure.assertHasCause("Could not find test-1.0.jar (org:test:1.0).")
 
         where:
         expression                                                    | _
@@ -805,8 +816,8 @@ ${showFailuresTask(expression)}
 
         then:
         failure.assertHasCause("Could not resolve all artifacts for configuration ':compile'.")
-        failure.assertHasCause("Could not find test.jar (org:test:1.0).")
-        failure.assertHasCause("Could not download test2.jar (org:test2:2.0)")
+        failure.assertHasCause("Could not find test-1.0.jar (org:test:1.0).")
+        failure.assertHasCause("Could not download test2-2.0.jar (org:test2:2.0)")
         failure.assertHasCause("broken 1")
         failure.assertHasCause("broken 2")
         failure.assertHasCause("More than one variant of project :a matches the consumer attributes")
@@ -819,6 +830,7 @@ ${showFailuresTask(expression)}
         "incoming.artifactView({lenient(false)}).artifacts"           | _
     }
 
+    @ToBeFixedForConfigurationCache(because = "broken file collection")
     def "lenient artifact view reports failure to resolve graph and artifacts"() {
         settingsFile << "include 'a', 'b'"
 
@@ -865,7 +877,6 @@ task resolveLenient {
         given:
         def m0 = mavenHttpRepo.module('org', 'missing-module', '1.0')
         m0.pom.expectGetMissing()
-        m0.artifact.expectHeadMissing()
 
         def m1 = mavenHttpRepo.module('org', 'missing-artifact', '1.0').publish()
         m1.pom.expectGet()
@@ -885,17 +896,20 @@ task resolveLenient {
         outputContains("failure 1: Could not find org:missing-module:1.0.")
         outputContains("failure 2: Could not resolve project :b.")
         outputContains("failure 3: broken")
-        outputContains("""failure 4: Could not find missing-artifact.jar (org:missing-artifact:1.0).
+        outputContains("""failure 4: Could not find missing-artifact-1.0.jar (org:missing-artifact:1.0).
 Searched in the following locations:
     ${m1.artifact.uri}""")
-        outputContains("failure 5: Could not download broken-artifact.jar (org:broken-artifact:1.0)")
-        outputContains("""failure 6: More than one variant of project :a matches the consumer attributes:
+        outputContains("failure 5: Could not download broken-artifact-1.0.jar (org:broken-artifact:1.0)")
+        outputContains("""failure 6: The consumer was configured to find attribute 'usage' with value 'compile'. However we cannot choose between the following variants of project :a:
   - Configuration ':a:default' variant v1:
-      - Required usage 'compile' but no value provided.
+      - Unmatched attribute:
+          - Doesn't say anything about usage (required 'compile')
   - Configuration ':a:default' variant v2:
-      - Required usage 'compile' but no value provided.""")
+      - Unmatched attribute:
+          - Doesn't say anything about usage (required 'compile')""")
     }
 
+    @ToBeFixedForConfigurationCache(because = "broken file collection")
     def "successfully resolved local artifacts are built when lenient file view used as task input"() {
         settingsFile << "include 'a', 'b', 'c'"
 
@@ -903,8 +917,8 @@ Searched in the following locations:
 allprojects {
     repositories { maven { url '$mavenHttpRepo.uri' } }
     tasks.withType(Jar) {
-        archiveName = project.name + '-' + name + ".jar"
-        destinationDir = buildDir
+        archiveFileName = project.name + '-' + name + ".jar"
+        destinationDirectory = buildDir
     }
 }
 dependencies {
@@ -918,7 +932,7 @@ configurations.compile.attributes.attribute(usage, "compile")
 project(':a') {
     task jar1(type: Jar)
     task jar2(type: Jar)
-    dependencies { 
+    dependencies {
         compile project(':c')
     }
     configurations.default.outgoing.variants {
@@ -954,7 +968,6 @@ task resolveLenient {
         given:
         def m0 = mavenHttpRepo.module('org', 'missing-module', '1.0')
         m0.pom.expectGetMissing()
-        m0.artifact.expectHeadMissing()
 
         expect:
         succeeds 'resolveLenient'

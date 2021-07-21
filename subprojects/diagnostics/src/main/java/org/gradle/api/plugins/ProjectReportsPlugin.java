@@ -17,19 +17,16 @@ package org.gradle.api.plugins;
 
 import org.gradle.api.Plugin;
 import org.gradle.api.Project;
-import org.gradle.api.Task;
-import org.gradle.api.internal.plugins.DslObject;
-import org.gradle.api.plugins.internal.DefaultProjectReportsPluginConvention;
 import org.gradle.api.reporting.dependencies.HtmlDependencyReportTask;
 import org.gradle.api.tasks.diagnostics.DependencyReportTask;
 import org.gradle.api.tasks.diagnostics.PropertyReportTask;
 import org.gradle.api.tasks.diagnostics.TaskReportTask;
-
-import java.io.File;
-import java.util.concurrent.Callable;
+import org.gradle.util.internal.WrapUtil;
 
 /**
  * <p>A {@link Plugin} which adds some project visualization report tasks to a project.</p>
+ *
+ * @see <a href="https://docs.gradle.org/current/userguide/project_report_plugin.html">Project Report plugin reference</a>
  */
 public class ProjectReportsPlugin implements Plugin<Project> {
     public static final String TASK_REPORT = "taskReport";
@@ -41,66 +38,44 @@ public class ProjectReportsPlugin implements Plugin<Project> {
     @Override
     public void apply(final Project project) {
         project.getPluginManager().apply(ReportingBasePlugin.class);
-        final ProjectReportsPluginConvention convention = new DefaultProjectReportsPluginConvention(project);
-        project.getConvention().getPlugins().put("projectReports", convention);
+        @SuppressWarnings("deprecation")
+        final ProjectReportsPluginConvention convention = new org.gradle.api.plugins.internal.DefaultProjectReportsPluginConvention(project);
+        @SuppressWarnings("deprecation")
+        Convention projectConvention = project.getConvention();
+        projectConvention.getPlugins().put("projectReports", convention);
 
-        TaskReportTask taskReportTask = project.getTasks().create(TASK_REPORT, TaskReportTask.class);
-        taskReportTask.setDescription("Generates a report about your tasks.");
-        taskReportTask.conventionMapping("outputFile", new Callable<Object>() {
-            public Object call() throws Exception {
-                return new File(convention.getProjectReportDir(), "tasks.txt");
-            }
-        });
-        taskReportTask.conventionMapping("projects", new Callable<Object>() {
-            public Object call() throws Exception {
-                return convention.getProjects();
-            }
+        project.getTasks().register(TASK_REPORT, TaskReportTask.class, taskReportTask -> {
+            taskReportTask.getProjectReportDirectory().convention(project.getLayout().dir(project.provider(() -> convention.getProjectReportDir())));
+            taskReportTask.setDescription("Generates a report about your tasks.");
+            taskReportTask.conventionMapping("outputFile", () -> taskReportTask.getProjectReportDirectory().file("tasks.txt").get().getAsFile());
+            taskReportTask.conventionMapping("projects", () -> WrapUtil.toSet(project));
         });
 
-        PropertyReportTask propertyReportTask = project.getTasks().create(PROPERTY_REPORT, PropertyReportTask.class);
-        propertyReportTask.setDescription("Generates a report about your properties.");
-        propertyReportTask.conventionMapping("outputFile", new Callable<Object>() {
-            public Object call() throws Exception {
-                return new File(convention.getProjectReportDir(), "properties.txt");
-            }
-        });
-        propertyReportTask.conventionMapping("projects", new Callable<Object>() {
-            public Object call() throws Exception {
-                return convention.getProjects();
-            }
+        project.getTasks().register(PROPERTY_REPORT, PropertyReportTask.class, propertyReportTask -> {
+            propertyReportTask.getProjectReportDirectory().convention(project.getLayout().dir(project.provider(() -> convention.getProjectReportDir())));
+            propertyReportTask.setDescription("Generates a report about your properties.");
+            propertyReportTask.conventionMapping("outputFile", () -> propertyReportTask.getProjectReportDirectory().file("properties.txt").get().getAsFile());
+            propertyReportTask.conventionMapping("projects", () -> WrapUtil.toSet(project));
         });
 
-        DependencyReportTask dependencyReportTask = project.getTasks().create(DEPENDENCY_REPORT,
-                DependencyReportTask.class);
-        dependencyReportTask.setDescription("Generates a report about your library dependencies.");
-        dependencyReportTask.conventionMapping("outputFile", new Callable<Object>() {
-            public Object call() throws Exception {
-                return new File(convention.getProjectReportDir(), "dependencies.txt");
-            }
-        });
-        dependencyReportTask.conventionMapping("projects", new Callable<Object>() {
-            public Object call() throws Exception {
-                return convention.getProjects();
-            }
+        project.getTasks().register(DEPENDENCY_REPORT, DependencyReportTask.class, dependencyReportTask -> {
+            dependencyReportTask.getProjectReportDirectory().convention(project.getLayout().dir(project.provider(() -> convention.getProjectReportDir())));
+            dependencyReportTask.setDescription("Generates a report about your library dependencies.");
+            dependencyReportTask.conventionMapping("outputFile", () -> dependencyReportTask.getProjectReportDirectory().file("dependencies.txt").get().getAsFile());
+            dependencyReportTask.conventionMapping("projects", () -> WrapUtil.toSet(project));
         });
 
-        HtmlDependencyReportTask htmlDependencyReportTask = project.getTasks().create(HTML_DEPENDENCY_REPORT,
-                HtmlDependencyReportTask.class);
-        htmlDependencyReportTask.setDescription("Generates an HTML report about your library dependencies.");
-        new DslObject(htmlDependencyReportTask.getReports().getHtml()).getConventionMapping().map("destination", new Callable<Object>() {
-            public Object call() throws Exception {
-                return new File(convention.getProjectReportDir(), "dependencies");
-            }
-        });
-        htmlDependencyReportTask.conventionMapping("projects", new Callable<Object>() {
-            public Object call() throws Exception {
-                return convention.getProjects();
-            }
+        project.getTasks().register(HTML_DEPENDENCY_REPORT, HtmlDependencyReportTask.class, htmlDependencyReportTask -> {
+            htmlDependencyReportTask.getProjectReportDirectory().convention(project.getLayout().dir(project.provider(() -> convention.getProjectReportDir())));
+            htmlDependencyReportTask.setDescription("Generates an HTML report about your library dependencies.");
+            htmlDependencyReportTask.getReports().getHtml().getOutputLocation().convention(htmlDependencyReportTask.getProjectReportDirectory().dir("dependencies"));
+            htmlDependencyReportTask.conventionMapping("projects", () -> WrapUtil.toSet(project));
         });
 
-        Task projectReportTask = project.getTasks().create(PROJECT_REPORT);
-        projectReportTask.dependsOn(TASK_REPORT, PROPERTY_REPORT, DEPENDENCY_REPORT, HTML_DEPENDENCY_REPORT);
-        projectReportTask.setDescription("Generates a report about your project.");
-        projectReportTask.setGroup("reporting");
+        project.getTasks().register(PROJECT_REPORT, projectReportTask -> {
+            projectReportTask.dependsOn(TASK_REPORT, PROPERTY_REPORT, DEPENDENCY_REPORT, HTML_DEPENDENCY_REPORT);
+            projectReportTask.setDescription("Generates a report about your project.");
+            projectReportTask.setGroup("reporting");
+        });
     }
 }

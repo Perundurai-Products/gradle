@@ -21,9 +21,12 @@ import org.gradle.api.Action;
 import org.gradle.api.Incubating;
 import org.gradle.api.UnknownProjectException;
 import org.gradle.api.initialization.dsl.ScriptHandler;
+import org.gradle.api.initialization.resolve.DependencyResolutionManagement;
 import org.gradle.api.invocation.Gradle;
 import org.gradle.api.plugins.ExtensionAware;
 import org.gradle.api.plugins.PluginAware;
+import org.gradle.api.provider.Provider;
+import org.gradle.api.provider.ProviderFactory;
 import org.gradle.caching.configuration.BuildCacheConfiguration;
 import org.gradle.internal.HasInternalProtocol;
 import org.gradle.plugin.management.PluginManagementSpec;
@@ -123,7 +126,11 @@ public interface Settings extends PluginAware, ExtensionAware {
      * {@code $rootDir/../a}.</p>
      *
      * @param projectNames the projects to add.
+     * @deprecated Using a flat project structure is discouraged. For one thing it causes inefficiencies in file-system watching.
+     * Clients should always use a hierarchical project layout and define the structure with {@link #include(String...)}
+     * This method is scheduled for removal in Gradle 8.0.
      */
+    @Deprecated
     void includeFlat(String... projectNames);
 
     /**
@@ -141,7 +148,6 @@ public interface Settings extends PluginAware, ExtensionAware {
      *
      * @since 4.4
      */
-    @Incubating
     ScriptHandler getBuildscript();
 
     /**
@@ -210,6 +216,14 @@ public interface Settings extends PluginAware, ExtensionAware {
     StartParameter getStartParameter();
 
     /**
+     * Provides access to methods to create various kinds of {@link Provider} instances.
+     *
+     * @since 6.8
+     */
+    @Incubating
+    ProviderFactory getProviders();
+
+    /**
      * Returns the {@link Gradle} instance for the current build.
      *
      * @return The Gradle instance. Never returns null.
@@ -266,7 +280,6 @@ public interface Settings extends PluginAware, ExtensionAware {
      *
      * @since 4.4
      */
-    @Incubating
     void sourceControl(Action<? super SourceControl> configuration);
 
     /**
@@ -274,7 +287,6 @@ public interface Settings extends PluginAware, ExtensionAware {
      *
      * @since 4.4
      */
-    @Incubating
     SourceControl getSourceControl();
 
     /**
@@ -284,6 +296,22 @@ public interface Settings extends PluginAware, ExtensionAware {
      *
      * @since 4.6
      */
-    @Incubating
     void enableFeaturePreview(String name);
+
+    /**
+     * Configures the cross-project dependency resolution aspects
+     * @param dependencyResolutionConfiguration the configuration
+     *
+     * @since 6.8
+     */
+    @Incubating
+    void dependencyResolutionManagement(Action<? super DependencyResolutionManagement> dependencyResolutionConfiguration);
+
+    /**
+     * Returns the dependency resolution management handler.
+     *
+     * @since 6.8
+     */
+    @Incubating
+    DependencyResolutionManagement getDependencyResolutionManagement();
 }

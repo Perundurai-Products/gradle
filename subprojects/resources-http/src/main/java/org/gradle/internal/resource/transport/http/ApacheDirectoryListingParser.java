@@ -128,13 +128,14 @@ public class ApacheDirectoryListingParser {
         return uris;
     }
 
-    private class AnchorListerHandler extends DefaultHandler {
+    private static class AnchorListerHandler extends DefaultHandler {
         List<String> hrefs = new ArrayList<String>();
 
         public List<String> getHrefs() {
             return hrefs;
         }
 
+        @Override
         public void startElement(String uri, String localName, String qName, Attributes atts) throws SAXException {
             if (qName.equalsIgnoreCase("A")) {
                 final String href = atts.getValue("href");

@@ -27,25 +27,51 @@ class ScalaRuntimeTest extends AbstractProjectBuilderSpec {
         project.pluginManager.apply(ScalaBasePlugin)
     }
 
-    def "inferred Scala class path contains 'scala-compiler' repository dependency matching 'scala-library' Jar found on class path"() {
+    def "inferred Scala class path contains 'scala-compiler' repository dependency and 'compiler-bridge' matching 'scala-library' Jar found on class path"() {
         project.repositories {
             mavenCentral()
         }
-
         when:
         def classpath = project.scalaRuntime.inferScalaClasspath([new File("other.jar"), new File("scala-library-2.10.1.jar")])
-
         then:
-        classpath instanceof LazilyInitializedFileCollection
-        classpath.sourceCollections.size() == 1
+        assertHasCorrectDependencies(classpath, ScalaBasePlugin.DEFAULT_ZINC_VERSION)
+    }
+
+    def "inferred Scala class path contains 'scala-compiler' repository dependency and 'compiler-bridge' matching 'scala-library' Jar found on class path with specified zinc version"() {
+        project.repositories {
+            mavenCentral()
+        }
+        def useZincVersion = "1.3.4"
+        project.scala {
+            zincVersion = useZincVersion
+        }
+        when:
+        def classpath = project.scalaRuntime.inferScalaClasspath([new File("other.jar"), new File("scala-library-2.10.1.jar")])
+        then:
+        assertHasCorrectDependencies(classpath, useZincVersion)
+    }
+
+    private void assertHasCorrectDependencies(classpath, zincVersion) {
+        assert classpath instanceof LazilyInitializedFileCollection
+        assert classpath.sourceCollections.size() == 1
         with(classpath.sourceCollections[0]) {
-            it instanceof Configuration
-            it.state == Configuration.State.UNRESOLVED
-            it.dependencies.size() == 1
-            with(it.dependencies.iterator().next()) {
-                group == "org.scala-lang"
-                name == "scala-compiler"
-                version == "2.10.1"
+            assert it instanceof Configuration
+            assert it.state == Configuration.State.UNRESOLVED
+            assert it.dependencies.size() == 3
+            assert it.dependencies.any { d ->
+                d.group == "org.scala-lang" &&
+                    d.name == "scala-compiler" &&
+                    d.version == "2.10.1"
+            }
+            assert it.dependencies.any { d ->
+                d.group == "org.scala-sbt" &&
+                    d.name == "compiler-bridge_2.10" &&
+                    d.version == zincVersion
+            }
+            assert it.dependencies.any { d ->
+                d.group == "org.scala-sbt" &&
+                    d.name == "compiler-interface" &&
+                    d.version == zincVersion
             }
         }
     }
@@ -57,7 +83,8 @@ class ScalaRuntimeTest extends AbstractProjectBuilderSpec {
 
         then:
         GradleException e = thrown()
-        e.message == "Cannot infer Scala class path because no repository is declared in $project"
+        e.message == "Could not resolve all files for configuration ':detachedConfiguration1'."
+        e.cause.message.startsWith("Cannot resolve external dependency org.scala-lang:scala-compiler:2.10.1 because no repositories are defined.")
     }
 
     def "inference fails if 'scalaTools' configuration is empty and no Scala library Jar is found on class path"() {

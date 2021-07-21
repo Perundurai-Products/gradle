@@ -17,6 +17,7 @@
 
 package org.gradle.language.assembler
 
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.language.AbstractNativeLanguageIntegrationTest
 import org.gradle.nativeplatform.fixtures.RequiresInstalledToolChain
 import org.gradle.nativeplatform.fixtures.ToolChainRequirement
@@ -28,7 +29,10 @@ import static org.gradle.util.Matchers.containsText
 @RequiresInstalledToolChain(ToolChainRequirement.SUPPORTS_32_AND_64)
 class AssemblyLanguageIntegrationTest extends AbstractNativeLanguageIntegrationTest {
 
-    HelloWorldApp helloWorldApp = new AssemblerWithCHelloWorldApp(toolChain)
+    @Override
+    HelloWorldApp getHelloWorldApp() {
+        return new AssemblerWithCHelloWorldApp(toolChain)
+    }
 
     def "build fails when assemble fails"() {
         given:
@@ -56,6 +60,7 @@ pushl
         failure.assertThatCause(containsText("Assembler failed while compiling broken.s"))
     }
 
+    @ToBeFixedForConfigurationCache
     def "can manually define Assembler source sets"() {
         given:
         helloWorldApp.mainSource.writeToDir(file("src/main"))

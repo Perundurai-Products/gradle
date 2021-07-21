@@ -54,7 +54,7 @@ import org.gradle.nativeplatform.toolchain.internal.msvcpp.metadata.VisualCppMet
 import org.gradle.nativeplatform.toolchain.internal.tools.CommandLineToolConfigurationInternal;
 import org.gradle.nativeplatform.toolchain.internal.tools.CommandLineToolSearchResult;
 import org.gradle.process.internal.ExecActionFactory;
-import org.gradle.util.VersionNumber;
+import org.gradle.util.internal.VersionNumber;
 
 import java.io.File;
 import java.util.List;
@@ -250,6 +250,7 @@ class VisualCppPlatformToolProvider extends AbstractPlatformToolProvider {
 
     private <T extends NativeCompileSpec> Transformer<T, T> addDefinitions(Class<T> type) {
         return new Transformer<T, T>() {
+            @Override
             public T transform(T original) {
                 for (Map.Entry<String, String> definition : libraries.getPreprocessorMacros().entrySet()) {
                     original.define(definition.getKey(), definition.getValue());
@@ -261,6 +262,7 @@ class VisualCppPlatformToolProvider extends AbstractPlatformToolProvider {
 
     private Transformer<LinkerSpec, LinkerSpec> addLibraryPath() {
         return new Transformer<LinkerSpec, LinkerSpec>() {
+            @Override
             public LinkerSpec transform(LinkerSpec original) {
                 original.libraryPath(libraries.getLibDirs());
                 return original;

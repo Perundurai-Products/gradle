@@ -17,8 +17,11 @@
 package org.gradle.api.internal.collections;
 
 import com.google.common.base.Objects;
+import com.google.common.collect.ImmutableCollection;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 import org.gradle.api.Action;
 import org.gradle.api.internal.DefaultMutationGuard;
 import org.gradle.api.internal.MutationGuard;
@@ -31,6 +34,7 @@ import org.gradle.api.internal.provider.Collectors.SingleElement;
 import org.gradle.api.internal.provider.Collectors.TypedCollector;
 import org.gradle.api.internal.provider.ProviderInternal;
 import org.gradle.api.specs.Spec;
+import org.gradle.internal.Cast;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -38,6 +42,7 @@ import java.util.ConcurrentModificationException;
 import java.util.Iterator;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.Set;
 
 abstract public class AbstractIterationOrderRetainingElementSource<T> implements ElementSource<T> {
     // This set represents the order in which elements are inserted to the store, either actual
@@ -146,12 +151,7 @@ abstract public class AbstractIterationOrderRetainingElementSource<T> implements
     Element<T> cachingElement(ProviderInternal<? extends T> provider) {
         final Element<T> element = new Element<T>(provider.getType(), new ElementFromProvider<T>(provider), realizeAction);
         if (provider instanceof ChangingValue) {
-            ((ChangingValue<T>) provider).onValueChange(new Action<T>() {
-                @Override
-                public void execute(T previousValue) {
-                    clearCachedElement(element);
-                }
-            });
+            Cast.<ChangingValue<T>>uncheckedNonnullCast(provider).onValueChange(previousValue -> clearCachedElement(element));
         }
         return element;
     }
@@ -159,12 +159,7 @@ abstract public class AbstractIterationOrderRetainingElementSource<T> implements
     Element<T> cachingElement(CollectionProviderInternal<T, ? extends Iterable<T>> provider) {
         final Element<T> element = new Element<T>(provider.getElementType(), new ElementsFromCollectionProvider<T>(provider), realizeAction);
         if (provider instanceof ChangingValue) {
-            ((ChangingValue<Iterable<T>>)provider).onValueChange(new Action<Iterable<T>>() {
-                @Override
-                public void execute(Iterable<T> previousValues) {
-                    clearCachedElement(element);
-                }
-            });
+            Cast.<ChangingValue<Iterable<T>>>uncheckedNonnullCast(provider).onValueChange(previousValues -> clearCachedElement(element));
         }
         return element;
     }
@@ -295,8 +290,8 @@ abstract public class AbstractIterationOrderRetainingElementSource<T> implements
     protected static class Element<T> extends TypedCollector<T> {
         private List<T> cache;
         private final List<T> removedValues = Lists.newArrayList();
-        private final List<T> realizedValues = Lists.newArrayList();
-        private final List<Integer> duplicates = Lists.newArrayList();
+        private final Set<T> realizedValues = Sets.newHashSet();
+        private final Set<Integer> duplicates = Sets.newHashSet(); // TODO IntSet
         private boolean realized;
         private final Action<T> realizeAction;
 
@@ -317,8 +312,9 @@ abstract public class AbstractIterationOrderRetainingElementSource<T> implements
 
         public void realize() {
             if (cache == null) {
-                cache = new ArrayList<T>(delegate.size());
-                super.collectInto(cache);
+                ImmutableList.Builder<T> builder = ImmutableList.builderWithExpectedSize(delegate.size());
+                super.collectInto(builder);
+                cache = new ArrayList<>(builder.build());
                 cache.removeAll(removedValues);
                 realized = true;
                 if (realizeAction != null) {
@@ -333,11 +329,11 @@ abstract public class AbstractIterationOrderRetainingElementSource<T> implements
         }
 
         @Override
-        public void collectInto(Collection<T> collection) {
+        public void collectInto(ImmutableCollection.Builder<T> builder) {
             if (!realized) {
                 realize();
             }
-            collection.addAll(cache);
+            builder.addAll(cache);
         }
 
         List<T> getValues() {
@@ -377,7 +373,7 @@ abstract public class AbstractIterationOrderRetainingElementSource<T> implements
             if (o == null || getClass() != o.getClass()) {
                 return false;
             }
-            Element that = (Element) o;
+            Element<?> that = (Element<?>) o;
             return Objects.equal(delegate, that.delegate) &&
                 Objects.equal(cache, that.cache);
         }

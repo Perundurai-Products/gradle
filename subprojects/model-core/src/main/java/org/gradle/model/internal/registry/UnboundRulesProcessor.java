@@ -16,14 +16,14 @@
 
 package org.gradle.model.internal.registry;
 
-import net.jcip.annotations.ThreadSafe;
+import javax.annotation.concurrent.ThreadSafe;
 import org.gradle.api.Transformer;
 import org.gradle.model.internal.core.ModelNode;
 import org.gradle.model.internal.core.ModelPath;
 import org.gradle.model.internal.core.ModelReference;
 import org.gradle.model.internal.report.unbound.UnboundRule;
 import org.gradle.model.internal.report.unbound.UnboundRuleInput;
-import org.gradle.util.CollectionUtils;
+import org.gradle.util.internal.CollectionUtils;
 
 import java.util.ArrayList;
 import java.util.Collection;

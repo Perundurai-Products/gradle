@@ -28,6 +28,7 @@ import org.gradle.api.artifacts.component.ComponentIdentifier;
 import org.gradle.api.artifacts.result.DependencyResult;
 import org.gradle.api.artifacts.result.ResolutionResult;
 import org.gradle.api.artifacts.result.ResolvedComponentResult;
+import org.gradle.api.attributes.AttributeContainer;
 import org.gradle.api.internal.artifacts.ConfigurationResolver;
 import org.gradle.api.internal.artifacts.ResolveContext;
 import org.gradle.api.internal.artifacts.ResolverResults;
@@ -96,11 +97,20 @@ public class ErrorHandlingConfigurationResolver implements ConfigurationResolver
         results.artifactsResolved(wrappedConfiguration, results.getVisitedArtifacts());
     }
 
-    private static ResolveException wrapException(Throwable e, ResolveContext resolveContext) {
+    static ResolveException wrapException(Throwable e, ResolveContext resolveContext) {
         if (e instanceof ResolveException) {
-            return (ResolveException) e;
+            ResolveException resolveException = (ResolveException) e;
+            return maybeAddHintToResolveException(resolveContext, resolveException);
         }
-        return new ResolveException(resolveContext.getDisplayName(), e);
+        return maybeAddHintToResolveException(resolveContext, new ResolveException(resolveContext.getDisplayName(), e));
+    }
+
+    private static ResolveException maybeAddHintToResolveException(ResolveContext resolveContext, ResolveException resolveException) {
+        if (resolveContext instanceof ConfigurationInternal) {
+            ConfigurationInternal config = (ConfigurationInternal) resolveContext;
+            return config.maybeAddContext(resolveException);
+        }
+        return resolveException;
     }
 
     private static class ErrorHandlingLenientConfiguration implements LenientConfiguration {
@@ -194,6 +204,7 @@ public class ErrorHandlingConfigurationResolver implements ConfigurationResolver
             this.resolveContext = configuration;
         }
 
+        @Override
         public ResolvedComponentResult getRoot() {
             try {
                 return resolutionResult.getRoot();
@@ -202,10 +213,12 @@ public class ErrorHandlingConfigurationResolver implements ConfigurationResolver
             }
         }
 
+        @Override
         public void allDependencies(Action<? super DependencyResult> action) {
             resolutionResult.allDependencies(action);
         }
 
+        @Override
         public Set<? extends DependencyResult> getAllDependencies() {
             try {
                 return resolutionResult.getAllDependencies();
@@ -214,10 +227,13 @@ public class ErrorHandlingConfigurationResolver implements ConfigurationResolver
             }
         }
 
+        @Override
+        @SuppressWarnings("rawtypes")
         public void allDependencies(Closure closure) {
             resolutionResult.allDependencies(closure);
         }
 
+        @Override
         public Set<ResolvedComponentResult> getAllComponents() {
             try {
                 return resolutionResult.getAllComponents();
@@ -226,12 +242,20 @@ public class ErrorHandlingConfigurationResolver implements ConfigurationResolver
             }
         }
 
+        @Override
         public void allComponents(Action<? super ResolvedComponentResult> action) {
             resolutionResult.allComponents(action);
         }
 
+        @Override
+        @SuppressWarnings("rawtypes")
         public void allComponents(Closure closure) {
             resolutionResult.allComponents(closure);
+        }
+
+        @Override
+        public AttributeContainer getRequestedAttributes() {
+            return resolutionResult.getRequestedAttributes();
         }
     }
 
@@ -245,10 +269,12 @@ public class ErrorHandlingConfigurationResolver implements ConfigurationResolver
             this.configuration = configuration;
         }
 
+        @Override
         public boolean hasError() {
             return resolvedConfiguration.hasError();
         }
 
+        @Override
         public LenientConfiguration getLenientConfiguration() {
             try {
                 return new ErrorHandlingLenientConfiguration(resolvedConfiguration.getLenientConfiguration(), configuration);
@@ -257,6 +283,7 @@ public class ErrorHandlingConfigurationResolver implements ConfigurationResolver
             }
         }
 
+        @Override
         public void rethrowFailure() throws ResolveException {
             try {
                 resolvedConfiguration.rethrowFailure();
@@ -274,6 +301,7 @@ public class ErrorHandlingConfigurationResolver implements ConfigurationResolver
             }
         }
 
+        @Override
         public Set<File> getFiles(Spec<? super Dependency> dependencySpec) throws ResolveException {
             try {
                 return resolvedConfiguration.getFiles(dependencySpec);
@@ -282,6 +310,7 @@ public class ErrorHandlingConfigurationResolver implements ConfigurationResolver
             }
         }
 
+        @Override
         public Set<ResolvedDependency> getFirstLevelModuleDependencies() throws ResolveException {
             try {
                 return resolvedConfiguration.getFirstLevelModuleDependencies();
@@ -290,6 +319,7 @@ public class ErrorHandlingConfigurationResolver implements ConfigurationResolver
             }
         }
 
+        @Override
         public Set<ResolvedDependency> getFirstLevelModuleDependencies(Spec<? super Dependency> dependencySpec) throws ResolveException {
             try {
                 return resolvedConfiguration.getFirstLevelModuleDependencies(dependencySpec);
@@ -298,6 +328,7 @@ public class ErrorHandlingConfigurationResolver implements ConfigurationResolver
             }
         }
 
+        @Override
         public Set<ResolvedArtifact> getResolvedArtifacts() throws ResolveException {
             try {
                 return resolvedConfiguration.getResolvedArtifacts();
@@ -308,11 +339,11 @@ public class ErrorHandlingConfigurationResolver implements ConfigurationResolver
     }
 
     private static class BrokenResolvedConfiguration implements ResolvedConfiguration, VisitedArtifactSet, SelectedArtifactSet {
-        private final Throwable e;
+        private final Throwable ex;
         private final ConfigurationInternal configuration;
 
-        public BrokenResolvedConfiguration(Throwable e, ConfigurationInternal configuration) {
-            this.e = e;
+        public BrokenResolvedConfiguration(Throwable ex, ConfigurationInternal configuration) {
+            this.ex = ex;
             this.configuration = configuration;
         }
 
@@ -323,37 +354,37 @@ public class ErrorHandlingConfigurationResolver implements ConfigurationResolver
 
         @Override
         public LenientConfiguration getLenientConfiguration() {
-            throw wrapException(e, configuration);
+            throw wrapException(ex, configuration);
         }
 
         @Override
         public void rethrowFailure() throws ResolveException {
-            throw wrapException(e, configuration);
+            throw wrapException(ex, configuration);
         }
 
         @Override
         public Set<File> getFiles() throws ResolveException {
-            throw wrapException(e, configuration);
+            throw wrapException(ex, configuration);
         }
 
         @Override
         public Set<File> getFiles(Spec<? super Dependency> dependencySpec) throws ResolveException {
-            throw wrapException(e, configuration);
+            throw wrapException(ex, configuration);
         }
 
         @Override
         public Set<ResolvedDependency> getFirstLevelModuleDependencies() throws ResolveException {
-            throw wrapException(e, configuration);
+            throw wrapException(ex, configuration);
         }
 
         @Override
         public Set<ResolvedDependency> getFirstLevelModuleDependencies(Spec<? super Dependency> dependencySpec) throws ResolveException {
-            throw wrapException(e, configuration);
+            throw wrapException(ex, configuration);
         }
 
         @Override
         public Set<ResolvedArtifact> getResolvedArtifacts() throws ResolveException {
-            throw wrapException(e, configuration);
+            throw wrapException(ex, configuration);
         }
 
         @Override
@@ -363,12 +394,12 @@ public class ErrorHandlingConfigurationResolver implements ConfigurationResolver
 
         @Override
         public void visitDependencies(TaskDependencyResolveContext context) {
-            context.visitFailure(e);
+            context.visitFailure(ex);
         }
 
         @Override
         public void visitArtifacts(ArtifactVisitor visitor, boolean continueOnSelectionFailure) {
-            visitor.visitFailure(e);
+            visitor.visitFailure(ex);
         }
 
     }

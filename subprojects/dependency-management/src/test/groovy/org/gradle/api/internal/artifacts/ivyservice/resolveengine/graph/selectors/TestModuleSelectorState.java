@@ -15,6 +15,7 @@
  */
 package org.gradle.api.internal.artifacts.ivyservice.resolveengine.graph.selectors;
 
+import org.gradle.api.artifacts.ClientModule;
 import org.gradle.api.artifacts.VersionConstraint;
 import org.gradle.api.artifacts.component.ComponentSelector;
 import org.gradle.api.internal.artifacts.ResolvedVersionConstraint;
@@ -24,7 +25,7 @@ import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.strategy.DefaultV
 import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.strategy.VersionParser;
 import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.strategy.VersionSelector;
 import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.strategy.VersionSelectorScheme;
-import org.gradle.internal.resolve.ModuleVersionResolveException;
+import org.gradle.internal.component.model.IvyArtifactName;
 import org.gradle.internal.resolve.resolver.DependencyToComponentIdResolver;
 import org.gradle.internal.resolve.result.BuildableComponentIdResolveResult;
 import org.gradle.internal.resolve.result.ComponentIdResolveResult;
@@ -55,7 +56,7 @@ public class TestModuleSelectorState implements ResolvableSelectorState {
 
     @Override
     public ComponentSelector getSelector() {
-        throw new UnsupportedOperationException();
+        return new TestComponentSelector();
     }
 
     @Override
@@ -90,11 +91,6 @@ public class TestModuleSelectorState implements ResolvableSelectorState {
     }
 
     @Override
-    public void failed(ModuleVersionResolveException failure) {
-        throw new UnsupportedOperationException("To be implemented");
-    }
-
-    @Override
     public void markResolved() {
     }
 
@@ -113,4 +109,23 @@ public class TestModuleSelectorState implements ResolvableSelectorState {
         return false;
     }
 
+    @Override
+    public boolean hasStrongOpinion() {
+        return false;
+    }
+
+    @Override
+    public IvyArtifactName getFirstDependencyArtifact() {
+        return null;
+    }
+
+    @Override
+    public ClientModule getClientModule() {
+        return null;
+    }
+
+    @Override
+    public boolean isChanging() {
+        return false;
+    }
 }

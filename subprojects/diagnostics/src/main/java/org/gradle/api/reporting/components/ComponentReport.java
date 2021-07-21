@@ -17,12 +17,12 @@
 package org.gradle.api.reporting.components;
 
 import org.gradle.api.DefaultTask;
-import org.gradle.api.Incubating;
 import org.gradle.api.internal.file.FileResolver;
 import org.gradle.api.internal.project.ProjectInternal;
 import org.gradle.api.reporting.components.internal.ComponentReportRenderer;
 import org.gradle.api.reporting.components.internal.TypeAwareBinaryRenderer;
 import org.gradle.api.tasks.TaskAction;
+import org.gradle.api.tasks.diagnostics.internal.ProjectDetails;
 import org.gradle.internal.logging.text.StyledTextOutput;
 import org.gradle.internal.logging.text.StyledTextOutputFactory;
 import org.gradle.language.base.ProjectSourceSet;
@@ -32,6 +32,7 @@ import org.gradle.model.internal.type.ModelType;
 import org.gradle.platform.base.BinaryContainer;
 import org.gradle.platform.base.ComponentSpec;
 import org.gradle.platform.base.ComponentSpecContainer;
+import org.gradle.work.DisableCachingByDefault;
 
 import javax.inject.Inject;
 import java.util.ArrayList;
@@ -42,7 +43,8 @@ import static org.gradle.model.internal.type.ModelTypes.modelMap;
 /**
  * Displays some details about the software components produced by the project.
  */
-@Incubating
+@Deprecated
+@DisableCachingByDefault(because = "Produces only non-cacheable console output")
 public class ComponentReport extends DefaultTask {
     @Inject
     protected StyledTextOutputFactory getTextOutputFactory() {
@@ -73,9 +75,10 @@ public class ComponentReport extends DefaultTask {
         ComponentReportRenderer renderer = new ComponentReportRenderer(getFileResolver(), getBinaryRenderer());
         renderer.setOutput(textOutput);
 
-        renderer.startProject(project);
+        ProjectDetails projectDetails = ProjectDetails.of(project);
+        renderer.startProject(projectDetails);
 
-        Collection<ComponentSpec> components = new ArrayList<ComponentSpec>();
+        Collection<ComponentSpec> components = new ArrayList<>();
         ComponentSpecContainer componentSpecs = modelElement("components", ComponentSpecContainer.class);
         if (componentSpecs != null) {
             components.addAll(componentSpecs.values());
@@ -97,7 +100,7 @@ public class ComponentReport extends DefaultTask {
             renderer.renderBinaries(binaries.values());
         }
 
-        renderer.completeProject(project);
+        renderer.completeProject(projectDetails);
         renderer.complete();
     }
 

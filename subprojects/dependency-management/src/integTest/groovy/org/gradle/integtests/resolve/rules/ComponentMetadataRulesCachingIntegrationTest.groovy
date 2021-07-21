@@ -18,7 +18,7 @@ package org.gradle.integtests.resolve.rules
 
 import org.gradle.integtests.fixtures.GradleMetadataResolveRunner
 import org.gradle.integtests.fixtures.RequiredFeature
-import org.gradle.integtests.fixtures.RequiredFeatures
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.integtests.resolve.AbstractModuleDependencyResolveTest
 
 class ComponentMetadataRulesCachingIntegrationTest extends AbstractModuleDependencyResolveTest implements ComponentMetadataRulesSupport {
@@ -43,8 +43,10 @@ task resolve {
     }
 }
 """
+        executer.withArgument("-Ddebug.modulesource=true")
     }
 
+    @ToBeFixedForConfigurationCache
     def "rule is cached across builds"() {
         repository {
             'org.test:projectA:1.0' {
@@ -64,7 +66,7 @@ class CachedRule implements ComponentMetadataRule {
                     deps.each {
                        println "See dependency: \$it"
                     }
-                }               
+                }
             }
     }
 }
@@ -98,6 +100,42 @@ dependencies {
         outputDoesNotContain('See dependency')
     }
 
+    @ToBeFixedForConfigurationCache
+    @RequiredFeature(feature = GradleMetadataResolveRunner.REPOSITORY_TYPE, value = "maven")
+    def 'cached rule can access PomModuleDescriptor for Maven component'() {
+        given:
+        repository {
+            'org.test:projectA:1.0'()
+        }
+
+        buildFile << """
+@CacheableRule
+class PomRule implements ComponentMetadataRule {
+    public void execute(ComponentMetadataContext context) {
+        assert context.getDescriptor(PomModuleDescriptor) != null
+        assert context.getDescriptor(PomModuleDescriptor).packaging == "jar"
+    }
+}
+
+dependencies {
+    components {
+        all(PomRule)
+    }
+}
+"""
+        when:
+        repositoryInteractions {
+            'org.test:projectA:1.0' {
+                expectResolve()
+            }
+        }
+
+        then:
+        succeeds 'resolve'
+        succeeds 'resolve'
+    }
+
+    @ToBeFixedForConfigurationCache
     def 'rule cache properly differentiates inputs'() {
         repository {
             'org.test:projectA:1.0'()
@@ -146,13 +184,13 @@ dependencies {
         outputContains('Rule B executed - saw changing true')
     }
 
+    @ToBeFixedForConfigurationCache
     def 'can cache rules with service injection'() {
         repository {
             'org.test:projectA:1.0'()
         }
         buildFile << """
 
-import javax.inject.Inject
 import org.gradle.api.artifacts.repositories.RepositoryResourceAccessor
 
 @CacheableRule
@@ -164,7 +202,7 @@ class CachedRuleA implements ComponentMetadataRule {
     CachedRuleA(RepositoryResourceAccessor accessor) {
         this.accessor = accessor
     }
-    
+
     void execute(ComponentMetadataContext context) {
             println 'Rule A executed'
             context.details.changing = true
@@ -180,7 +218,7 @@ class CachedRuleB implements ComponentMetadataRule {
     CachedRuleB(RepositoryResourceAccessor accessor) {
         this.accessor = accessor
     }
-    
+
     public void execute(ComponentMetadataContext context) {
             println 'Rule B executed - saw changing ' + context.details.changing
     }
@@ -213,13 +251,12 @@ dependencies {
         outputContains('Rule B executed - saw changing true')
     }
 
+    @ToBeFixedForConfigurationCache
     def 'can cache rules having a custom type attribute as parameter'() {
         repository {
             'org.test:projectA:1.0'()
         }
         buildFile << """
-
-import javax.inject.Inject
 
 @CacheableRule
 class AttributeCachedRule implements ComponentMetadataRule {
@@ -230,7 +267,7 @@ class AttributeCachedRule implements ComponentMetadataRule {
     AttributeCachedRule(Attribute attribute) {
         this.targetAttribute = attribute
     }
-    
+
     void execute(ComponentMetadataContext context) {
         println 'Attribute rule executed'
     }
@@ -264,9 +301,8 @@ dependencies {
         outputDoesNotContain('Attribute rule executed')
     }
 
-    @RequiredFeatures(
-        @RequiredFeature(feature = GradleMetadataResolveRunner.GRADLE_METADATA, value = "true")
-    )
+    @RequiredFeature(feature = GradleMetadataResolveRunner.GRADLE_METADATA, value = "true")
+    @ToBeFixedForConfigurationCache
     def 'can cache rules setting custom type attributes'() {
         repository {
             'org.test:projectA:1.0'()
@@ -275,8 +311,6 @@ dependencies {
         def expectedStatus = useIvy() ? 'integration' : 'release'
 
         buildFile << """
-
-import javax.inject.Inject
 
 @CacheableRule
 class AttributeCachedRule implements ComponentMetadataRule {
@@ -289,7 +323,7 @@ class AttributeCachedRule implements ComponentMetadataRule {
         this.objects = objects
         this.targetAttribute = attribute
     }
-    
+
     void execute(ComponentMetadataContext context) {
         println 'Attribute rule executed'
         context.details.withVariant('api') {
@@ -343,7 +377,7 @@ dependencies {
         resolve.expectGraph {
             root(":", ":test:") {
                 module('org.test:projectA:1.0') {
-                    variant('runtime', ['org.gradle.status': expectedStatus, 'org.gradle.usage': 'java-runtime', 'thing': 'Bar'])
+                    variant('runtime', ['org.gradle.status': expectedStatus, 'org.gradle.usage': 'java-runtime', 'org.gradle.libraryelements': 'jar', 'org.gradle.category': 'library', 'thing': 'Bar'])
                 }
             }
         }
@@ -355,7 +389,7 @@ dependencies {
         resolve.expectGraph {
             root(":", ":test:") {
                 module('org.test:projectA:1.0') {
-                    variant('runtime', ['org.gradle.status': expectedStatus, 'org.gradle.usage': 'java-runtime', 'thing': 'Bar'])
+                    variant('runtime', ['org.gradle.status': expectedStatus, 'org.gradle.usage': 'java-runtime', 'org.gradle.libraryelements': 'jar', 'org.gradle.category': 'library', 'thing': 'Bar'])
                 }
             }
         }
@@ -368,7 +402,7 @@ dependencies {
 
         def cachedRule = file('buildSrc/src/main/groovy/rule/CachedRule.groovy')
         cachedRule.text = """
-package rule 
+package rule
 
 import org.gradle.api.artifacts.ComponentMetadataRule
 import org.gradle.api.artifacts.CacheableRule
@@ -411,7 +445,7 @@ dependencies {
             }
         }
         cachedRule.text = """
-package rule 
+package rule
 
 import org.gradle.api.artifacts.ComponentMetadataRule
 import org.gradle.api.artifacts.CacheableRule
@@ -430,5 +464,55 @@ class CachedRule implements ComponentMetadataRule {
         succeeds 'checkDeps'
         outputContains('Modified cached rule executed')
 
+    }
+
+    def 'having a rule triggered on missing metadata does not cause cache collision'() {
+        file('deps/projectA-1.0.jar').createFile()
+        file('deps/projectB-1.0.jar').createFile()
+
+        def cachedRule = file('buildSrc/src/main/groovy/rule/CachedRule.groovy')
+        cachedRule.text = """
+package rule
+
+import org.gradle.api.artifacts.ComponentMetadataRule
+import org.gradle.api.artifacts.CacheableRule
+import org.gradle.api.artifacts.ComponentMetadataContext
+
+@CacheableRule
+class CachedRule implements ComponentMetadataRule {
+
+    void execute(ComponentMetadataContext context) {
+        println 'Cached rule executed'
+    }
+}
+"""
+
+        buildFile << """
+import rule.CachedRule
+
+repositories.clear()
+
+repositories {
+    flatDir {
+        dirs 'deps'
+    }
+}
+
+dependencies {
+    conf 'org.test:projectB:1.0'
+    components {
+        all(CachedRule)
+    }
+}
+"""
+
+        when:
+        succeeds 'resolve'
+
+        then:
+        outputContains("""
+Cached rule executed
+Cached rule executed""")
+        Arrays.asList(file('libs').listFiles()).sort() == [file('libs/projectA-1.0.jar'), file('libs/projectB-1.0.jar')]
     }
 }

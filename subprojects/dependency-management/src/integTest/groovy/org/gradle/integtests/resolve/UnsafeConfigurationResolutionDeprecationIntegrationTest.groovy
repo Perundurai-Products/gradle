@@ -17,8 +17,10 @@
 package org.gradle.integtests.resolve
 
 import org.gradle.integtests.fixtures.AbstractDependencyResolutionTest
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 
 class UnsafeConfigurationResolutionDeprecationIntegrationTest extends AbstractDependencyResolutionTest {
+    @ToBeFixedForConfigurationCache(because = "Task.getProject() during execution")
     def "deprecation warning when configuration in another project is resolved unsafely"() {
         mavenRepo.module("test", "test-jar", "1.0").publish()
 
@@ -33,20 +35,20 @@ class UnsafeConfigurationResolutionDeprecationIntegrationTest extends AbstractDe
                     println project(':bar').configurations.bar.files
                 }
             }
-            
+
             project(':bar') {
                 repositories {
                     maven { url '${mavenRepo.uri}' }
                 }
-                
+
                 configurations {
                     bar
                 }
-                
+
                 dependencies {
                     bar "test:test-jar:1.0"
                 }
-            }       
+            }
         """
 
         when:
@@ -55,10 +57,11 @@ class UnsafeConfigurationResolutionDeprecationIntegrationTest extends AbstractDe
         succeeds(":resolve")
 
         then:
-        outputContains("The configuration :bar:bar was resolved without accessing the project in a safe manner.")
+        outputContains("Resolution of the configuration :bar:bar was attempted from a context different than the project context.")
     }
 
-    def "deprecation warning when configuration is resolved from a non-gradle thread"() {
+    @ToBeFixedForConfigurationCache
+    def "exception when configuration is resolved from a non-gradle thread"() {
         mavenRepo.module("test", "test-jar", "1.0").publish()
 
         settingsFile << """
@@ -69,36 +72,38 @@ class UnsafeConfigurationResolutionDeprecationIntegrationTest extends AbstractDe
         buildFile << """
             task resolve {
                 def thread = new Thread({
-                    println project(':bar').configurations.bar.files
+                    file('bar') << project(':bar').configurations.bar.files
                 })
                 doFirst {
                     thread.start()
                     thread.join()
+                    // this should fail
+                    assert file('bar').exists()
                 }
             }
-           
+
             project(':bar') {
                 repositories {
                     maven { url '${mavenRepo.uri}' }
                 }
-                
+
                 configurations {
                     bar
                 }
-                
+
                 dependencies {
                     bar "test:test-jar:1.0"
                 }
-            }    
+            }
         """
 
         when:
         executer.withArgument("--parallel")
-        executer.expectDeprecationWarning()
-        succeeds(":resolve")
+        executer.withStackTraceChecksDisabled()
+        fails(":resolve")
 
         then:
-        outputContains("The configuration :bar:bar was resolved without accessing the project in a safe manner.")
+        failure.assertHasErrorOutput("The configuration :bar:bar was resolved from a thread not managed by Gradle.")
     }
 
     def "deprecation warning when configuration is resolved while evaluating a different project"() {
@@ -109,24 +114,24 @@ class UnsafeConfigurationResolutionDeprecationIntegrationTest extends AbstractDe
             include ":bar", ":baz"
         """
 
-        buildFile << """   
-            project(':baz') {  
+        buildFile << """
+            project(':baz') {
                 repositories {
                     maven { url '${mavenRepo.uri}' }
                 }
-                
+
                 configurations {
                     baz
                 }
-                
+
                 dependencies {
                     baz "test:test-jar:1.0"
-                }  
-            } 
-            
+                }
+            }
+
             project(':bar') {
                 println project(':baz').configurations.baz.files
-            }       
+            }
         """
 
         when:
@@ -135,7 +140,7 @@ class UnsafeConfigurationResolutionDeprecationIntegrationTest extends AbstractDe
         succeeds(":bar:help")
 
         then:
-        outputContains("The configuration :baz:baz was resolved without accessing the project in a safe manner.")
+        outputContains("Resolution of the configuration :baz:baz was attempted from a context different than the project context.")
     }
 
     def "no deprecation warning when configuration is resolved while evaluating same project"() {
@@ -150,16 +155,16 @@ class UnsafeConfigurationResolutionDeprecationIntegrationTest extends AbstractDe
             repositories {
                 maven { url '${mavenRepo.uri}' }
             }
-            
+
             configurations {
                 foo
             }
-            
+
             dependencies {
                 foo "test:test-jar:1.0"
             }
-            
-            println configurations.foo.files      
+
+            println configurations.foo.files
         """
 
         expect:
@@ -178,17 +183,17 @@ class UnsafeConfigurationResolutionDeprecationIntegrationTest extends AbstractDe
             repositories {
                 maven { url '${mavenRepo.uri}' }
             }
-            
+
             configurations {
                 foo
             }
-            
+
             dependencies {
                 foo "test:test-jar:1.0"
             }
-            
+
             afterEvaluate {
-                println configurations.foo.files      
+                println configurations.foo.files
             }
         """
 
@@ -210,16 +215,16 @@ class UnsafeConfigurationResolutionDeprecationIntegrationTest extends AbstractDe
                     repositories {
                         maven { url '${mavenRepo.uri}' }
                     }
-                    
+
                     configurations {
                         foo
                     }
-                    
+
                     dependencies {
                         foo "test:test-jar:1.0"
                     }
-                
-                    println configurations.foo.files      
+
+                    println configurations.foo.files
                 }
             }
         """

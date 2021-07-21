@@ -18,7 +18,7 @@ package org.gradle.execution;
 import org.gradle.StartParameter;
 import org.gradle.TaskExecutionRequest;
 import org.gradle.api.internal.project.ProjectInternal;
-import org.gradle.util.GUtil;
+import org.gradle.util.internal.GUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -36,6 +36,7 @@ public class DefaultTasksBuildExecutionAction implements BuildConfigurationActio
         this.projectConfigurer = projectConfigurer;
     }
 
+    @Override
     public void configure(BuildExecutionContext context) {
         StartParameter startParameter = context.getGradle().getStartParameter();
 

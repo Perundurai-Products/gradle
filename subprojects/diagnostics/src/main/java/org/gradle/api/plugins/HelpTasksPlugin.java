@@ -18,40 +18,45 @@ package org.gradle.api.plugins;
 
 import org.gradle.api.Action;
 import org.gradle.api.Plugin;
+import org.gradle.api.Project;
 import org.gradle.api.internal.component.BuildableJavaComponent;
 import org.gradle.api.internal.component.ComponentRegistry;
 import org.gradle.api.internal.plugins.DslObject;
 import org.gradle.api.internal.project.ProjectInternal;
-import org.gradle.api.internal.tasks.TaskContainerInternal;
-import org.gradle.api.reporting.components.ComponentReport;
-import org.gradle.api.reporting.dependents.DependentComponentsReport;
-import org.gradle.api.reporting.model.ModelReport;
+import org.gradle.api.tasks.TaskContainer;
 import org.gradle.api.tasks.diagnostics.BuildEnvironmentReportTask;
 import org.gradle.api.tasks.diagnostics.DependencyInsightReportTask;
 import org.gradle.api.tasks.diagnostics.DependencyReportTask;
+import org.gradle.api.tasks.diagnostics.OutgoingVariantsReportTask;
 import org.gradle.api.tasks.diagnostics.ProjectReportTask;
 import org.gradle.api.tasks.diagnostics.PropertyReportTask;
 import org.gradle.api.tasks.diagnostics.TaskReportTask;
 import org.gradle.configuration.Help;
 
-import java.util.concurrent.Callable;
-
 /**
  * Adds various reporting tasks that provide information about the project.
+ *
+ * @see <a href="https://gradle.org/help/">Getting additional help with Gradle</a>
  */
-public class HelpTasksPlugin implements Plugin<ProjectInternal> {
+public class HelpTasksPlugin implements Plugin<Project> {
 
     public static final String HELP_GROUP = "help";
     public static final String PROPERTIES_TASK = "properties";
     public static final String DEPENDENCIES_TASK = "dependencies";
     public static final String DEPENDENCY_INSIGHT_TASK = "dependencyInsight";
     public static final String COMPONENTS_TASK = "components";
+    /**
+     * The name of the outgoing variants report task.
+     *
+     * @since 6.0
+     */
+    public static final String OUTGOING_VARIANTS_TASK = "outgoingVariants";
     public static final String MODEL_TASK = "model";
     public static final String DEPENDENT_COMPONENTS_TASK = "dependentComponents";
 
     @Override
-    public void apply(final ProjectInternal project) {
-        final TaskContainerInternal tasks = project.getTasks();
+    public void apply(final Project project) {
+        final TaskContainer tasks = project.getTasks();
 
         // static classes are used for the actions to avoid implicitly dragging project/tasks into the model registry
         String projectName = project.toString();
@@ -62,9 +67,19 @@ public class HelpTasksPlugin implements Plugin<ProjectInternal> {
         tasks.register(DEPENDENCY_INSIGHT_TASK, DependencyInsightReportTask.class, new DependencyInsightReportTaskAction(projectName));
         tasks.register(DEPENDENCIES_TASK, DependencyReportTask.class, new DependencyReportTaskAction(projectName));
         tasks.register(BuildEnvironmentReportTask.TASK_NAME, BuildEnvironmentReportTask.class, new BuildEnvironmentReportTaskAction(projectName));
-        tasks.register(COMPONENTS_TASK, ComponentReport.class, new ComponentReportAction(projectName));
-        tasks.register(MODEL_TASK, ModelReport.class, new ModelReportAction(projectName));
-        tasks.register(DEPENDENT_COMPONENTS_TASK, DependentComponentsReport.class, new DependentComponentsReportAction(projectName));
+        registerDeprecatedTasks(tasks, projectName);
+        tasks.register(OUTGOING_VARIANTS_TASK, OutgoingVariantsReportTask.class, task -> {
+            task.setDescription("Displays the outgoing variants of " + projectName + ".");
+            task.setGroup(HELP_GROUP);
+            task.setImpliesSubProjects(true);
+        });
+    }
+
+    @SuppressWarnings("deprecation")
+    private void registerDeprecatedTasks(TaskContainer tasks, String projectName) {
+        tasks.register(COMPONENTS_TASK, org.gradle.api.reporting.components.ComponentReport.class, new ComponentReportAction(projectName));
+        tasks.register(MODEL_TASK, org.gradle.api.reporting.model.ModelReport.class, new ModelReportAction(projectName));
+        tasks.register(DEPENDENT_COMPONENTS_TASK, org.gradle.api.reporting.dependents.DependentComponentsReport.class, new DependentComponentsReportAction(projectName));
     }
 
     private static class HelpAction implements Action<Help> {
@@ -141,11 +156,9 @@ public class HelpTasksPlugin implements Plugin<ProjectInternal> {
             task.setDescription("Displays the insight into a specific dependency in " + projectName + ".");
             task.setGroup(HELP_GROUP);
             task.setImpliesSubProjects(true);
-            new DslObject(task).getConventionMapping().map("configuration", new Callable<Object>() {
-                public Object call() {
-                    BuildableJavaComponent javaProject = ((ProjectInternal) task.getProject()).getServices().get(ComponentRegistry.class).getMainComponent();
-                    return javaProject == null ? null : javaProject.getCompileDependencies();
-                }
+            new DslObject(task).getConventionMapping().map("configuration", () -> {
+                BuildableJavaComponent javaProject = ((ProjectInternal) task.getProject()).getServices().get(ComponentRegistry.class).getMainComponent();
+                return javaProject == null ? null : javaProject.getCompileDependencies();
             });
         }
     }
@@ -180,7 +193,8 @@ public class HelpTasksPlugin implements Plugin<ProjectInternal> {
         }
     }
 
-    private static class ComponentReportAction implements Action<ComponentReport> {
+    @SuppressWarnings("deprecation")
+    private static class ComponentReportAction implements Action<org.gradle.api.reporting.components.ComponentReport> {
         private final String projectName;
 
         public ComponentReportAction(String projectName) {
@@ -188,14 +202,14 @@ public class HelpTasksPlugin implements Plugin<ProjectInternal> {
         }
 
         @Override
-        public void execute(ComponentReport task) {
-            task.setDescription("Displays the components produced by " + projectName + ". [incubating]");
-            task.setGroup(HELP_GROUP);
+        public void execute(org.gradle.api.reporting.components.ComponentReport task) {
+            task.setDescription("Displays the components produced by " + projectName + ". [deprecated]");
             task.setImpliesSubProjects(true);
         }
     }
 
-    private static class ModelReportAction implements Action<ModelReport> {
+    @SuppressWarnings("deprecation")
+    private static class ModelReportAction implements Action<org.gradle.api.reporting.model.ModelReport> {
         private final String projectName;
 
         public ModelReportAction(String projectName) {
@@ -203,14 +217,14 @@ public class HelpTasksPlugin implements Plugin<ProjectInternal> {
         }
 
         @Override
-        public void execute(ModelReport task) {
-            task.setDescription("Displays the configuration model of " + projectName + ". [incubating]");
-            task.setGroup(HELP_GROUP);
+        public void execute(org.gradle.api.reporting.model.ModelReport task) {
+            task.setDescription("Displays the configuration model of " + projectName + ". [deprecated]");
             task.setImpliesSubProjects(true);
         }
     }
 
-    private static class DependentComponentsReportAction implements Action<DependentComponentsReport> {
+    @SuppressWarnings("deprecation")
+    private static class DependentComponentsReportAction implements Action<org.gradle.api.reporting.dependents.DependentComponentsReport> {
         private final String projectName;
 
         public DependentComponentsReportAction(String projectName) {
@@ -218,9 +232,8 @@ public class HelpTasksPlugin implements Plugin<ProjectInternal> {
         }
 
         @Override
-        public void execute(DependentComponentsReport task) {
-            task.setDescription("Displays the dependent components of components in " + projectName + ". [incubating]");
-            task.setGroup(HELP_GROUP);
+        public void execute(org.gradle.api.reporting.dependents.DependentComponentsReport task) {
+            task.setDescription("Displays the dependent components of components in " + projectName + ". [deprecated]");
             task.setImpliesSubProjects(true);
         }
     }

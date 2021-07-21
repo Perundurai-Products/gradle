@@ -25,9 +25,10 @@ import org.gradle.internal.event.DefaultListenerManager
 import org.gradle.internal.execution.OutputChangeListener
 import org.gradle.internal.hash.HashCode
 import org.gradle.internal.serialize.BaseSerializerFactory
-import org.gradle.internal.snapshot.FileSystemSnapshotter
+import org.gradle.internal.service.scopes.Scopes
+import org.gradle.internal.vfs.FileSystemAccess
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
-import org.gradle.testfixtures.internal.InMemoryCacheFactory
+import org.gradle.testfixtures.internal.TestInMemoryCacheFactory
 import org.gradle.util.GradleVersion
 import org.gradle.util.UsesNativeServices
 import org.junit.Rule
@@ -36,22 +37,22 @@ import spock.lang.Specification
 @UsesNativeServices
 class DefaultFileContentCacheFactoryTest extends Specification {
     @Rule
-    TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
-    def listenerManager = new DefaultListenerManager()
-    def fileSystemSnapshotter = Mock(FileSystemSnapshotter)
-    def cacheRepository = new DefaultCacheRepository(new DefaultCacheScopeMapping(tmpDir.file("user-home"), tmpDir.file("build-dir"), GradleVersion.current()), new InMemoryCacheFactory())
-    def inMemoryTaskArtifactCache = new InMemoryCacheDecoratorFactory(false, new TestCrossBuildInMemoryCacheFactory()) {
+    TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider(getClass())
+    def listenerManager = new DefaultListenerManager(Scopes.Build)
+    def fileSystemAccess = Mock(FileSystemAccess)
+    def cacheRepository = new DefaultCacheRepository(new DefaultCacheScopeMapping(tmpDir.file("user-home"), tmpDir.file("build-dir"), GradleVersion.current()), new TestInMemoryCacheFactory())
+    def inMemoryTaskArtifactCache = new DefaultInMemoryCacheDecoratorFactory(false, new TestCrossBuildInMemoryCacheFactory()) {
         @Override
         CacheDecorator decorator(int maxEntriesToKeepInMemory, boolean cacheInMemoryForShortLivedProcesses) {
             return new CacheDecorator() {
                 @Override
-                <K, V> MultiProcessSafePersistentIndexedCache<K, V> decorate(String cacheId, String cacheName, MultiProcessSafePersistentIndexedCache<K, V> persistentCache, CrossProcessCacheAccess crossProcessCacheAccess, AsyncCacheAccess asyncCacheAccess) {
+                public <K, V> MultiProcessSafePersistentIndexedCache<K, V> decorate(String cacheId, String cacheName, MultiProcessSafePersistentIndexedCache<K, V> persistentCache, CrossProcessCacheAccess crossProcessCacheAccess, AsyncCacheAccess asyncCacheAccess) {
                     return persistentCache
                 }
             }
         }
     }
-    def factory = new DefaultFileContentCacheFactory(listenerManager, fileSystemSnapshotter, cacheRepository, inMemoryTaskArtifactCache, Stub(Gradle))
+    def factory = new DefaultFileContentCacheFactory(listenerManager, fileSystemAccess, cacheRepository, inMemoryTaskArtifactCache, Stub(Gradle))
     def calculator = Mock(FileContentCacheFactory.Calculator)
 
     def "calculates entry value for file when not seen before and reuses result"() {
@@ -90,7 +91,7 @@ class DefaultFileContentCacheFactoryTest extends Specification {
         result == 12
 
         and:
-        1 * fileSystemSnapshotter.getRegularFileContentHash(file) >> null
+        1 * fileSystemAccess.readRegularFileContentHash(file.absolutePath, _) >> Optional.empty()
         1 * calculator.calculate(file, false) >> 12
         0 * _
 
@@ -147,7 +148,7 @@ class DefaultFileContentCacheFactoryTest extends Specification {
         0 * _
 
         when:
-        def otherFactory = new DefaultFileContentCacheFactory(listenerManager, fileSystemSnapshotter, cacheRepository, inMemoryTaskArtifactCache, Stub(Gradle))
+        def otherFactory = new DefaultFileContentCacheFactory(listenerManager, fileSystemAccess, cacheRepository, inMemoryTaskArtifactCache, Stub(Gradle))
         result = otherFactory.newCache("cache", 12000, calculator, BaseSerializerFactory.INTEGER_SERIALIZER).get(file)
 
         then:
@@ -178,7 +179,7 @@ class DefaultFileContentCacheFactoryTest extends Specification {
         0 * _
 
         when:
-        listenerManager.getBroadcaster(OutputChangeListener).beforeOutputChange()
+        listenerManager.getBroadcaster(OutputChangeListener).beforeOutputChange([])
         result = cache.get(file)
 
         then:
@@ -202,19 +203,19 @@ class DefaultFileContentCacheFactoryTest extends Specification {
         result == 12
 
         and:
-        1 * fileSystemSnapshotter.getRegularFileContentHash(file) >> null
+        1 * fileSystemAccess.readRegularFileContentHash(file.getAbsolutePath(), _) >> Optional.empty()
         1 * calculator.calculate(file, false) >> 12
         0 * _
 
         when:
-        listenerManager.getBroadcaster(OutputChangeListener).beforeOutputChange()
+        listenerManager.getBroadcaster(OutputChangeListener).beforeOutputChange([])
         result = cache.get(file)
 
         then:
         result == 10
 
         and:
-        1 * fileSystemSnapshotter.getRegularFileContentHash(file) >> null
+        1 * fileSystemAccess.readRegularFileContentHash(file.getAbsolutePath(), _) >> Optional.empty()
         1 * calculator.calculate(file, false) >> 10
         0 * _
     }
@@ -237,7 +238,7 @@ class DefaultFileContentCacheFactoryTest extends Specification {
         0 * _
 
         when:
-        listenerManager.getBroadcaster(OutputChangeListener).beforeOutputChange()
+        listenerManager.getBroadcaster(OutputChangeListener).beforeOutputChange([])
         result = cache.get(file)
 
         then:
@@ -252,6 +253,8 @@ class DefaultFileContentCacheFactoryTest extends Specification {
     }
 
     def snapshotRegularFile(File file, HashCode hashCode = HashCode.fromInt(123)) {
-        1 * fileSystemSnapshotter.getRegularFileContentHash(file) >> hashCode
+        1 * fileSystemAccess.readRegularFileContentHash(file.getAbsolutePath(), _) >> { location, function ->
+            return Optional.ofNullable(function.apply(hashCode))
+        }
     }
 }

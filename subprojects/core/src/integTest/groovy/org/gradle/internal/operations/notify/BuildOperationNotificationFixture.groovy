@@ -20,6 +20,7 @@ import com.google.common.base.Predicate
 import com.google.common.collect.Sets
 import groovy.json.JsonSlurper
 import org.gradle.internal.operations.trace.BuildOperationTrace
+import org.gradle.launcher.exec.RunBuildBuildOperationType
 import org.gradle.test.fixtures.file.TestFile
 
 class BuildOperationNotificationFixture {
@@ -35,7 +36,14 @@ class BuildOperationNotificationFixture {
             return op.detailsType == detailsClass.name && op.details.subMap(details.keySet()) == details
         }
         assert found.size() == 1
-        found.first()
+        return found.first()
+    }
+
+    def ops(Class<?> detailsClass, Map<String, String> details = [:]) {
+        def found = recordedOps.findAll { op ->
+            return op.detailsType == detailsClass.name && op.details.subMap(details.keySet()) == details
+        }
+        return found
     }
 
     void started(Class<?> type, Predicate<? super Map<String, ?>> payloadTest) {
@@ -116,24 +124,28 @@ class BuildOperationNotificationFixture {
             def listener = new ${BuildOperationNotificationListener.name}() {
 
                 def ops = [:]
-            
+
                 @Override
                 synchronized void started(${BuildOperationStartedNotification.name} startedNotification) {
-            
+
                     def details = ${BuildOperationTrace.name}.toSerializableModel(startedNotification.notificationOperationDetails)
+                    def detailsType = startedNotification.notificationOperationDetails.getClass()
+                    if (detailsType.interfaces.length > 0) {
+                        detailsType = detailsType.interfaces[0]
+                    }
 
                     ops.put(startedNotification.notificationOperationId, new BuildOpsEntry(id: startedNotification.notificationOperationId?.id,
                             parentId: startedNotification.notificationOperationParentId?.id,
-                            detailsType: startedNotification.notificationOperationDetails.getClass().getInterfaces()[0].getName(),
-                            details: details, 
+                            detailsType: detailsType.name,
+                            details: details,
                             started: startedNotification.notificationOperationStartedTimestamp))
                 }
-                
+
                 @Override
                 synchronized void progress(${BuildOperationProgressNotification.name} progressNotification){
                     // Do nothing
                 }
-            
+
                 @Override
                 synchronized void finished(${BuildOperationFinishedNotification.name} finishedNotification) {
                     def result = ${BuildOperationTrace.name}.toSerializableModel(finishedNotification.getNotificationOperationResult())
@@ -141,15 +153,18 @@ class BuildOperationNotificationFixture {
                     op.resultType = finishedNotification.getNotificationOperationResult().getClass().getInterfaces()[0].getName()
                     op.result = result
                     op.finished = finishedNotification.getNotificationOperationFinishedTimestamp()
+                    if (finishedNotification.notificationOperationDetails instanceof ${RunBuildBuildOperationType.Details.name}) {
+                        store(file('${jsonFile().toURI()}'))
+                    }
                 }
-            
+
                 synchronized void store(File target){
                     target.withPrintWriter { pw ->
                         String json = groovy.json.JsonOutput.toJson(ops.values())
                         pw.append(json)
                     }
                 }
-            
+
                 static class BuildOpsEntry {
                     Object id
                     Object parentId
@@ -162,10 +177,7 @@ class BuildOperationNotificationFixture {
                 }
             }
 
-            def registrar = services.get($BuildOperationNotificationListenerRegistrar.name)            
-            gradle.buildFinished {
-                listener.store(file('${jsonFile().toURI()}'))
-            }
+            def registrar = services.get($BuildOperationNotificationListenerRegistrar.name)
         """
     }
 

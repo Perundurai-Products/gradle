@@ -18,19 +18,14 @@ package org.gradle.internal.logging.console.taskgrouping
 
 import org.fusesource.jansi.Ansi
 import org.gradle.api.logging.LogLevel
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.integtests.fixtures.console.AbstractConsoleGroupedTaskFunctionalTest
 import org.gradle.integtests.fixtures.executer.LogContent
 import spock.lang.Unroll
 
 abstract class AbstractConsoleBuildResultFunctionalTest extends AbstractConsoleGroupedTaskFunctionalTest {
-    protected final String buildFailed = 'BUILD FAILED'
-    protected final String buildSuccess = 'BUILD SUCCESSFUL'
-    protected final StyledOutput buildFailedStyled = styled(buildFailed, Ansi.Color.RED, Ansi.Attribute.INTENSITY_BOLD)
-    protected final StyledOutput buildSuccessStyled = styled(buildSuccess, Ansi.Color.GREEN, Ansi.Attribute.INTENSITY_BOLD)
-
-    abstract String getFailureMessage()
-
-    abstract String getSuccessMessage()
+    protected final StyledOutput buildFailed = styled(Ansi.Color.RED, Ansi.Attribute.INTENSITY_BOLD).text('BUILD FAILED').off()
+    protected final StyledOutput buildSuccessful = styled(Ansi.Color.GREEN, Ansi.Attribute.INTENSITY_BOLD).text('BUILD SUCCESSFUL').off()
 
     def "outcome for successful build is logged with appropriate styling"() {
         given:
@@ -50,9 +45,9 @@ abstract class AbstractConsoleBuildResultFunctionalTest extends AbstractConsoleG
         succeeds('all')
 
         then:
-        result.assertRawOutputContains(successMessage)
-        LogContent.of(result.output).removeAnsiChars().withNormalizedEol().matches """(?s).*
-BUILD SUCCESSFUL in \\d+s\\n?
+        result.formattedOutput.contains(buildSuccessful.output)
+        result.plainTextOutput.matches """(?s).*
+BUILD SUCCESSFUL in [ \\dms]+
 2 actionable tasks: 2 executed
 .*"""
 
@@ -60,9 +55,9 @@ BUILD SUCCESSFUL in \\d+s\\n?
         succeeds('all')
 
         then:
-        result.assertRawOutputContains(successMessage)
-        LogContent.of(result.output).removeAnsiChars().withNormalizedEol().matches """(?s).*
-BUILD SUCCESSFUL in \\d+s\\n?
+        result.formattedOutput.contains(buildSuccessful.output)
+        result.plainTextOutput.matches """(?s).*
+BUILD SUCCESSFUL in [ \\dms]+
 2 actionable tasks: 1 executed, 1 up-to-date
 .*"""
     }
@@ -82,11 +77,12 @@ BUILD SUCCESSFUL in \\d+s\\n?
         result.assertNotOutput("actionable task")
     }
 
+    @ToBeFixedForConfigurationCache(because = "Gradle.buildFinished")
     def "outcome for successful build is logged after user logic has completed"() {
         given:
         buildFile << """
             task success { doLast { } }
-            gradle.buildFinished { 
+            gradle.buildFinished {
                 println "build finished"
             }
         """
@@ -95,9 +91,9 @@ BUILD SUCCESSFUL in \\d+s\\n?
         succeeds('success')
 
         then:
-        LogContent.of(result.output).removeAnsiChars().withNormalizedEol().matches """(?s).*build finished
+        result.plainTextOutput.matches """(?s).*build finished
 
-BUILD SUCCESSFUL in \\d+s\\n?
+BUILD SUCCESSFUL in [ \\dms]+
 1 actionable task: 1 executed
 .*"""
     }
@@ -124,19 +120,18 @@ BUILD SUCCESSFUL in \\d+s\\n?
         // Check that the failure text appears either stdout or stderr
         def outputWithFailure = errorsShouldAppearOnStdout() ? failure.output : failure.error
         def outputWithoutFailure = errorsShouldAppearOnStdout() ? failure.error : failure.output
-        def outputWithFailureAndNoDebugging = LogContent.of(outputWithFailure).removeBlankLines().removeAnsiChars().removeDebugPrefix().withNormalizedEol()
+        def outputWithFailureAndNoDebugging = LogContent.of(outputWithFailure).ansiCharsToColorText().removeDebugPrefix().withNormalizedEol()
 
-        outputWithFailure.contains("Build failed with an exception.")
+        outputWithFailureAndNoDebugging.contains("FAILURE: Build failed with an exception.")
         outputWithFailureAndNoDebugging.contains("""
             * What went wrong:
             Execution failed for task ':broken'.
-        """.stripIndent().trim())
+            """.stripIndent().trim())
 
         !outputWithoutFailure.contains("Build failed with an exception.")
         !outputWithoutFailure.contains("* What went wrong:")
 
-        outputWithFailure.contains("BUILD FAILED")
-        failure.assertHasRawErrorOutput(failureMessage)
+        outputWithFailureAndNoDebugging.contains(buildFailed.errorOutput)
 
         where:
         level << [LogLevel.DEBUG, LogLevel.INFO, LogLevel.LIFECYCLE, LogLevel.WARN, LogLevel.QUIET]
@@ -157,7 +152,7 @@ BUILD SUCCESSFUL in \\d+s\\n?
         fails("broken")
 
         and:
-        result.assertRawOutputContains("1 actionable task: 1 executed")
+        LogContent.of(result.output).ansiCharsToPlainText().withNormalizedEol().contains("1 actionable task: 1 executed")
 
         where:
         level << [LogLevel.DEBUG, LogLevel.INFO, LogLevel.LIFECYCLE]

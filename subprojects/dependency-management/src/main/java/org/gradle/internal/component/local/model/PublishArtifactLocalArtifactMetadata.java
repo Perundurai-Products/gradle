@@ -34,9 +34,13 @@ public class PublishArtifactLocalArtifactMetadata implements LocalComponentArtif
     public PublishArtifactLocalArtifactMetadata(ComponentIdentifier componentIdentifier, PublishArtifact publishArtifact) {
         this.componentIdentifier = componentIdentifier;
         this.publishArtifact = publishArtifact;
+        // In case the publish artifact is backed by an ArchiveTask, this causes the task to be realized.
+        // However, if we are at this point, we need the realized task to determine the archive extension/type later
+        // to set the 'artifactType' attribute required in matching (even if the variant with the artifact is not selected in the end).
         ivyArtifactName = DefaultIvyArtifactName.forPublishArtifact(publishArtifact);
     }
 
+    @Override
     public String getDisplayName() {
         StringBuilder result = new StringBuilder();
         result.append(getName());
@@ -56,6 +60,7 @@ public class PublishArtifactLocalArtifactMetadata implements LocalComponentArtif
         return getDisplayName();
     }
 
+    @Override
     public ComponentIdentifier getComponentIdentifier() {
         return componentIdentifier;
     }

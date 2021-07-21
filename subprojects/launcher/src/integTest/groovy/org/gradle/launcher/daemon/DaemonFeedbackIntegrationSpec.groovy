@@ -16,13 +16,16 @@
 
 package org.gradle.launcher.daemon
 
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.integtests.fixtures.daemon.DaemonIntegrationSpec
 import org.gradle.integtests.fixtures.timeout.IntegrationTestTimeout
 import org.gradle.launcher.daemon.logging.DaemonMessages
 import org.gradle.test.fixtures.file.LeaksFileHandles
+import org.gradle.test.fixtures.file.TestFile
 import org.gradle.util.GradleVersion
 import org.gradle.util.Requires
 import org.gradle.util.TestPrecondition
+import spock.lang.Issue
 
 import static org.gradle.test.fixtures.ConcurrentTestUtil.poll
 
@@ -69,9 +72,12 @@ task sleep {
         then:
         def ex = thrown(Exception)
         ex.message.contains(DaemonMessages.UNABLE_TO_START_DAEMON)
-        ex.message.contains("-Xyz")
+        ex.message.contains("Process command line:")
+        ex.message.contains("-Dorg.gradle.jvmargs=-Xyz")
+        ex.message.contains("Unrecognized option: -Xyz")
     }
 
+    @ToBeFixedForConfigurationCache(because = "asserts on configuration phase logging")
     def "daemon log contains all necessary logging"() {
         given:
         file("build.gradle") << "println 'Hello build!'"
@@ -158,9 +164,28 @@ task sleep {
         log.count('error me!') == 1
     }
 
-    //IBM JDK adds a bunch of environment variables that make the foreground daemon not match
+    @Issue("https://github.com/gradle/gradle/issues/8833")
+    @Requires(TestPrecondition.NOT_WINDOWS)
+    def "daemon log restricts permissions to owner"() {
+        given:
+        file("build.gradle") << """
+        """
+
+        when:
+        executer.withArguments("-q").run()
+
+        then:
+        def log = firstLog(executer.daemonBaseDir)
+        assertLogIsOnlyVisibleToOwner(log)
+    }
+
+    void assertLogIsOnlyVisibleToOwner(File logFile) {
+        assert new TestFile(logFile).permissions == "rw-------"
+    }
+
     //Java 9 and above needs --add-opens to make environment variable mutation work
-    @Requires([TestPrecondition.NOT_JDK_IBM, TestPrecondition.JDK8_OR_EARLIER])
+    @Requires(TestPrecondition.JDK8_OR_EARLIER)
+    @ToBeFixedForConfigurationCache(because = "asserts on configuration phase logging")
     def "foreground daemon log honors log levels for logging"() {
         given:
         file("build.gradle") << """

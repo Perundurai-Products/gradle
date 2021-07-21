@@ -38,11 +38,15 @@ public abstract class AbstractTrackedResourceLock implements ResourceLock {
 
     @Override
     public boolean tryLock() {
-        failIfNotInResourceLockStateChange();
         if (!isLockedByCurrentThread()) {
             if (acquireLock()) {
                 LOGGER.debug("{}: acquired lock on {}", Thread.currentThread().getName(), displayName);
-                lockAction.execute(this);
+                try {
+                    lockAction.execute(this);
+                } catch (RuntimeException e) {
+                    releaseLock();
+                    throw e;
+                }
                 coordinationService.getCurrent().registerLocked(this);
                 return true;
             } else {
@@ -55,12 +59,14 @@ public abstract class AbstractTrackedResourceLock implements ResourceLock {
 
     @Override
     public void unlock() {
-        failIfNotInResourceLockStateChange();
         if (isLockedByCurrentThread()) {
             releaseLock();
             LOGGER.debug("{}: released lock on {}", Thread.currentThread().getName(), displayName);
-            unlockAction.execute(this);
-            coordinationService.getCurrent().registerUnlocked(this);
+            try {
+                unlockAction.execute(this);
+            } finally {
+                coordinationService.getCurrent().registerUnlocked(this);
+            }
         }
     }
 

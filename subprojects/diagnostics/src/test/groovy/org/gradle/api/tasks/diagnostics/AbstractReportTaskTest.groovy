@@ -17,11 +17,12 @@ package org.gradle.api.tasks.diagnostics
 
 import org.gradle.api.Project
 import org.gradle.api.internal.project.ProjectInternal
+import org.gradle.api.tasks.diagnostics.internal.ProjectDetails
 import org.gradle.api.tasks.diagnostics.internal.ReportRenderer
 import org.gradle.internal.logging.text.StyledTextOutput
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.gradle.util.TestUtil
-import org.gradle.util.WrapUtil
+import org.gradle.util.internal.WrapUtil
 import org.junit.Rule
 import spock.lang.Specification
 
@@ -33,8 +34,9 @@ class AbstractReportTaskTest extends Specification {
     private TestReportTask task
 
     @Rule
-    public TestNameTestDirectoryProvider tmpDir = TestNameTestDirectoryProvider.newInstance()
+    public TestNameTestDirectoryProvider tmpDir = TestNameTestDirectoryProvider.newInstance(getClass())
     private ProjectInternal project = TestUtil.create(tmpDir).rootProject()
+    private ProjectDetails projectDetails = ProjectDetails.of(project)
 
     def setup() throws Exception {
         task = TestUtil.createTask(TestReportTask.class, project)
@@ -50,9 +52,9 @@ class AbstractReportTaskTest extends Specification {
         then:
         1 * renderer.setClientMetaData(_)
         1 * renderer.setOutput(_ as StyledTextOutput)
-        1 * renderer.startProject(project)
+        1 * renderer.startProject(projectDetails)
         1 * generator.run()
-        1 * renderer.completeProject(project)
+        1 * renderer.completeProject(projectDetails)
         1 * renderer.complete()
     }
 
@@ -66,9 +68,9 @@ class AbstractReportTaskTest extends Specification {
         then:
         1 * renderer.setClientMetaData(_)
         1 * renderer.setOutputFile(file)
-        1 * renderer.startProject(project)
+        1 * renderer.startProject(projectDetails)
         1 * generator.run()
-        1 * renderer.completeProject(project)
+        1 * renderer.completeProject(projectDetails)
         1 * renderer.complete()
     }
 
@@ -84,13 +86,15 @@ class AbstractReportTaskTest extends Specification {
         1 * renderer.setClientMetaData(_)
         1 * renderer.setOutput(_ as StyledTextOutput)
         [project, child1, child2].each {
-            1 * renderer.startProject(it)
+            final ProjectDetails p = ProjectDetails.of(it)
+            1 * renderer.startProject(p)
             1 * generator.run()
-            1 * renderer.completeProject(it)
+            1 * renderer.completeProject(p)
         }
         1 * renderer.complete()
     }
 
+    @SuppressWarnings('GrDeprecatedAPIUsage')
     static class TestReportTask extends AbstractReportTask {
         private Runnable generator
         private ReportRenderer renderer

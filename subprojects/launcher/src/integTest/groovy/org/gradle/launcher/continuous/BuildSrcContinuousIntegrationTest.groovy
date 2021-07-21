@@ -16,7 +16,9 @@
 
 package org.gradle.launcher.continuous
 
-class BuildSrcContinuousIntegrationTest extends Java7RequiringContinuousIntegrationTest {
+import org.gradle.integtests.fixtures.AbstractContinuousIntegrationTest
+
+class BuildSrcContinuousIntegrationTest extends AbstractContinuousIntegrationTest {
 
     def setup() {
         file("buildSrc/src/main/groovy/Thing.groovy") << """

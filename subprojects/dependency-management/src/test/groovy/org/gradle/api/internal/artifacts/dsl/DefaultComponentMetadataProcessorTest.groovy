@@ -22,9 +22,8 @@ import org.gradle.api.artifacts.ComponentMetadataDetails
 import org.gradle.api.artifacts.ModuleIdentifier
 import org.gradle.api.internal.artifacts.DefaultImmutableModuleIdentifierFactory
 import org.gradle.api.internal.artifacts.DefaultModuleIdentifier
+import org.gradle.api.internal.artifacts.DependencyManagementTestUtil
 import org.gradle.api.internal.artifacts.MetadataResolutionContext
-import org.gradle.api.internal.artifacts.repositories.metadata.IvyMutableModuleMetadataFactory
-import org.gradle.api.internal.artifacts.repositories.metadata.MavenMutableModuleMetadataFactory
 import org.gradle.api.internal.artifacts.repositories.resolver.DependencyConstraintMetadataImpl
 import org.gradle.api.internal.artifacts.repositories.resolver.DirectDependencyMetadataImpl
 import org.gradle.api.internal.notations.ComponentIdentifierParserFactory
@@ -32,7 +31,7 @@ import org.gradle.api.internal.notations.DependencyMetadataNotationParser
 import org.gradle.api.internal.notations.ModuleIdentifierNotationConverter
 import org.gradle.api.specs.Specs
 import org.gradle.cache.CacheRepository
-import org.gradle.cache.internal.InMemoryCacheDecoratorFactory
+import org.gradle.cache.internal.DefaultInMemoryCacheDecoratorFactory
 import org.gradle.internal.action.DefaultConfigurableRule
 import org.gradle.internal.component.external.model.DefaultModuleComponentIdentifier
 import org.gradle.internal.component.external.model.ivy.DefaultMutableIvyModuleResolveMetadata
@@ -46,7 +45,7 @@ import org.gradle.internal.serialize.Serializer
 import org.gradle.internal.snapshot.ValueSnapshotter
 import org.gradle.internal.typeconversion.NotationParserBuilder
 import org.gradle.util.AttributeTestUtil
-import org.gradle.util.BuildCommencedTimeProvider
+import org.gradle.util.internal.BuildCommencedTimeProvider
 import org.gradle.util.SnapshotTestUtil
 import org.gradle.util.TestUtil
 import org.gradle.util.internal.SimpleMapInterner
@@ -57,7 +56,7 @@ class DefaultComponentMetadataProcessorTest extends Specification {
 
     private static final String GROUP = "group"
     private static final String MODULE = "module"
-    static def ruleActionAdapter = new DefaultRuleActionAdapter(new DefaultRuleActionValidator(Collections.emptyList()), "context")
+    static def ruleActionAdapter = new DefaultRuleActionAdapter(new DefaultRuleActionValidator(), "context")
     private static SpecRuleAction<ComponentMetadataDetails> rule1 = new SpecRuleAction(ruleActionAdapter.createFromAction(new Action<ComponentMetadataDetails>() {
         @Override
         void execute(ComponentMetadataDetails t) {
@@ -75,11 +74,11 @@ class DefaultComponentMetadataProcessorTest extends Specification {
     private static boolean rule2Executed
 
     MetadataResolutionContext context = Mock()
-    def executor = new ComponentMetadataRuleExecutor(Stub(CacheRepository), Stub(InMemoryCacheDecoratorFactory), Stub(ValueSnapshotter), new BuildCommencedTimeProvider(), Stub(Serializer))
+    def executor = new ComponentMetadataRuleExecutor(Stub(CacheRepository), Stub(DefaultInMemoryCacheDecoratorFactory), Stub(ValueSnapshotter), Stub(BuildCommencedTimeProvider), Stub(Serializer))
     def instantiator = TestUtil.instantiatorFactory().decorateLenient()
     def stringInterner = SimpleMapInterner.notThreadSafe()
-    def mavenMetadataFactory = new MavenMutableModuleMetadataFactory(new DefaultImmutableModuleIdentifierFactory(), AttributeTestUtil.attributesFactory(), TestUtil.objectInstantiator(), TestUtil.featurePreviews())
-    def ivyMetadataFactory = new IvyMutableModuleMetadataFactory(new DefaultImmutableModuleIdentifierFactory(), AttributeTestUtil.attributesFactory())
+    def mavenMetadataFactory = DependencyManagementTestUtil.mavenMetadataFactory()
+    def ivyMetadataFactory = DependencyManagementTestUtil.ivyMetadataFactory()
     def dependencyMetadataNotationParser = DependencyMetadataNotationParser.parser(instantiator, DirectDependencyMetadataImpl, stringInterner)
     def dependencyConstraintMetadataNotationParser = DependencyMetadataNotationParser.parser(instantiator, DependencyConstraintMetadataImpl, stringInterner)
     def moduleIdentifierNotationParser = NotationParserBuilder.toType(ModuleIdentifier).converter(new ModuleIdentifierNotationConverter(new DefaultImmutableModuleIdentifierFactory())).toComposite();
@@ -95,7 +94,7 @@ class DefaultComponentMetadataProcessorTest extends Specification {
     }
 
     def "does nothing when no rules registered"() {
-        def processor = new DefaultComponentMetadataProcessor(metadataRuleContainer, instantiator, dependencyMetadataNotationParser, dependencyConstraintMetadataNotationParser, componentIdentifierNotationParser, AttributeTestUtil.attributesFactory(), executor, context)
+        def processor = new DefaultComponentMetadataProcessor(metadataRuleContainer, instantiator, dependencyMetadataNotationParser, dependencyConstraintMetadataNotationParser, componentIdentifierNotationParser, AttributeTestUtil.attributesFactory(), executor, DependencyManagementTestUtil.platformSupport(), context)
         def metadata = ivyMetadata().asImmutable()
 
         expect:
@@ -107,7 +106,7 @@ class DefaultComponentMetadataProcessorTest extends Specification {
         context.injectingInstantiator >> instantiator
         String notation = "${GROUP}:${MODULE}"
         addRuleForModule(notation)
-        def processor = new DefaultComponentMetadataProcessor(metadataRuleContainer, instantiator, dependencyMetadataNotationParser, dependencyConstraintMetadataNotationParser, componentIdentifierNotationParser, AttributeTestUtil.attributesFactory(), executor, context)
+        def processor = new DefaultComponentMetadataProcessor(metadataRuleContainer, instantiator, dependencyMetadataNotationParser, dependencyConstraintMetadataNotationParser, componentIdentifierNotationParser, AttributeTestUtil.attributesFactory(), executor, DependencyManagementTestUtil.platformSupport(), context)
 
 
         when:
@@ -123,7 +122,7 @@ class DefaultComponentMetadataProcessorTest extends Specification {
         String notation = "${GROUP}:${MODULE}"
         addRuleForModuleWithParams(notation, "foo", 42L)
 
-        def processor = new DefaultComponentMetadataProcessor(metadataRuleContainer, instantiator, dependencyMetadataNotationParser, dependencyConstraintMetadataNotationParser, componentIdentifierNotationParser, AttributeTestUtil.attributesFactory(), executor, context)
+        def processor = new DefaultComponentMetadataProcessor(metadataRuleContainer, instantiator, dependencyMetadataNotationParser, dependencyConstraintMetadataNotationParser, componentIdentifierNotationParser, AttributeTestUtil.attributesFactory(), executor, DependencyManagementTestUtil.platformSupport(), context)
 
         when:
         processor.processMetadata(ivyMetadata().asImmutable())
@@ -134,7 +133,7 @@ class DefaultComponentMetadataProcessorTest extends Specification {
     }
 
     def "processing fails when status is not present in status scheme"() {
-        def processor = new DefaultComponentMetadataProcessor(metadataRuleContainer, instantiator, dependencyMetadataNotationParser, dependencyConstraintMetadataNotationParser, componentIdentifierNotationParser, AttributeTestUtil.attributesFactory(), executor, context)
+        def processor = new DefaultComponentMetadataProcessor(metadataRuleContainer, instantiator, dependencyMetadataNotationParser, dependencyConstraintMetadataNotationParser, componentIdentifierNotationParser, AttributeTestUtil.attributesFactory(), executor, DependencyManagementTestUtil.platformSupport(), context)
         def metadata = ivyMetadata()
         metadata.status = "green"
         metadata.statusScheme = ["alpha", "beta"]
@@ -159,7 +158,7 @@ class DefaultComponentMetadataProcessorTest extends Specification {
                 addRuleForModule(notation)
             }
         }
-        def processor = new DefaultComponentMetadataProcessor(metadataRuleContainer, instantiator, dependencyMetadataNotationParser, dependencyConstraintMetadataNotationParser, componentIdentifierNotationParser, AttributeTestUtil.attributesFactory(), executor, context)
+        def processor = new DefaultComponentMetadataProcessor(metadataRuleContainer, instantiator, dependencyMetadataNotationParser, dependencyConstraintMetadataNotationParser, componentIdentifierNotationParser, AttributeTestUtil.attributesFactory(), executor, DependencyManagementTestUtil.platformSupport(), context)
 
 
         when:
@@ -187,7 +186,7 @@ class DefaultComponentMetadataProcessorTest extends Specification {
 
     private DefaultMutableIvyModuleResolveMetadata ivyMetadata() {
         def module = DefaultModuleIdentifier.newId("group", "module")
-        def metadata = ivyMetadataFactory.create(DefaultModuleComponentIdentifier.newId(module, "version"))
+        def metadata = ivyMetadataFactory.create(DefaultModuleComponentIdentifier.newId(module, "version"), [])
         metadata.status = "integration"
         metadata.statusScheme = ["integration", "release"]
         return metadata
@@ -195,7 +194,7 @@ class DefaultComponentMetadataProcessorTest extends Specification {
 
     private DefaultMutableMavenModuleResolveMetadata mavenMetadata() {
         def module = DefaultModuleIdentifier.newId("group", "module")
-        def metadata = mavenMetadataFactory.create(DefaultModuleComponentIdentifier.newId(module, "version"))
+        def metadata = mavenMetadataFactory.create(DefaultModuleComponentIdentifier.newId(module, "version"), [])
         metadata.status = "integration"
         metadata.statusScheme = ["integration", "release"]
         return metadata

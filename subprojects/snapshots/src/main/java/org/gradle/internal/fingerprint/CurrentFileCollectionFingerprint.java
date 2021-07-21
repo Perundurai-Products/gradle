@@ -16,15 +16,13 @@
 
 package org.gradle.internal.fingerprint;
 
-import org.gradle.internal.change.Change;
-import org.gradle.internal.change.ChangeVisitor;
 import org.gradle.internal.hash.HashCode;
 import org.gradle.internal.snapshot.FileSystemSnapshot;
 
 /**
  * A file collection fingerprint taken during this build.
  */
-public interface CurrentFileCollectionFingerprint extends FileCollectionFingerprint, FileSystemSnapshot {
+public interface CurrentFileCollectionFingerprint extends FileCollectionFingerprint {
     /**
      * Returns the combined hash of the contents of this {@link CurrentFileCollectionFingerprint}.
      */
@@ -32,13 +30,10 @@ public interface CurrentFileCollectionFingerprint extends FileCollectionFingerpr
 
     String getStrategyIdentifier();
 
-    boolean isEmpty();
-
     /**
-     * Visits the changes to file contents since the given fingerprint, subject to the given filters.
-     *
-     * @return Whether the {@link ChangeVisitor} is looking for further changes. See {@link ChangeVisitor#visitChange(Change)}.
+     * Returns the snapshot used to capture these fingerprints.
      */
-    boolean visitChangesSince(FileCollectionFingerprint oldFingerprint, String title, boolean includeAdded, ChangeVisitor visitor);
+    FileSystemSnapshot getSnapshot();
 
+    boolean isEmpty();
 }

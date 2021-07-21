@@ -18,32 +18,32 @@ package org.gradle.plugins.signing;
 import groovy.lang.Closure;
 import org.gradle.api.Action;
 import org.gradle.api.DomainObjectCollection;
-import org.gradle.api.Incubating;
 import org.gradle.api.InvalidUserDataException;
 import org.gradle.api.Project;
 import org.gradle.api.Task;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.artifacts.ConfigurationContainer;
 import org.gradle.api.artifacts.PublishArtifact;
-import org.gradle.api.artifacts.maven.MavenDeployment;
 import org.gradle.api.internal.ConventionMapping;
 import org.gradle.api.internal.IConventionAware;
-import org.gradle.api.internal.project.ProjectInternal;
+import org.gradle.api.model.ObjectFactory;
 import org.gradle.api.publish.Publication;
 import org.gradle.api.publish.PublicationArtifact;
 import org.gradle.api.publish.internal.PublicationInternal;
 import org.gradle.api.tasks.TaskContainer;
-import org.gradle.internal.Factory;
-import org.gradle.internal.reflect.Instantiator;
+import org.gradle.internal.Cast;
+import org.gradle.plugins.signing.internal.SignOperationInternal;
 import org.gradle.plugins.signing.signatory.Signatory;
 import org.gradle.plugins.signing.signatory.SignatoryProvider;
 import org.gradle.plugins.signing.signatory.internal.gnupg.GnupgSignatoryProvider;
+import org.gradle.plugins.signing.signatory.internal.pgp.InMemoryPgpSignatoryProvider;
 import org.gradle.plugins.signing.signatory.pgp.PgpSignatoryProvider;
 import org.gradle.plugins.signing.type.DefaultSignatureTypeProvider;
 import org.gradle.plugins.signing.type.SignatureType;
 import org.gradle.plugins.signing.type.SignatureTypeProvider;
-import org.gradle.util.DeferredUtil;
+import org.gradle.util.internal.DeferredUtil;
 
+import javax.annotation.Nullable;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -124,7 +124,7 @@ public class SigningExtension {
      *
      * <pre>
      * signing {
-     *   required = { gradle.taskGraph.hasTask("uploadArchives") }
+     *   required = { gradle.taskGraph.hasTask("publish") }
      * }
      * </pre>
      *
@@ -227,9 +227,46 @@ public class SigningExtension {
      * Use GnuPG agent to perform signing work.
      * @since 4.5
      */
-    @Incubating
     public void useGpgCmd() {
         setSignatories(new GnupgSignatoryProvider());
+    }
+
+    /**
+     * Use the supplied ascii-armored in-memory PGP secret key and password
+     * instead of reading it from a keyring.
+     *
+     * <pre><code>
+     * signing {
+     *     def secretKey = findProperty("mySigningKey")
+     *     def password = findProperty("mySigningPassword")
+     *     useInMemoryPgpKeys(secretKey, password)
+     * }
+     * </code></pre>
+     *
+     * @since 5.4
+     */
+    public void useInMemoryPgpKeys(@Nullable String defaultSecretKey, @Nullable String defaultPassword) {
+        setSignatories(new InMemoryPgpSignatoryProvider(defaultSecretKey, defaultPassword));
+    }
+
+    /**
+     * Use the supplied ascii-armored in-memory PGP secret key and password
+     * instead of reading it from a keyring.
+     * In case a signing subkey is provided, keyId must be provided as well.
+     *
+     * <pre><code>
+     * signing {
+     *     def keyId = findProperty("keyId")
+     *     def secretKey = findProperty("mySigningKey")
+     *     def password = findProperty("mySigningPassword")
+     *     useInMemoryPgpKeys(keyId, secretKey, password)
+     * }
+     * </code></pre>
+     *
+     * @since 6.0
+     */
+    public void useInMemoryPgpKeys(@Nullable String defaultKeyId, @Nullable String defaultSecretKey, @Nullable String defaultPassword) {
+        setSignatories(new InMemoryPgpSignatoryProvider(defaultKeyId, defaultSecretKey, defaultPassword));
     }
 
     /**
@@ -249,16 +286,19 @@ public class SigningExtension {
 
         ConventionMapping conventionMapping = ((IConventionAware) spec).getConventionMapping();
         conventionMapping.map("signatory", new Callable<Signatory>() {
+            @Override
             public Signatory call() {
                 return getSignatory();
             }
         });
         conventionMapping.map("signatureType", new Callable<SignatureType>() {
+            @Override
             public SignatureType call() {
                 return getSignatureType();
             }
         });
         conventionMapping.map("required", new Callable<Boolean>() {
+            @Override
             public Boolean call() {
                 return isRequired();
             }
@@ -280,6 +320,7 @@ public class SigningExtension {
         for (final Task taskToSign : tasks) {
             result.add(
                 createSignTaskFor(taskToSign.getName(), new Action<Sign>() {
+                    @Override
                     public void execute(Sign task) {
                         task.setDescription("Signs the archive produced by the '" + taskToSign.getName() + "' task.");
                         task.sign(taskToSign);
@@ -305,6 +346,7 @@ public class SigningExtension {
         for (final Configuration configurationToSign : configurations) {
             result.add(
                 createSignTaskFor(configurationToSign.getName(), new Action<Sign>() {
+                    @Override
                     public void execute(Sign task) {
                         task.setDescription("Signs all artifacts in the '" + configurationToSign.getName() + "' configuration.");
                         task.sign(configurationToSign);
@@ -327,7 +369,6 @@ public class SigningExtension {
      * @return the created tasks.
      * @since 4.8
      */
-    @Incubating
     public List<Sign> sign(Publication... publications) {
         List<Sign> result = new ArrayList<Sign>(publications.length);
         for (final Publication publication : publications) {
@@ -348,7 +389,6 @@ public class SigningExtension {
      * @return the created tasks.
      * @since 4.8
      */
-    @Incubating
     public List<Sign> sign(DomainObjectCollection<Publication> publications) {
         final List<Sign> result = new ArrayList<Sign>();
         publications.all(new Action<Publication>() {
@@ -362,7 +402,7 @@ public class SigningExtension {
             public void execute(Publication publication) {
                 TaskContainer tasks = project.getTasks();
                 Task task = tasks.getByName(determineSignTaskNameForPublication(publication));
-                tasks.remove(task);
+                task.setEnabled(false);
                 result.remove(task);
             }
         });
@@ -371,6 +411,7 @@ public class SigningExtension {
 
     private <T extends PublicationArtifact> Sign createSignTaskFor(final PublicationInternal<T> publicationToSign) {
         final Sign signTask = project.getTasks().create(determineSignTaskNameForPublication(publicationToSign), Sign.class, new Action<Sign>() {
+            @Override
             public void execute(Sign task) {
                 task.setDescription("Signs all artifacts in the '" + publicationToSign.getName() + "' publication.");
                 task.sign(publicationToSign);
@@ -378,18 +419,15 @@ public class SigningExtension {
         });
         final Map<Signature, T> artifacts = new HashMap<Signature, T>();
         signTask.getSignatures().all(new Action<Signature>() {
+            @Override
             public void execute(final Signature signature) {
-                T artifact = publicationToSign.addDerivedArtifact((T) signature.getSource(), new Factory<File>() {
-                    @Override
-                    public File create() {
-                        return signature.getFile();
-                    }
-                });
+                T artifact = publicationToSign.addDerivedArtifact(Cast.uncheckedNonnullCast(signature.getSource()), new DefaultDerivedArtifactFile(signature, signTask));
                 artifact.builtBy(signTask);
                 artifacts.put(signature, artifact);
             }
         });
         signTask.getSignatures().whenObjectRemoved(new Action<Signature>() {
+            @Override
             public void execute(Signature signature) {
                 T artifact = artifacts.remove(signature);
                 publicationToSign.removeDerivedArtifact(artifact);
@@ -410,11 +448,13 @@ public class SigningExtension {
 
     protected Object addSignaturesToConfiguration(Sign task, final Configuration configuration) {
         task.getSignatures().all(new Action<Signature>() {
+            @Override
             public void execute(Signature sig) {
                 configuration.getArtifacts().add(sig);
             }
         });
         return task.getSignatures().whenObjectRemoved(new Action<Signature>() {
+            @Override
             public void execute(Signature sig) {
                 configuration.getArtifacts().remove(sig);
             }
@@ -432,6 +472,7 @@ public class SigningExtension {
      */
     public SignOperation sign(final PublishArtifact... publishArtifacts) {
         return doSignOperation(new Action<SignOperation>() {
+            @Override
             public void execute(SignOperation operation) {
                 operation.sign(publishArtifacts);
             }
@@ -449,6 +490,7 @@ public class SigningExtension {
      */
     public SignOperation sign(final File... files) {
         return doSignOperation(new Action<SignOperation>() {
+            @Override
             public void execute(SignOperation operation) {
                 operation.sign(files);
             }
@@ -467,6 +509,7 @@ public class SigningExtension {
      */
     public SignOperation sign(final String classifier, final File... files) {
         return doSignOperation(new Action<SignOperation>() {
+            @Override
             public void execute(SignOperation operation) {
                 operation.sign(classifier, files);
             }
@@ -487,82 +530,6 @@ public class SigningExtension {
         return doSignOperation(closure);
     }
 
-    /**
-     * Signs the POM artifact for the given Maven deployment.
-     *
-     * <p>You can use this method to sign the generated POM when publishing to a Maven repository with the Maven plugin. </p>
-     * <pre class='autoTested'>
-     * uploadArchives {
-     *   repositories {
-     *     mavenDeployer {
-     *       beforeDeployment { MavenDeployment deployment -&gt;
-     *         signing.signPom(deployment)
-     *       }
-     *     }
-     *   }
-     * }
-     * </pre>
-     * <p>You can optionally provide a configuration closure to fine tune the {@link SignOperation sign
-     * operation} for the POM.</p> <p> If {@link #isRequired()} is false and the signature cannot be generated (e.g. no configured signatory), this method will silently do nothing. That is, a
-     * signature for the POM file will not be uploaded.
-     * <p>
-     * <b>Note:</b> Signing the generated POM file generated by the Maven Publishing plugin is currently not supported. Future versions of Gradle might add this functionality.
-     *
-     * @param mavenDeployment The deployment to sign the POM of
-     * @param closure the configuration of the underlying {@link SignOperation sign operation} for the POM (optional)
-     * @return the generated signature artifact
-     */
-    public Signature signPom(final MavenDeployment mavenDeployment, final Closure closure) {
-        SignOperation signOperation = doSignOperation(new Action<SignOperation>() {
-            public void execute(SignOperation so) {
-                so.sign(mavenDeployment.getPomArtifact());
-                so.configure(closure);
-            }
-        });
-
-        Signature pomSignature = signOperation.getSingleSignature();
-        if (!pomSignature.getFile().exists()) {
-            // This means that the signature was not required and we couldn't generate the signature
-            // (most likely project.required == false and there is no signatory)
-            // So just noop
-            return null;
-        }
-
-        // Have to alter the "type" of the artifact to match what is published
-        // See https://issues.gradle.org/browse/GRADLE-1589
-        pomSignature.setType("pom." + pomSignature.getSignatureType().getExtension());
-        mavenDeployment.addArtifact(pomSignature);
-        return pomSignature;
-    }
-
-    /**
-     * Signs the POM artifact for the given Maven deployment.
-     *
-     * <p>You can use this method to sign the generated POM when publishing to a Maven repository with the Maven plugin. </p>
-     * <pre class='autoTested'>
-     * uploadArchives {
-     *   repositories {
-     *     mavenDeployer {
-     *       beforeDeployment { MavenDeployment deployment -&gt;
-     *         signing.signPom(deployment)
-     *       }
-     *     }
-     *   }
-     * }
-     * </pre>
-     * <p>You can optionally provide a configuration closure to fine tune the {@link SignOperation sign
-     * operation} for the POM.</p> <p> If {@link #isRequired()} is false and the signature cannot be generated (e.g. no configured signatory), this method will silently do nothing. That is, a
-     * signature for the POM file will not be uploaded.
-     * <p>
-     * <b>Note:</b> Signing the generated POM file generated by the Maven Publishing plugin is currently not supported. Future versions of Gradle might add this functionality.
-     *
-     * @param mavenDeployment The deployment to sign the POM of
-     * @return the generated signature artifact
-     */
-    public Signature signPom(MavenDeployment mavenDeployment) {
-        return signPom(mavenDeployment, null);
-    }
-
     protected SignOperation doSignOperation(final Closure setup) {
         return doSignOperation(new Action<SignOperation>() {
             @Override
@@ -573,15 +540,15 @@ public class SigningExtension {
     }
 
     protected SignOperation doSignOperation(Action<SignOperation> setup) {
-        SignOperation operation = instantiator().newInstance(SignOperation.class);
+        SignOperation operation = objectFactory().newInstance(SignOperationInternal.class);
         addSignatureSpecConventions(operation);
         setup.execute(operation);
         operation.execute();
         return operation;
     }
 
-    private Instantiator instantiator() {
-        return ((ProjectInternal) project).getServices().get(Instantiator.class);
+    private ObjectFactory objectFactory() {
+        return project.getObjects();
     }
 
     public SignatoryProvider getSignatories() {
@@ -590,5 +557,27 @@ public class SigningExtension {
 
     private Object force(Object maybeCallable) {
         return DeferredUtil.unpack(maybeCallable);
+    }
+
+    private static class DefaultDerivedArtifactFile implements PublicationInternal.DerivedArtifact {
+        private final Signature signature;
+        private final Sign signTask;
+
+        public DefaultDerivedArtifactFile(Signature signature, Sign signTask) {
+            this.signature = signature;
+            this.signTask = signTask;
+        }
+
+        @Override
+        public File create() {
+            return signature.getFile();
+        }
+
+        @Override
+        public boolean shouldBePublished() {
+            return signTask.isEnabled() &&
+                signTask.getOnlyIf().isSatisfiedBy(signTask) &&
+                create().exists();
+        }
     }
 }

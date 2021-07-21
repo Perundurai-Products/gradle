@@ -25,7 +25,7 @@ class BuildScriptClassPathIntegrationTest extends AbstractIntegrationSpec {
     def "script can use xerces without affecting that used for dependency resolution"() {
         buildFile << """
 buildscript {
-    ${jcenterRepository()}
+    ${mavenCentralRepository()}
     dependencies {
         classpath 'xerces:xercesImpl:2.9.1'
     }
@@ -34,15 +34,15 @@ plugins {
     id 'java'
 }
 
-${jcenterRepository()}
+${mavenCentralRepository()}
 
 dependencies {
-    compile "com.google.guava:guava:19.0"
+    implementation "com.google.guava:guava:19.0"
 }
 
 task show {
     doLast {
-        configurations.compile.files.each { println it }
+        configurations.runtimeClasspath.files.each { println it }
     }
 }
 """
@@ -55,7 +55,7 @@ task show {
     @NotYetImplemented
     @Ignore("Apparently sometimes the test passes on CI")
     def "doesn't cache the metaclass from previous execution if build script changes"() {
-        buildFile << '''
+        buildFile '''
 void bar() {
    println 'Original bar'
 }

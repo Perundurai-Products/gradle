@@ -20,9 +20,9 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.io.ByteStreams;
 import org.gradle.api.DefaultTask;
 import org.gradle.api.GradleException;
-import org.gradle.api.Incubating;
 import org.gradle.api.UncheckedIOException;
 import org.gradle.api.internal.file.FileLookup;
+import org.gradle.api.internal.file.FileOperations;
 import org.gradle.api.internal.file.FileResolver;
 import org.gradle.api.internal.plugins.StartScriptGenerator;
 import org.gradle.api.tasks.Input;
@@ -32,9 +32,10 @@ import org.gradle.api.tasks.TaskAction;
 import org.gradle.api.tasks.options.Option;
 import org.gradle.api.tasks.options.OptionValues;
 import org.gradle.internal.util.PropertiesUtils;
-import org.gradle.util.DistributionLocator;
 import org.gradle.util.GradleVersion;
-import org.gradle.util.WrapUtil;
+import org.gradle.util.internal.DistributionLocator;
+import org.gradle.util.internal.WrapUtil;
+import org.gradle.work.DisableCachingByDefault;
 import org.gradle.wrapper.GradleWrapperMain;
 import org.gradle.wrapper.Install;
 import org.gradle.wrapper.WrapperExecutor;
@@ -64,6 +65,7 @@ import java.util.Properties;
  * generates a small {@code gradle-wrapper.jar} bootstrap JAR file and properties file which should also be committed to
  * your VCS. The scripts delegates to this JAR.
  */
+@DisableCachingByDefault(because = "Updating the wrapper is not worth caching")
 public class Wrapper extends DefaultTask {
     public static final String DEFAULT_DISTRIBUTION_PARENT_NAME = Install.DEFAULT_DISTRIBUTION_PATH;
 
@@ -131,7 +133,7 @@ public class Wrapper extends DefaultTask {
         generator.setExitEnvironmentVar("GRADLE_EXIT_CONSOLE");
         generator.setAppNameSystemProperty("org.gradle.appname");
         generator.setScriptRelPath(unixScript.getName());
-        generator.setDefaultJvmOpts(ImmutableList.of("-Xmx64m"));
+        generator.setDefaultJvmOpts(ImmutableList.of("-Xmx64m", "-Xms64m"));
         generator.generateUnixScript(unixScript);
         generator.generateWindowsScript(getBatchScript());
     }
@@ -170,7 +172,7 @@ public class Wrapper extends DefaultTask {
      */
     @OutputFile
     public File getScriptFile() {
-        return getProject().file(scriptFile);
+        return getServices().get(FileOperations.class).file(scriptFile);
     }
 
     /**
@@ -203,7 +205,7 @@ public class Wrapper extends DefaultTask {
      */
     @OutputFile
     public File getJarFile() {
-        return getProject().file(jarFile);
+        return getServices().get(FileOperations.class).file(jarFile);
     }
 
     /**
@@ -352,7 +354,6 @@ public class Wrapper extends DefaultTask {
      *
      * @since 4.5
      */
-    @Incubating
     @Nullable
     @Optional
     @Input
@@ -371,7 +372,6 @@ public class Wrapper extends DefaultTask {
      *
      * @since 4.5
      */
-    @Incubating
     @Option(option = "gradle-distribution-sha256-sum", description = "The SHA-256 hash sum of the gradle distribution.")
     public void setDistributionSha256Sum(@Nullable String distributionSha256Sum) {
         this.distributionSha256Sum = distributionSha256Sum;

@@ -22,6 +22,7 @@ import org.gradle.api.initialization.ConfigurableIncludedBuild;
 import org.gradle.api.initialization.ProjectDescriptor;
 import org.gradle.api.initialization.Settings;
 import org.gradle.api.initialization.dsl.ScriptHandler;
+import org.gradle.api.initialization.resolve.DependencyResolutionManagement;
 import org.gradle.api.internal.FeaturePreviews;
 import org.gradle.api.internal.FeaturePreviews.Feature;
 import org.gradle.api.internal.GradleInternal;
@@ -33,15 +34,19 @@ import org.gradle.api.internal.plugins.DefaultObjectConfigurationAction;
 import org.gradle.api.internal.plugins.PluginManagerInternal;
 import org.gradle.api.internal.project.AbstractPluginAware;
 import org.gradle.api.internal.project.ProjectRegistry;
+import org.gradle.api.provider.ProviderFactory;
 import org.gradle.caching.configuration.BuildCacheConfiguration;
+import org.gradle.caching.configuration.internal.BuildCacheConfigurationInternal;
 import org.gradle.configuration.ScriptPluginFactory;
 import org.gradle.groovy.scripts.ScriptSource;
 import org.gradle.internal.Actions;
-import org.gradle.internal.resource.TextResourceLoader;
+import org.gradle.internal.deprecation.DeprecationLogger;
+import org.gradle.internal.management.DependencyResolutionManagementInternal;
+import org.gradle.internal.resource.TextUriResourceLoader;
 import org.gradle.internal.service.ServiceRegistry;
 import org.gradle.internal.service.scopes.ServiceRegistryFactory;
 import org.gradle.plugin.management.PluginManagementSpec;
-import org.gradle.util.SingleMessageLogger;
+import org.gradle.plugin.management.internal.PluginManagementSpecInternal;
 import org.gradle.vcs.SourceControl;
 
 import javax.inject.Inject;
@@ -50,7 +55,6 @@ import java.util.ArrayList;
 import java.util.List;
 
 public abstract class DefaultSettings extends AbstractPluginAware implements SettingsInternal {
-    public static final String DEFAULT_BUILD_SRC_DIR = "buildSrc";
     private ScriptSource settingsScript;
 
     private StartParameter startParameter;
@@ -59,29 +63,36 @@ public abstract class DefaultSettings extends AbstractPluginAware implements Set
 
     private DefaultProjectDescriptor rootProjectDescriptor;
 
-    private ProjectDescriptor defaultProjectDescriptor;
+    private DefaultProjectDescriptor defaultProjectDescriptor;
 
-    private GradleInternal gradle;
+    private final GradleInternal gradle;
 
-    private final ClassLoaderScope settingsClassLoaderScope;
-    private final ClassLoaderScope buildRootClassLoaderScope;
+    private final ClassLoaderScope classLoaderScope;
+    private final ClassLoaderScope baseClassLoaderScope;
     private final ScriptHandler scriptHandler;
     private final ServiceRegistry services;
 
-    private final List<IncludedBuildSpec> includedBuildSpecs = new ArrayList<IncludedBuildSpec>();
+    private final List<IncludedBuildSpec> includedBuildSpecs = new ArrayList<>();
+    private final DependencyResolutionManagementInternal dependencyResolutionManagement;
 
-    public DefaultSettings(ServiceRegistryFactory serviceRegistryFactory, GradleInternal gradle,
-                           ClassLoaderScope settingsClassLoaderScope, ClassLoaderScope buildRootClassLoaderScope, ScriptHandler settingsScriptHandler,
-                           File settingsDir, ScriptSource settingsScript, StartParameter startParameter) {
+    public DefaultSettings(ServiceRegistryFactory serviceRegistryFactory,
+                           GradleInternal gradle,
+                           ClassLoaderScope classLoaderScope,
+                           ClassLoaderScope baseClassLoaderScope,
+                           ScriptHandler settingsScriptHandler,
+                           File settingsDir,
+                           ScriptSource settingsScript,
+                           StartParameter startParameter) {
         this.gradle = gradle;
-        this.buildRootClassLoaderScope = buildRootClassLoaderScope;
+        this.classLoaderScope = classLoaderScope;
+        this.baseClassLoaderScope = baseClassLoaderScope;
         this.scriptHandler = settingsScriptHandler;
         this.settingsDir = settingsDir;
         this.settingsScript = settingsScript;
         this.startParameter = startParameter;
-        this.settingsClassLoaderScope = settingsClassLoaderScope;
-        services = serviceRegistryFactory.createFor(this);
-        rootProjectDescriptor = createProjectDescriptor(null, settingsDir.getName(), settingsDir);
+        this.services = serviceRegistryFactory.createFor(this);
+        this.rootProjectDescriptor = createProjectDescriptor(null, settingsDir.getName(), settingsDir);
+        this.dependencyResolutionManagement = services.get(DependencyResolutionManagementInternal.class);
     }
 
     @Override
@@ -89,6 +100,7 @@ public abstract class DefaultSettings extends AbstractPluginAware implements Set
         return "settings '" + rootProjectDescriptor.getName() + "'";
     }
 
+    @Override
     public GradleInternal getGradle() {
         return gradle;
     }
@@ -98,6 +110,7 @@ public abstract class DefaultSettings extends AbstractPluginAware implements Set
         return includedBuildSpecs;
     }
 
+    @Override
     public Settings getSettings() {
         return this;
     }
@@ -111,14 +124,17 @@ public abstract class DefaultSettings extends AbstractPluginAware implements Set
         return new DefaultProjectDescriptor(parent, name, dir, getProjectDescriptorRegistry(), getFileResolver());
     }
 
+    @Override
     public DefaultProjectDescriptor findProject(String path) {
         return getProjectDescriptorRegistry().getProject(path);
     }
 
+    @Override
     public DefaultProjectDescriptor findProject(File projectDir) {
         return getProjectDescriptorRegistry().getProject(projectDir);
     }
 
+    @Override
     public DefaultProjectDescriptor project(String path) {
         DefaultProjectDescriptor projectDescriptor = getProjectDescriptorRegistry().getProject(path);
         if (projectDescriptor == null) {
@@ -127,6 +143,7 @@ public abstract class DefaultSettings extends AbstractPluginAware implements Set
         return projectDescriptor;
     }
 
+    @Override
     public DefaultProjectDescriptor project(File projectDir) {
         DefaultProjectDescriptor projectDescriptor = getProjectDescriptorRegistry().getProject(projectDir);
         if (projectDescriptor == null) {
@@ -135,6 +152,7 @@ public abstract class DefaultSettings extends AbstractPluginAware implements Set
         return projectDescriptor;
     }
 
+    @Override
     public void include(String... projectPaths) {
         for (String projectPath : projectPaths) {
             String subPath = "";
@@ -152,6 +170,8 @@ public abstract class DefaultSettings extends AbstractPluginAware implements Set
         }
     }
 
+    @Override
+    @Deprecated
     public void includeFlat(String... projectNames) {
         for (String projectName : projectNames) {
             createProjectDescriptor(rootProjectDescriptor, projectName,
@@ -166,6 +186,7 @@ public abstract class DefaultSettings extends AbstractPluginAware implements Set
         return projectPath;
     }
 
+    @Override
     public ProjectDescriptor getRootProject() {
         return rootProjectDescriptor;
     }
@@ -174,18 +195,22 @@ public abstract class DefaultSettings extends AbstractPluginAware implements Set
         this.rootProjectDescriptor = rootProjectDescriptor;
     }
 
-    public ProjectDescriptor getDefaultProject() {
+    @Override
+    public DefaultProjectDescriptor getDefaultProject() {
         return defaultProjectDescriptor;
     }
 
-    public void setDefaultProject(ProjectDescriptor defaultProjectDescriptor) {
+    @Override
+    public void setDefaultProject(DefaultProjectDescriptor defaultProjectDescriptor) {
         this.defaultProjectDescriptor = defaultProjectDescriptor;
     }
 
+    @Override
     public File getRootDir() {
         return rootProjectDescriptor.getProjectDir();
     }
 
+    @Override
     public StartParameter getStartParameter() {
         return startParameter;
     }
@@ -194,6 +219,7 @@ public abstract class DefaultSettings extends AbstractPluginAware implements Set
         this.startParameter = startParameter;
     }
 
+    @Override
     public File getSettingsDir() {
         return settingsDir;
     }
@@ -202,6 +228,7 @@ public abstract class DefaultSettings extends AbstractPluginAware implements Set
         this.settingsDir = settingsDir;
     }
 
+    @Override
     public ScriptSource getSettingsScript() {
         return settingsScript;
     }
@@ -210,11 +237,24 @@ public abstract class DefaultSettings extends AbstractPluginAware implements Set
         this.settingsScript = settingsScript;
     }
 
+    @Override
+    @Inject
+    public ProviderFactory getProviders() {
+        // Decoration takes care of the implementation
+        throw new UnsupportedOperationException();
+    }
+
     @Inject
     public ProjectDescriptorRegistry getProjectDescriptorRegistry() {
         throw new UnsupportedOperationException();
     }
 
+    @Inject
+    public TextUriResourceLoader.Factory getTextUriResourceLoaderFactory() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     public ProjectRegistry<DefaultProjectDescriptor> getProjectRegistry() {
         return getProjectDescriptorRegistry();
     }
@@ -225,26 +265,29 @@ public abstract class DefaultSettings extends AbstractPluginAware implements Set
             getFileResolver(),
             getScriptPluginFactory(),
             getScriptHandlerFactory(),
-            getRootClassLoaderScope(),
-            getResourceLoader(),
+            baseClassLoaderScope,
+            getTextUriResourceLoaderFactory(),
             this);
     }
 
-    public ClassLoaderScope getRootClassLoaderScope() {
-        return buildRootClassLoaderScope;
+    @Override
+    public ClassLoaderScope getBaseClassLoaderScope() {
+        return baseClassLoaderScope;
     }
 
+    @Override
     public ClassLoaderScope getClassLoaderScope() {
-        return settingsClassLoaderScope;
+        return classLoaderScope;
     }
 
-    protected ServiceRegistry getServices() {
+    @Override
+    public File getBuildSrcDir() {
+        return new File(getSettingsDir(), BUILD_SRC);
+    }
+
+    @Override
+    public ServiceRegistry getServices() {
         return services;
-    }
-
-    @Inject
-    protected TextResourceLoader getResourceLoader() {
-        throw new UnsupportedOperationException();
     }
 
     @Inject
@@ -262,6 +305,7 @@ public abstract class DefaultSettings extends AbstractPluginAware implements Set
         throw new UnsupportedOperationException();
     }
 
+    @Override
     @Inject
     public PluginManagerInternal getPluginManager() {
         throw new UnsupportedOperationException();
@@ -269,13 +313,13 @@ public abstract class DefaultSettings extends AbstractPluginAware implements Set
 
     @Override
     public void includeBuild(Object rootProject) {
-        includeBuild(rootProject, Actions.<ConfigurableIncludedBuild>doNothing());
+        includeBuild(rootProject, Actions.doNothing());
     }
 
     @Override
     public void includeBuild(Object rootProject, Action<ConfigurableIncludedBuild> configuration) {
         File projectDir = getFileResolver().resolve(rootProject);
-        includedBuildSpecs.add(new IncludedBuildSpec(projectDir, configuration));
+        includedBuildSpecs.add(IncludedBuildSpec.includedBuild(projectDir, configuration));
     }
 
     @Override
@@ -285,13 +329,14 @@ public abstract class DefaultSettings extends AbstractPluginAware implements Set
 
     @Override
     @Inject
-    public BuildCacheConfiguration getBuildCache() {
+    public BuildCacheConfigurationInternal getBuildCache() {
         throw new UnsupportedOperationException();
     }
 
     @Override
     public void pluginManagement(Action<? super PluginManagementSpec> rule) {
         rule.execute(getPluginManagement());
+        includedBuildSpecs.addAll(((PluginManagementSpecInternal) getPluginManagement()).getIncludedBuilds());
     }
 
     @Override
@@ -317,7 +362,27 @@ public abstract class DefaultSettings extends AbstractPluginAware implements Set
         if (feature.isActive()) {
             services.get(FeaturePreviews.class).enableFeature(feature);
         } else {
-            SingleMessageLogger.nagUserOfDeprecated("enableFeaturePreview('" + feature.name() + "')", "The feature flag is no longer relevant, please remove it from your settings file.");
+            DeprecationLogger
+                .deprecate("enableFeaturePreview('" + feature.name() + "')")
+                .withAdvice("The feature flag is no longer relevant, please remove it from your settings file.")
+                .willBeRemovedInGradle8()
+                .withUserManual("feature_lifecycle", "feature_preview")
+                .nagUser();
         }
+    }
+
+    @Override
+    public void dependencyResolutionManagement(Action<? super DependencyResolutionManagement> dependencyResolutionConfiguration) {
+        dependencyResolutionConfiguration.execute(dependencyResolutionManagement);
+    }
+
+    @Override
+    public void preventFromFurtherMutation() {
+        dependencyResolutionManagement.preventFromFurtherMutation();
+    }
+
+    @Override
+    public DependencyResolutionManagementInternal getDependencyResolutionManagement() {
+        return dependencyResolutionManagement;
     }
 }

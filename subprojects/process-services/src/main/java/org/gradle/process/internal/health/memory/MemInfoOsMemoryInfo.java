@@ -39,7 +39,8 @@ public class MemInfoOsMemoryInfo implements OsMemoryInfo {
     }
 
     @Override
-    public OsMemoryStatus getOsSnapshot() {
+    public synchronized OsMemoryStatus getOsSnapshot() {
+        // NOTE: meminfoMatcher is _not_ thread safe and access needs to be limited to a single thread.
         List<String> meminfoOutputLines;
         try {
             meminfoOutputLines = Files.readLines(new File(MEMINFO_FILE_PATH), Charset.defaultCharset());
@@ -96,7 +97,7 @@ public class MemInfoOsMemoryInfo implements OsMemoryInfo {
         throw new UnsupportedOperationException("Unable to parse /proc/meminfo output to get system memory");
     }
 
-    private class Meminfo {
+    private static class Meminfo {
         private long total = -1;
         private long available = -1;
         private long free = -1;

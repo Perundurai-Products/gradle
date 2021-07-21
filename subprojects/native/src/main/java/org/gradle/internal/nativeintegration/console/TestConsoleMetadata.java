@@ -18,11 +18,8 @@ package org.gradle.internal.nativeintegration.console;
 
 public enum TestConsoleMetadata implements ConsoleMetaData {
     BOTH(true, true),
-    NEITHER(false, false),
     STDOUT_ONLY(true, false),
     STDERR_ONLY(false, true);
-
-    public static final String TEST_CONSOLE_PROPERTY = "org.gradle.internal.console.test-console";
 
     private final boolean attachedToStdout;
     private final boolean attachedToStderr;
@@ -44,15 +41,20 @@ public enum TestConsoleMetadata implements ConsoleMetaData {
 
     @Override
     public int getCols() {
-        return 0;
+        return 130;
     }
 
     @Override
     public int getRows() {
-        return 0;
+        return 40;
+    }
+
+    @Override
+    public boolean isWrapStreams() {
+        return false;
     }
 
     public String getCommandLineArgument() {
-        return "-D" + TEST_CONSOLE_PROPERTY + "=" + name();
+        return "-D" + TestOverrideConsoleDetector.TEST_CONSOLE_PROPERTY + "=" + name();
     }
 }

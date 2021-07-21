@@ -16,7 +16,6 @@
 package org.gradle.testing.jacoco.tasks;
 
 import org.gradle.api.Action;
-import org.gradle.api.Incubating;
 import org.gradle.api.Task;
 import org.gradle.api.file.ConfigurableFileCollection;
 import org.gradle.api.file.FileCollection;
@@ -30,6 +29,7 @@ import org.gradle.api.tasks.PathSensitive;
 import org.gradle.api.tasks.PathSensitivity;
 import org.gradle.api.tasks.TaskAction;
 import org.gradle.api.tasks.TaskCollection;
+import org.gradle.internal.deprecation.DeprecationLogger;
 import org.gradle.internal.jacoco.AntJacocoMerge;
 import org.gradle.testing.jacoco.plugins.JacocoTaskExtension;
 
@@ -38,7 +38,11 @@ import java.io.File;
 
 /**
  * Task to merge multiple execution data files into one.
+ *
+ * @deprecated The {@link JacocoReport} task accepts multiple execution files as an input. This task type provides
+ * duplicated functionality and will be removed in Gradle 8.0.
  */
+@Deprecated
 @CacheableTask
 public class JacocoMerge extends JacocoBase {
 
@@ -76,7 +80,6 @@ public class JacocoMerge extends JacocoBase {
      * @param destinationFile Destination file provider
      * @since 4.0
      */
-    @Incubating
     public void setDestinationFile(Provider<File> destinationFile) {
         this.destinationFile.set(destinationFile);
     }
@@ -88,6 +91,7 @@ public class JacocoMerge extends JacocoBase {
 
     @TaskAction
     public void merge() {
+        DeprecationLogger.deprecateTaskType(JacocoMerge.class, getPath()).replaceWith(JacocoReport.class).willBeRemovedInGradle8().withUpgradeGuideSection(7, "jacoco_merge").nagUser();
         new AntJacocoMerge(getAntBuilder()).execute(getJacocoClasspath(), getExecutionData(), getDestinationFile());
     }
 
@@ -125,12 +129,8 @@ public class JacocoMerge extends JacocoBase {
      *
      * @param tasks one or more tasks to merge
      */
+    @SuppressWarnings("unchecked")
     public void executionData(TaskCollection tasks) {
-        tasks.all(new Action<Task>() {
-            @Override
-            public void execute(Task task) {
-                executionData(task);
-            }
-        });
+        tasks.all((Action<Task>) task -> executionData(task));
     }
 }

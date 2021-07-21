@@ -18,6 +18,7 @@ package org.gradle.groovy.scripts
 
 import org.codehaus.groovy.control.CompilerConfiguration
 import org.gradle.api.internal.project.ProjectInternal
+import org.gradle.internal.resource.StringTextResource
 import org.gradle.internal.service.ServiceRegistry
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.gradle.util.TestUtil
@@ -26,7 +27,7 @@ import spock.lang.Specification
 
 class DefaultScriptTest extends Specification {
     @Rule
-    public final TestNameTestDirectoryProvider temporaryFolder = TestNameTestDirectoryProvider.newInstance()
+    public final TestNameTestDirectoryProvider temporaryFolder = TestNameTestDirectoryProvider.newInstance(getClass())
 
     def testApplyMetaData() {
         ServiceRegistry serviceRegistryMock = Mock(ServiceRegistry)
@@ -35,7 +36,7 @@ class DefaultScriptTest extends Specification {
         DefaultScript script = new GroovyShell(createBaseCompilerConfiguration()).parse(testScriptText)
         ProjectInternal testProject = TestUtil.create(temporaryFolder).rootProject()
         testProject.ext.custom = 'true'
-        script.setScriptSource(new StringScriptSource('script', '//'))
+        script.setScriptSource(new TextResourceScriptSource(new StringTextResource('script', '//')))
         script.init(testProject, serviceRegistryMock)
         script.run();
 

@@ -17,47 +17,44 @@ package org.gradle.api.tasks.bundling;
 
 import groovy.lang.Closure;
 import org.gradle.api.Action;
-import org.gradle.api.Transformer;
+import org.gradle.api.Incubating;
 import org.gradle.api.file.CopySpec;
+import org.gradle.api.file.DirectoryProperty;
 import org.gradle.api.file.FileCollection;
+import org.gradle.api.internal.file.copy.CopySpecInternal;
 import org.gradle.api.internal.file.copy.DefaultCopySpec;
-import org.gradle.api.specs.Spec;
+import org.gradle.api.internal.file.copy.RenamingCopyAction;
+import org.gradle.api.model.ObjectFactory;
 import org.gradle.api.tasks.Classpath;
 import org.gradle.api.tasks.InputFile;
 import org.gradle.api.tasks.Internal;
 import org.gradle.api.tasks.Optional;
 import org.gradle.api.tasks.PathSensitive;
 import org.gradle.api.tasks.PathSensitivity;
-import org.gradle.util.ConfigureUtil;
+import org.gradle.internal.Transformers;
+import org.gradle.util.internal.ConfigureUtil;
+import org.gradle.work.DisableCachingByDefault;
 
 import javax.annotation.Nullable;
+import javax.inject.Inject;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.concurrent.Callable;
 
+import static org.gradle.api.internal.lambdas.SerializableLambdas.spec;
+
 /**
  * Assembles a WAR archive.
  */
+@DisableCachingByDefault(because = "Not worth caching")
 public class War extends Jar {
     public static final String WAR_EXTENSION = "war";
-    private static final Spec<File> IS_DIRECTORY = new Spec<File>() {
-        @Override
-        public boolean isSatisfiedBy(File element) {
-            return element.isDirectory();
-        }
-    };
-    private static final Spec<File> IS_FILE = new Spec<File>() {
-        @Override
-        public boolean isSatisfiedBy(File element) {
-            return element.isFile();
-        }
-    };
 
     private File webXml;
     private FileCollection classpath;
     private final DefaultCopySpec webInf;
-
+    private final DirectoryProperty webAppDirectory;
 
     public War() {
         getArchiveExtension().set(WAR_EXTENSION);
@@ -65,42 +62,26 @@ public class War extends Jar {
         // Add these as separate specs, so they are not affected by the changes to the main spec
 
         webInf = (DefaultCopySpec) getRootSpec().addChildBeforeSpec(getMainSpec()).into("WEB-INF");
-        webInf.into("classes", new Action<CopySpec>() {
-            @Override
-            public void execute(CopySpec copySpec) {
-                copySpec.from(new Callable<Iterable<File>>() {
-                    public Iterable<File> call() {
-                        FileCollection classpath = getClasspath();
-                        return classpath != null ? classpath.filter(IS_DIRECTORY) : Collections.<File>emptyList();
-                    }
-                });
-            }
-        });
-        webInf.into("lib", new Action<CopySpec>() {
-            public void execute(CopySpec it) {
-                it.from(new Callable<Iterable<File>>() {
-                    public Iterable<File> call() {
-                        FileCollection classpath = getClasspath();
-                        return classpath != null ? classpath.filter(IS_FILE) : Collections.<File>emptyList();
-                    }
-                });
-            }
+        webInf.into("classes", spec -> spec.from((Callable<Iterable<File>>) () -> {
+            FileCollection classpath = getClasspath();
+            return classpath != null ? classpath.filter(spec(File::isDirectory)) : Collections.<File>emptyList();
+        }));
+        webInf.into("lib", spec -> spec.from((Callable<Iterable<File>>) () -> {
+            FileCollection classpath = getClasspath();
+            return classpath != null ? classpath.filter(spec(File::isFile)) : Collections.<File>emptyList();
+        }));
 
-        });
-        webInf.into("", new Action<CopySpec>() {
-            public void execute(CopySpec it) {
-                it.from(new Callable<File>() {
-                    public File call() {
-                        return getWebXml();
-                    }
-                });
-                it.rename(new Transformer<String, String>() {
-                    public String transform(String it) {
-                        return "web.xml";
-                    }
-                });
-            }
-        });
+        CopySpecInternal renameSpec = webInf.addChild();
+        renameSpec.into("");
+        renameSpec.from((Callable<File>) War.this::getWebXml);
+        renameSpec.appendCachingSafeCopyAction(new RenamingCopyAction(Transformers.constant("web.xml")));
+
+        webAppDirectory = getObjectFactory().directoryProperty();
+    }
+
+    @Inject
+    public ObjectFactory getObjectFactory() {
+        throw new UnsupportedOperationException();
     }
 
     @Internal
@@ -199,4 +180,19 @@ public class War extends Jar {
         this.webXml = webXml;
     }
 
+    /**
+     * Returns the app directory of the task. Added to the output web archive by default.
+     * <p>
+     * The {@code war} plugin sets the default value for all {@code War} tasks to {@code src/main/webapp} and adds it as a task input.
+     * <p>
+     * Note, that if the {@code war} plugin is not applied then this property is ignored. In that case, clients can manually set an app directory as a task input.
+     *
+     * @return The app directory.
+     * @since 7.1
+     */
+    @Incubating
+    @Internal
+    public DirectoryProperty getWebAppDirectory() {
+        return webAppDirectory;
+    }
 }

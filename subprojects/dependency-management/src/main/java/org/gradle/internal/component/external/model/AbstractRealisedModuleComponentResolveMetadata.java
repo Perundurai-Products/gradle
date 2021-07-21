@@ -28,11 +28,10 @@ import org.gradle.internal.Describables;
 import org.gradle.internal.DisplayName;
 import org.gradle.internal.component.model.ComponentArtifactMetadata;
 import org.gradle.internal.component.model.ConfigurationMetadata;
-import org.gradle.internal.component.model.ModuleSource;
+import org.gradle.internal.component.model.ModuleSources;
 import org.gradle.internal.component.model.VariantResolveMetadata;
 
 import javax.annotation.Nullable;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -56,8 +55,8 @@ public abstract class AbstractRealisedModuleComponentResolveMetadata extends Abs
         this.configurations = metadata.configurations;
     }
 
-    public AbstractRealisedModuleComponentResolveMetadata(AbstractRealisedModuleComponentResolveMetadata metadata, ModuleSource source) {
-        super(metadata, source);
+    public AbstractRealisedModuleComponentResolveMetadata(AbstractRealisedModuleComponentResolveMetadata metadata, ModuleSources sources, VariantDerivationStrategy derivationStrategy) {
+        super(metadata, sources, derivationStrategy);
         this.configurations = metadata.configurations;
     }
 
@@ -95,11 +94,11 @@ public abstract class AbstractRealisedModuleComponentResolveMetadata extends Abs
         if (variants.isEmpty()) {
             return maybeDeriveVariants();
         }
-        ImmutableList.Builder<ConfigurationMetadata> configurations = new ImmutableList.Builder<ConfigurationMetadata>();
+        ImmutableList.Builder<ConfigurationMetadata> configurations = new ImmutableList.Builder<>();
         for (ComponentVariant variant : variants) {
             configurations.add(new RealisedVariantBackedConfigurationMetadata(getId(), variant, getAttributes(), getAttributesFactory()));
         }
-        return Optional.<ImmutableList<? extends ConfigurationMetadata>>of(configurations.build());
+        return Optional.of(configurations.build());
     }
 
     protected static class NameOnlyVariantResolveMetadata implements VariantResolveMetadata {
@@ -115,6 +114,11 @@ public abstract class AbstractRealisedModuleComponentResolveMetadata extends Abs
         }
 
         @Override
+        public Identifier getIdentifier() {
+            return null;
+        }
+
+        @Override
         public DisplayName asDescribable() {
             throw new UnsupportedOperationException("NameOnlyVariantResolveMetadata cannot be used that way");
         }
@@ -125,13 +129,18 @@ public abstract class AbstractRealisedModuleComponentResolveMetadata extends Abs
         }
 
         @Override
-        public List<? extends ComponentArtifactMetadata> getArtifacts() {
+        public ImmutableList<? extends ComponentArtifactMetadata> getArtifacts() {
             throw new UnsupportedOperationException("NameOnlyVariantResolveMetadata cannot be used that way");
         }
 
         @Override
         public CapabilitiesMetadata getCapabilities() {
             throw new UnsupportedOperationException("NameOnlyVariantResolveMetadata cannot be used that way");
+        }
+
+        @Override
+        public boolean isExternalVariant() {
+            return false;
         }
     }
 
@@ -144,11 +153,13 @@ public abstract class AbstractRealisedModuleComponentResolveMetadata extends Abs
         private final ImmutableList<? extends File> files;
         private final ImmutableCapabilities capabilities;
         private final ImmutableList<GradleDependencyMetadata> dependencyMetadata;
+        private final boolean externalVariant;
 
         public ImmutableRealisedVariantImpl(ModuleComponentIdentifier componentId, String name, ImmutableAttributes attributes,
-                                     ImmutableList<? extends Dependency> dependencies, ImmutableList<? extends DependencyConstraint> dependencyConstraints,
-                                     ImmutableList<? extends File> files, ImmutableCapabilities capabilities,
-                                     List<GradleDependencyMetadata> dependencyMetadata) {
+                                            ImmutableList<? extends Dependency> dependencies, ImmutableList<? extends DependencyConstraint> dependencyConstraints,
+                                            ImmutableList<? extends File> files, ImmutableCapabilities capabilities,
+                                            List<GradleDependencyMetadata> dependencyMetadata,
+                                            boolean externalVariant) {
             this.componentId = componentId;
             this.name = name;
             this.attributes = attributes;
@@ -157,11 +168,17 @@ public abstract class AbstractRealisedModuleComponentResolveMetadata extends Abs
             this.files = files;
             this.capabilities = capabilities;
             this.dependencyMetadata = ImmutableList.copyOf(dependencyMetadata);
+            this.externalVariant = externalVariant;
         }
 
         @Override
         public String getName() {
             return name;
+        }
+
+        @Override
+        public Identifier getIdentifier() {
+            return null;
         }
 
         @Override
@@ -199,12 +216,17 @@ public abstract class AbstractRealisedModuleComponentResolveMetadata extends Abs
         }
 
         @Override
-        public List<? extends ComponentArtifactMetadata> getArtifacts() {
-            List<ComponentArtifactMetadata> artifacts = new ArrayList<ComponentArtifactMetadata>(files.size());
+        public ImmutableList<? extends ComponentArtifactMetadata> getArtifacts() {
+            ImmutableList.Builder<ComponentArtifactMetadata> artifacts = new ImmutableList.Builder<>();
             for (ComponentVariant.File file : files) {
                 artifacts.add(new UrlBackedArtifactMetadata(componentId, file.getName(), file.getUri()));
             }
-            return artifacts;
+            return artifacts.build();
+        }
+
+        @Override
+        public boolean isExternalVariant() {
+            return externalVariant;
         }
 
         @Override
@@ -222,7 +244,8 @@ public abstract class AbstractRealisedModuleComponentResolveMetadata extends Abs
                 && Objects.equal(attributes, that.attributes)
                 && Objects.equal(dependencies, that.dependencies)
                 && Objects.equal(dependencyConstraints, that.dependencyConstraints)
-                && Objects.equal(files, that.files);
+                && Objects.equal(files, that.files)
+                && externalVariant == that.externalVariant;
         }
 
         @Override
@@ -232,7 +255,8 @@ public abstract class AbstractRealisedModuleComponentResolveMetadata extends Abs
                 attributes,
                 dependencies,
                 dependencyConstraints,
-                files);
+                files,
+                externalVariant);
         }
     }
 

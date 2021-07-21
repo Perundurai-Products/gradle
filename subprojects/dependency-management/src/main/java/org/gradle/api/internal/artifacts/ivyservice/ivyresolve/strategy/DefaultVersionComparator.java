@@ -24,8 +24,13 @@ import java.util.Comparator;
  * @see StaticVersionComparator
  */
 public class DefaultVersionComparator implements VersionComparator {
-    private final Comparator<Version> baseComparator = new StaticVersionComparator();
+    private final Comparator<Version> baseComparator;
 
+    public DefaultVersionComparator() {
+        baseComparator = new StaticVersionComparator();
+    }
+
+    @Override
     public int compare(Versioned element1, Versioned element2) {
         Version version1 = element1.getVersion();
         Version version2 = element2.getVersion();
@@ -36,4 +41,5 @@ public class DefaultVersionComparator implements VersionComparator {
     public Comparator<Version> asVersionComparator() {
         return baseComparator;
     }
+
 }

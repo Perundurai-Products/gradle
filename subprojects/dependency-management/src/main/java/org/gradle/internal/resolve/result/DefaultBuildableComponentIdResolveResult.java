@@ -36,24 +36,29 @@ public class DefaultBuildableComponentIdResolveResult extends DefaultResourceAwa
     private ImmutableSet.Builder<RejectedVersion> rejections;
     private Object mark;
 
+    @Override
     public boolean hasResult() {
         return id != null || failure != null;
     }
 
+    @Override
     public ModuleVersionResolveException getFailure() {
         return failure;
     }
 
+    @Override
     public ComponentIdentifier getId() {
         assertResolved();
         return id;
     }
 
+    @Override
     public ModuleVersionIdentifier getModuleVersionId() {
         assertResolved();
         return moduleVersionId;
     }
 
+    @Override
     public ComponentResolveMetadata getMetadata() {
         assertResolved();
         return metadata;
@@ -64,6 +69,7 @@ public class DefaultBuildableComponentIdResolveResult extends DefaultResourceAwa
         return rejected;
     }
 
+    @Override
     public void resolved(ComponentIdentifier id, ModuleVersionIdentifier moduleVersionIdentifier) {
         reset();
         this.id = id;
@@ -76,11 +82,13 @@ public class DefaultBuildableComponentIdResolveResult extends DefaultResourceAwa
         rejected = true;
     }
 
+    @Override
     public void resolved(ComponentResolveMetadata metadata) {
         resolved(metadata.getId(), metadata.getModuleVersionId());
         this.metadata = metadata;
     }
 
+    @Override
     public void failed(ModuleVersionResolveException failure) {
         reset();
         this.failure = failure;
@@ -92,7 +100,7 @@ public class DefaultBuildableComponentIdResolveResult extends DefaultResourceAwa
             return;
         }
         if (this.unmatchedVersions == null) {
-            this.unmatchedVersions = new ImmutableSet.Builder<String>();
+            this.unmatchedVersions = new ImmutableSet.Builder<>();
         }
         this.unmatchedVersions.addAll(unmatchedVersions);
     }
@@ -103,7 +111,7 @@ public class DefaultBuildableComponentIdResolveResult extends DefaultResourceAwa
             return;
         }
         if (this.rejections == null) {
-            this.rejections = new ImmutableSet.Builder<RejectedVersion>();
+            this.rejections = new ImmutableSet.Builder<>();
         }
         this.rejections.addAll(rejections);
     }

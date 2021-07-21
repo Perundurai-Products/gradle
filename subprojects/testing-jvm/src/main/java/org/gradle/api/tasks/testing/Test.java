@@ -20,16 +20,14 @@ import com.google.common.collect.Lists;
 import groovy.lang.Closure;
 import org.gradle.StartParameter;
 import org.gradle.api.Action;
-import org.gradle.api.Incubating;
 import org.gradle.api.JavaVersion;
 import org.gradle.api.NonNullApi;
+import org.gradle.api.file.ConfigurableFileCollection;
 import org.gradle.api.file.FileCollection;
 import org.gradle.api.file.FileTree;
 import org.gradle.api.file.FileTreeElement;
 import org.gradle.api.internal.DocumentationRegistry;
 import org.gradle.api.internal.classpath.ModuleRegistry;
-import org.gradle.api.internal.file.FileResolver;
-import org.gradle.api.internal.initialization.loadercache.ClassLoaderCache;
 import org.gradle.api.internal.tasks.testing.JvmTestExecutionSpec;
 import org.gradle.api.internal.tasks.testing.TestExecuter;
 import org.gradle.api.internal.tasks.testing.TestFramework;
@@ -40,6 +38,10 @@ import org.gradle.api.internal.tasks.testing.junit.result.TestClassResult;
 import org.gradle.api.internal.tasks.testing.junit.result.TestResultSerializer;
 import org.gradle.api.internal.tasks.testing.junitplatform.JUnitPlatformTestFramework;
 import org.gradle.api.internal.tasks.testing.testng.TestNGTestFramework;
+import org.gradle.api.internal.tasks.testing.worker.TestWorker;
+import org.gradle.api.jvm.ModularitySpec;
+import org.gradle.api.model.ObjectFactory;
+import org.gradle.api.provider.Property;
 import org.gradle.api.specs.Spec;
 import org.gradle.api.tasks.CacheableTask;
 import org.gradle.api.tasks.Classpath;
@@ -47,6 +49,7 @@ import org.gradle.api.tasks.Input;
 import org.gradle.api.tasks.InputFiles;
 import org.gradle.api.tasks.Internal;
 import org.gradle.api.tasks.Nested;
+import org.gradle.api.tasks.Optional;
 import org.gradle.api.tasks.PathSensitive;
 import org.gradle.api.tasks.PathSensitivity;
 import org.gradle.api.tasks.SkipWhenEmpty;
@@ -56,20 +59,27 @@ import org.gradle.api.tasks.testing.junit.JUnitOptions;
 import org.gradle.api.tasks.testing.junitplatform.JUnitPlatformOptions;
 import org.gradle.api.tasks.testing.testng.TestNGOptions;
 import org.gradle.api.tasks.util.PatternFilterable;
+import org.gradle.api.tasks.util.PatternSet;
 import org.gradle.internal.Actions;
 import org.gradle.internal.Cast;
+import org.gradle.internal.Factory;
 import org.gradle.internal.actor.ActorFactory;
+import org.gradle.internal.jvm.DefaultModularitySpec;
+import org.gradle.internal.jvm.JavaModuleDetector;
+import org.gradle.internal.jvm.Jvm;
 import org.gradle.internal.jvm.UnsupportedJavaRuntimeException;
 import org.gradle.internal.jvm.inspection.JvmVersionDetector;
-import org.gradle.internal.operations.BuildOperationExecutor;
+import org.gradle.internal.scan.UsedByScanPlugin;
 import org.gradle.internal.time.Clock;
 import org.gradle.internal.work.WorkerLeaseRegistry;
+import org.gradle.jvm.toolchain.JavaLauncher;
 import org.gradle.process.CommandLineArgumentProvider;
+import org.gradle.process.JavaDebugOptions;
 import org.gradle.process.JavaForkOptions;
 import org.gradle.process.ProcessForkOptions;
-import org.gradle.process.internal.DefaultJavaForkOptions;
+import org.gradle.process.internal.JavaForkOptionsFactory;
 import org.gradle.process.internal.worker.WorkerProcessFactory;
-import org.gradle.util.ConfigureUtil;
+import org.gradle.util.internal.ConfigureUtil;
 
 import javax.annotation.Nullable;
 import javax.inject.Inject;
@@ -79,15 +89,21 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Callable;
 
-import static org.gradle.util.ConfigureUtil.configureUsing;
+import static com.google.common.base.Preconditions.checkState;
+import static org.gradle.util.internal.ConfigureUtil.configureUsing;
 
 /**
  * Executes JUnit (3.8.x, 4.x or 5.x) or TestNG tests. Test are always run in (one or more) separate JVMs.
+ *
+ * <p>
  * The sample below shows various configuration options.
  *
  * <pre class='autoTested'>
- * apply plugin: 'java' // adds 'test' task
+ * plugins {
+ *     id 'java' // adds 'test' task
+ * }
  *
  * test {
  *   // enable TestNG support (default is JUnit)
@@ -131,17 +147,19 @@ import static org.gradle.util.ConfigureUtil.configureUsing;
  * <pre>
  * gradle someTestTask --debug-jvm
  * </pre>
-
  */
 @NonNullApi
 @CacheableTask
 public class Test extends AbstractTestTask implements JavaForkOptions, PatternFilterable {
 
-    private final DefaultJavaForkOptions forkOptions;
+    private final JavaForkOptions forkOptions;
+    private final ModularitySpec modularity;
+    private final Property<JavaLauncher> javaLauncher;
 
     private FileCollection testClassesDirs;
-    private PatternFilterable patternSet;
+    private final PatternFilterable patternSet;
     private FileCollection classpath;
+    private final ConfigurableFileCollection stableClasspath;
     private TestFramework testFramework;
     private boolean scanForTestClasses = true;
     private long forkEvery;
@@ -149,18 +167,30 @@ public class Test extends AbstractTestTask implements JavaForkOptions, PatternFi
     private TestExecuter<JvmTestExecutionSpec> testExecuter;
 
     public Test() {
-        patternSet = getFileResolver().getPatternSetFactory().create();
-        forkOptions = new DefaultJavaForkOptions(getFileResolver());
+        patternSet = getPatternSetFactory().create();
+        classpath = getObjectFactory().fileCollection();
+        // Create a stable instance to represent the classpath, that takes care of conventions and mutations applied to the property
+        stableClasspath = getObjectFactory().fileCollection();
+        stableClasspath.from(new Callable<Object>() {
+            @Override
+            public Object call() {
+                return getClasspath();
+            }
+        });
+        forkOptions = getForkOptionsFactory().newDecoratedJavaForkOptions();
         forkOptions.setEnableAssertions(true);
+        forkOptions.setExecutable(null);
+        modularity = getObjectFactory().newInstance(DefaultModularitySpec.class);
+        javaLauncher = getObjectFactory().property(JavaLauncher.class);
     }
 
     @Inject
-    protected ActorFactory getActorFactory() {
+    protected ObjectFactory getObjectFactory() {
         throw new UnsupportedOperationException();
     }
 
     @Inject
-    protected ClassLoaderCache getClassLoaderCache() {
+    protected ActorFactory getActorFactory() {
         throw new UnsupportedOperationException();
     }
 
@@ -170,12 +200,22 @@ public class Test extends AbstractTestTask implements JavaForkOptions, PatternFi
     }
 
     @Inject
-    protected FileResolver getFileResolver() {
+    protected Factory<PatternSet> getPatternSetFactory() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Inject
+    protected JavaForkOptionsFactory getForkOptionsFactory() {
         throw new UnsupportedOperationException();
     }
 
     @Inject
     protected ModuleRegistry getModuleRegistry() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Inject
+    protected JavaModuleDetector getJavaModuleDetector() {
         throw new UnsupportedOperationException();
     }
 
@@ -220,7 +260,7 @@ public class Test extends AbstractTestTask implements JavaForkOptions, PatternFi
      */
     @Input
     public JavaVersion getJavaVersion() {
-        return getServices().get(JvmVersionDetector.class).getJavaVersion(getExecutable());
+        return getServices().get(JvmVersionDetector.class).getJavaVersion(getEffectiveExecutable());
     }
 
     /**
@@ -447,6 +487,23 @@ public class Test extends AbstractTestTask implements JavaForkOptions, PatternFi
         forkOptions.setDebug(enabled);
     }
 
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public JavaDebugOptions getDebugOptions() {
+        return forkOptions.getDebugOptions();
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void debugOptions(Action<JavaDebugOptions> action) {
+        forkOptions.debugOptions(action);
+    }
+
     /**
      * Enables fail fast behavior causing the task to fail on the first failed test.
      */
@@ -531,6 +588,7 @@ public class Test extends AbstractTestTask implements JavaForkOptions, PatternFi
     @Override
     public Test copyTo(ProcessForkOptions target) {
         forkOptions.copyTo(target);
+        copyToolchainAsExecutable(target);
         return this;
     }
 
@@ -540,22 +598,49 @@ public class Test extends AbstractTestTask implements JavaForkOptions, PatternFi
     @Override
     public Test copyTo(JavaForkOptions target) {
         forkOptions.copyTo(target);
+        copyToolchainAsExecutable(target);
         return this;
+    }
+
+    private void copyToolchainAsExecutable(ProcessForkOptions target) {
+        target.setExecutable(getEffectiveExecutable());
+    }
+
+    /**
+     * Returns the module path handling of this test task.
+     *
+     * @since 6.4
+     */
+    @Nested
+    public ModularitySpec getModularity() {
+        return modularity;
     }
 
     /**
      * {@inheritDoc}
+     *
      * @since 4.4
      */
     @Override
     protected JvmTestExecutionSpec createTestExecutionSpec() {
-        DefaultJavaForkOptions javaForkOptions = new DefaultJavaForkOptions(getFileResolver());
+        validateToolchainConfiguration();
+        JavaForkOptions javaForkOptions = getForkOptionsFactory().newJavaForkOptions();
         copyTo(javaForkOptions);
-        return new JvmTestExecutionSpec(getTestFramework(), getClasspath(), getCandidateClassFiles(), isScanForTestClasses(), getTestClassesDirs(), getPath(), getIdentityPath(), getForkEvery(), javaForkOptions, getMaxParallelForks(), getPreviousFailedTestClasses());
+        JavaModuleDetector javaModuleDetector = getJavaModuleDetector();
+        boolean testIsModule = javaModuleDetector.isModule(modularity.getInferModulePath().get(), getTestClassesDirs());
+        FileCollection classpath = javaModuleDetector.inferClasspath(testIsModule, stableClasspath);
+        FileCollection modulePath = javaModuleDetector.inferModulePath(testIsModule, stableClasspath);
+        return new JvmTestExecutionSpec(getTestFramework(), classpath, modulePath, getCandidateClassFiles(), isScanForTestClasses(), getTestClassesDirs(), getPath(), getIdentityPath(), getForkEvery(), javaForkOptions, getMaxParallelForks(), getPreviousFailedTestClasses());
+    }
+
+    private void validateToolchainConfiguration() {
+        if (javaLauncher.isPresent()) {
+            checkState(forkOptions.getExecutable() == null, "Must not use `executable` property on `Test` together with `javaLauncher` property");
+        }
     }
 
     private Set<String> getPreviousFailedTestClasses() {
-        TestResultSerializer serializer = new TestResultSerializer(getBinResultsDir());
+        TestResultSerializer serializer = new TestResultSerializer(getBinaryResultsDirectory().getAsFile().get());
         if (serializer.isHasResults()) {
             final Set<String> previousFailedTestClasses = new HashSet<String>();
             serializer.read(new Action<TestClassResult>() {
@@ -572,6 +657,7 @@ public class Test extends AbstractTestTask implements JavaForkOptions, PatternFi
         }
     }
 
+    @Override
     @TaskAction
     public void executeTests() {
         JavaVersion javaVersion = getJavaVersion();
@@ -582,6 +668,7 @@ public class Test extends AbstractTestTask implements JavaForkOptions, PatternFi
         if (getDebug()) {
             getLogger().info("Running tests for remote debugging.");
         }
+        forkOptions.systemProperty(TestWorker.WORKER_TMPDIR_SYS_PROPERTY, new File(getTemporaryDir(), "work"));
 
         try {
             super.executeTests();
@@ -595,7 +682,6 @@ public class Test extends AbstractTestTask implements JavaForkOptions, PatternFi
         if (testExecuter == null) {
             return new DefaultTestExecuter(getProcessBuilderFactory(), getActorFactory(), getModuleRegistry(),
                 getServices().get(WorkerLeaseRegistry.class),
-                getServices().get(BuildOperationExecutor.class),
                 getServices().get(StartParameter.class).getMaxWorkerCount(),
                 getServices().get(Clock.class),
                 getServices().get(DocumentationRegistry.class),
@@ -723,7 +809,9 @@ public class Test extends AbstractTestTask implements JavaForkOptions, PatternFi
      *
      * Typically, this would be configured to use the output of a source set:
      * <pre class='autoTested'>
-     * apply plugin: 'java'
+     * plugins {
+     *     id 'java'
+     * }
      *
      * sourceSets {
      *    integrationTest {
@@ -848,7 +936,7 @@ public class Test extends AbstractTestTask implements JavaForkOptions, PatternFi
         this.testFramework = testFramework;
 
         if (testFrameworkConfigure != null) {
-            testFrameworkConfigure.execute(Cast.<T>uncheckedCast(this.testFramework.getOptions()));
+            testFrameworkConfigure.execute(Cast.<T>uncheckedNonnullCast(this.testFramework.getOptions()));
         }
 
         return this.testFramework;
@@ -887,7 +975,6 @@ public class Test extends AbstractTestTask implements JavaForkOptions, PatternFi
      *
      * @since 4.6
      */
-    @Incubating
     public void useJUnitPlatform() {
         useJUnitPlatform(Actions.<JUnitPlatformOptions>doNothing());
     }
@@ -899,7 +986,6 @@ public class Test extends AbstractTestTask implements JavaForkOptions, PatternFi
      * @param testFrameworkConfigure An action used to configure the JUnit platform options.
      * @since 4.6
      */
-    @Incubating
     public void useJUnitPlatform(Action<? super JUnitPlatformOptions> testFrameworkConfigure) {
         useTestFramework(new JUnitPlatformTestFramework((DefaultTestFilter) getFilter()), testFrameworkConfigure);
     }
@@ -929,13 +1015,23 @@ public class Test extends AbstractTestTask implements JavaForkOptions, PatternFi
      * @since 3.5
      */
     public void useTestNG(Action<? super TestNGOptions> testFrameworkConfigure) {
-        useTestFramework(new TestNGTestFramework(this, (DefaultTestFilter) getFilter(), getInstantiator(), getClassLoaderCache()), testFrameworkConfigure);
+        useTestFramework(new TestNGTestFramework(this, stableClasspath, (DefaultTestFilter) getFilter(), getObjectFactory()), testFrameworkConfigure);
+    }
+
+    /**
+     * Returns the classpath to use to execute the tests.
+     *
+     * @since 6.6
+     */
+    @Classpath
+    protected FileCollection getStableClasspath() {
+        return stableClasspath;
     }
 
     /**
      * Returns the classpath to use to execute the tests.
      */
-    @Classpath
+    @Internal("captured by stableClasspath")
     public FileCollection getClasspath() {
         return classpath;
     }
@@ -958,17 +1054,29 @@ public class Test extends AbstractTestTask implements JavaForkOptions, PatternFi
     }
 
     /**
-     * Returns the maximum number of test classes to execute in a forked test process. The forked test process will be restarted when this limit is reached. The default value is 0 (no maximum).
+     * Returns the maximum number of test classes to execute in a forked test process. The forked test process will be restarted when this limit is reached.
      *
-     * @return The maximum number of test classes. Returns 0 when there is no maximum.
+     * <p>
+     * By default, Gradle automatically uses a separate JVM when executing tests.
+     * <ul>
+     *  <li>A value of <code>0</code> (no limit) means to reuse the test process for all test classes. This is the default.</li>
+     *  <li>A value of <code>1</code> means that a new test process is started for <b>every</b> test class. <b>This is very expensive.</b></li>
+     *  <li>A value of <code>N</code> means that a new test process is started after <code>N</code> test classes.</li>
+     * </ul>
+     * This property can have a large impact on performance due to the cost of stopping and starting each test process. It is unusual for this property to be changed from the default.
+     *
+     * @return The maximum number of test classes to execute in a test process. Returns 0 when there is no maximum.
      */
     @Internal
     public long getForkEvery() {
-        return forkEvery;
+        return getDebug() ? 0 : forkEvery;
     }
 
     /**
-     * Sets the maximum number of test classes to execute in a forked test process. Use null or 0 to use no maximum.
+     * Sets the maximum number of test classes to execute in a forked test process.
+     * <p>
+     * By default, Gradle automatically uses a separate JVM when executing tests, so changing this property is usually not necessary.
+     * </p>
      *
      * @param forkEvery The maximum number of test classes. Use null or 0 to specify no maximum.
      */
@@ -980,8 +1088,16 @@ public class Test extends AbstractTestTask implements JavaForkOptions, PatternFi
     }
 
     /**
-     * Returns the maximum number of forked test processes to execute in parallel. The default value is 1 (no parallel test execution).
-     * It cannot exceed the value of {@literal max-workers} for the current build.
+     * Returns the maximum number of test processes to start in parallel.
+     *
+     * <p>
+     * By default, Gradle executes a single test class at a time.
+     * <ul>
+     * <li>A value of <code>1</code> means to only execute a single test class in a single test process at a time. This is the default.</li>
+     * <li>A value of <code>N</code> means that up to <code>N</code> test processes will be started to execute test classes. <b>This can improve test execution time by running multiple test classes in parallel.</b></li>
+     * </ul>
+     *
+     * This property cannot exceed the value of {@literal max-workers} for the current build. Gradle will also limit the number of started test processes across all {@link Test} tasks.
      *
      * @return The maximum number of forked test processes.
      */
@@ -991,9 +1107,12 @@ public class Test extends AbstractTestTask implements JavaForkOptions, PatternFi
     }
 
     /**
-     * Sets the maximum number of forked test processes to execute in parallel. Set to 1 to disable parallel test execution.
+     * Sets the maximum number of test processes to start in parallel.
+     * <p>
+     * By default, Gradle executes a single test class at a time but allows multiple {@link Test} tasks to run in parallel.
+     * </p>
      *
-     * @param maxParallelForks The maximum number of forked test processes.
+     * @param maxParallelForks The maximum number of forked test processes. Use 1 to disable parallel test execution for this task.
      */
     public void setMaxParallelForks(int maxParallelForks) {
         if (maxParallelForks < 1) {
@@ -1029,7 +1148,29 @@ public class Test extends AbstractTestTask implements JavaForkOptions, PatternFi
      *
      * @since 4.2
      */
+    @UsedByScanPlugin("test-distribution")
     void setTestExecuter(TestExecuter<JvmTestExecutionSpec> testExecuter) {
         this.testExecuter = testExecuter;
     }
+
+    /**
+     * Configures the java executable to be used to run the tests.
+     *
+     * @since 6.7
+     */
+    @Nested
+    @Optional
+    public Property<JavaLauncher> getJavaLauncher() {
+        return javaLauncher;
+    }
+
+    private String getEffectiveExecutable() {
+        if (javaLauncher.isPresent()) {
+            // The below line is OK because it will only be exercised in the Gradle daemon and not in the worker running tests.
+            return javaLauncher.get().getExecutablePath().toString();
+        }
+        final String executable = getExecutable();
+        return executable == null ? Jvm.current().getJavaExecutable().getAbsolutePath() : executable;
+    }
+
 }

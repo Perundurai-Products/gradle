@@ -17,7 +17,6 @@
 package org.gradle.nativeplatform.test.xctest.plugins;
 
 import com.google.common.collect.Lists;
-import org.gradle.api.Incubating;
 import org.gradle.api.Plugin;
 import org.gradle.api.Project;
 import org.gradle.api.artifacts.Dependency;
@@ -29,6 +28,7 @@ import org.gradle.api.model.ObjectFactory;
 import org.gradle.api.provider.Provider;
 import org.gradle.api.provider.ProviderFactory;
 import org.gradle.api.provider.SetProperty;
+import org.gradle.api.tasks.Sync;
 import org.gradle.api.tasks.TaskContainer;
 import org.gradle.api.tasks.TaskProvider;
 import org.gradle.language.base.plugins.LifecycleBasePlugin;
@@ -36,14 +36,15 @@ import org.gradle.language.internal.NativeComponentFactory;
 import org.gradle.language.nativeplatform.internal.Dimensions;
 import org.gradle.language.nativeplatform.internal.Names;
 import org.gradle.language.nativeplatform.internal.toolchains.ToolChainSelector;
+import org.gradle.language.nativeplatform.tasks.UnexportMainSymbol;
 import org.gradle.language.swift.ProductionSwiftComponent;
 import org.gradle.language.swift.SwiftApplication;
 import org.gradle.language.swift.SwiftComponent;
 import org.gradle.language.swift.SwiftPlatform;
 import org.gradle.language.swift.internal.DefaultSwiftBinary;
+import org.gradle.language.swift.internal.DefaultSwiftPlatform;
 import org.gradle.language.swift.plugins.SwiftBasePlugin;
 import org.gradle.language.swift.tasks.SwiftCompile;
-import org.gradle.language.swift.tasks.UnexportMainSymbol;
 import org.gradle.model.internal.registry.ModelRegistry;
 import org.gradle.nativeplatform.TargetMachine;
 import org.gradle.nativeplatform.TargetMachineFactory;
@@ -64,7 +65,7 @@ import org.gradle.nativeplatform.toolchain.internal.NativeToolChainInternal;
 import org.gradle.nativeplatform.toolchain.internal.NativeToolChainRegistryInternal;
 import org.gradle.nativeplatform.toolchain.internal.PlatformToolProvider;
 import org.gradle.nativeplatform.toolchain.internal.xcode.MacOSSdkPlatformPathLocator;
-import org.gradle.util.GUtil;
+import org.gradle.util.internal.GUtil;
 
 import javax.inject.Inject;
 import java.io.File;
@@ -78,7 +79,6 @@ import static org.gradle.language.nativeplatform.internal.Dimensions.useHostAsDe
  *
  * @since 4.2
  */
-@Incubating
 public class XCTestConventionPlugin implements Plugin<Project> {
     private final MacOSSdkPlatformPathLocator sdkPlatformPathLocator;
     private final ToolChainSelector toolChainSelector;
@@ -120,6 +120,7 @@ public class XCTestConventionPlugin implements Plugin<Project> {
         final DefaultSwiftXCTestSuite testComponent = testSuite;
 
         testComponent.getTargetMachines().convention(useHostAsDefaultTargetMachine(targetMachineFactory));
+        testComponent.getSourceCompatibility().convention(testComponent.getTestedComponent().flatMap(it -> it.getSourceCompatibility()));
         final String mainComponentName = "main";
 
         project.getComponents().withType(ProductionSwiftComponent.class, component -> {
@@ -160,10 +161,11 @@ public class XCTestConventionPlugin implements Plugin<Project> {
                     providers.provider(() -> project.getGroup().toString()), providers.provider(() -> project.getVersion().toString()),
                     variantIdentity -> {
                         if (tryToBuildOnHost(variantIdentity)) {
-                            ToolChainSelector.Result<SwiftPlatform> result = toolChainSelector.select(SwiftPlatform.class, variantIdentity.getTargetMachine());
+                            testComponent.getSourceCompatibility().finalizeValue();
+                            ToolChainSelector.Result<SwiftPlatform> result = toolChainSelector.select(SwiftPlatform.class, new DefaultSwiftPlatform(variantIdentity.getTargetMachine(), testComponent.getSourceCompatibility().getOrNull()));
 
                             // Create test suite executable
-                            if (result.getTargetPlatform().getOperatingSystemFamily().isMacOs()) {
+                            if (result.getTargetPlatform().getTargetMachine().getOperatingSystemFamily().isMacOs()) {
                                 testComponent.addBundle(variantIdentity, result.getTargetPlatform(), result.getToolChain(), result.getPlatformToolProvider());
                             } else {
                                 testComponent.addExecutable(variantIdentity, result.getTargetPlatform(), result.getToolChain(), result.getPlatformToolProvider());
@@ -176,6 +178,10 @@ public class XCTestConventionPlugin implements Plugin<Project> {
     }
 
     private void configureTestSuiteBuildingTasks(final Project project, final DefaultSwiftXCTestBinary binary) {
+        // Overwrite the source to exclude `LinuxMain.swift`
+        SwiftCompile compile = binary.getCompileTask().get();
+        compile.getSource().setFrom(binary.getSwiftSource().getAsFileTree().matching(patterns -> patterns.include("**/*").exclude("**/LinuxMain.swift")));
+
         if (binary instanceof SwiftXCTestBundle) {
             TaskContainer tasks = project.getTasks();
             final Names names = binary.getNames();
@@ -190,7 +196,6 @@ public class XCTestConventionPlugin implements Plugin<Project> {
             // Platform specific arguments
             // TODO: Need to lazily configure compile task
             // TODO: Ultimately, this should be some kind of 3rd party dependency that's visible to dependency management.
-            SwiftCompile compile = binary.getCompileTask().get();
             compile.getCompilerArgs().addAll(project.provider(() -> {
                 File frameworkDir = new File(sdkPlatformPathLocator.find(), "Developer/Library/Frameworks");
                 return Arrays.asList("-parse-as-library", "-F" + frameworkDir.getAbsolutePath());
@@ -228,6 +233,17 @@ public class XCTestConventionPlugin implements Plugin<Project> {
         } else {
             DefaultSwiftXCTestExecutable executable = (DefaultSwiftXCTestExecutable) binary;
             executable.getRunScriptFile().set(executable.getInstallTask().flatMap(task -> task.getRunScriptFile()));
+
+            // Rename `LinuxMain.swift` to `main.swift` so the entry point is correctly detected by swiftc
+            if (binary.getTargetMachine().getOperatingSystemFamily().isLinux()) {
+                TaskProvider<Sync> renameLinuxMainTask = project.getTasks().register("renameLinuxMain", Sync.class, task -> {
+                    task.from(binary.getSwiftSource());
+                    task.into(project.provider(() -> task.getTemporaryDir()));
+                    task.include("LinuxMain.swift");
+                    task.rename(it -> "main.swift");
+                });
+                compile.getSource().from(project.files(renameLinuxMainTask).getAsFileTree().matching(patterns -> patterns.include("**/*.swift")));
+            }
         }
     }
 
@@ -244,11 +260,6 @@ public class XCTestConventionPlugin implements Plugin<Project> {
                 return;
             }
 
-            // If nothing was configured for the test suite source compatibility, use the tested component one.
-            if (testSuite.getSourceCompatibility().getOrNull() == null) {
-                testExecutable.getSourceCompatibility().set(testedBinary.getSourceCompatibility());
-            }
-
             // Setup the dependency on the main binary
             // This should all be replaced by a single dependency that points at some "testable" variants of the main binary
 
@@ -263,11 +274,10 @@ public class XCTestConventionPlugin implements Plugin<Project> {
             ConfigurableFileCollection testableObjects = project.files();
             if (testedComponent instanceof SwiftApplication) {
                 TaskProvider<UnexportMainSymbol> unexportMainSymbol = tasks.register("relocateMainForTest", UnexportMainSymbol.class, task -> {
-                    task.getOutputDirectory().set(project.getLayout().getBuildDirectory().dir("obj/main/for-test"));
+                    String dirName = ((DefaultSwiftBinary) testedBinary).getNames().getDirName();
+                    task.getOutputDirectory().set(project.getLayout().getBuildDirectory().dir("obj/for-test/" + dirName));
                     task.getObjects().from(testedBinary.getObjects());
                 });
-                // TODO: builtBy unnecessary?
-                testableObjects.builtBy(unexportMainSymbol);
                 testableObjects.from(unexportMainSymbol.map(task -> task.getRelocatedObjects()));
             } else {
                 testableObjects.from(testedBinary.getObjects());

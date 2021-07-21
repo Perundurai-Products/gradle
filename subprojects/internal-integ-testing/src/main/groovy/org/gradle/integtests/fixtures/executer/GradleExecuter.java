@@ -24,8 +24,11 @@ import org.gradle.integtests.fixtures.RichConsoleStyling;
 import org.gradle.internal.concurrent.Stoppable;
 import org.gradle.test.fixtures.file.TestDirectoryProvider;
 import org.gradle.test.fixtures.file.TestFile;
+import org.gradle.util.internal.TextUtil;
 
 import java.io.File;
+import java.io.IOException;
+import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.util.List;
 import java.util.Locale;
@@ -73,6 +76,7 @@ public interface GradleExecuter extends Stoppable {
      */
     GradleExecuter withEnvironmentVars(Map<String, ?> environment);
 
+    @Deprecated
     GradleExecuter usingSettingsFile(File settingsFile);
 
     GradleExecuter usingInitScript(File initScript);
@@ -85,6 +89,7 @@ public interface GradleExecuter extends Stoppable {
     /**
      * Uses the given build script
      */
+    @Deprecated
     GradleExecuter usingBuildScript(File buildScript);
 
     /**
@@ -120,6 +125,16 @@ public interface GradleExecuter extends Stoppable {
      * Sets a stream to use for writing to stdin.
      */
     GradleExecuter withStdinPipe(PipedOutputStream stdInPipe);
+
+    default GradleExecuter withStdIn(String input) {
+        return withStdinPipe(new PipedOutputStream() {
+            @Override
+            public void connect(PipedInputStream snk) throws IOException {
+                super.connect(snk);
+                write(TextUtil.toPlatformLineSeparators(input).getBytes());
+            }
+        });
+    }
 
     /**
      * Executes the requested build, asserting that the build succeeds. Resets the configuration of this executer.
@@ -185,9 +200,22 @@ public interface GradleExecuter extends Stoppable {
     GradleExecuter withNoExplicitNativeServicesDir();
 
     /**
-     * Disables the rendering of stack traces for deprecation logging.
+     * Enables the rendering of stack traces for deprecation logging.
      */
-    GradleExecuter withFullDeprecationStackTraceDisabled();
+    GradleExecuter withFullDeprecationStackTraceEnabled();
+
+    /**
+     * Downloads and sets up the JVM arguments for running the Gradle daemon with the file leak detector: https://file-leak-detector.kohsuke.org/
+     *
+     * NOTE: This requires running the test with JDK8 and the forking executer.
+     *
+     * This should not be checked-in on. This is only for local debugging.
+     *
+     * By default, this starts a HTTP server on port 19999, so you can observe which files are open. Passing any arguments disables this behavior.
+     *
+     * @param args the arguments to pass the file leak detector java agent
+     */
+    GradleExecuter withFileLeakDetection(String... args);
 
     /**
      * Specifies that the executer should only those JVM args explicitly requested using {@link #withBuildJvmOpts(String...)} and {@link #withCommandLineGradleOpts(String...)} (where appropriate) for
@@ -230,6 +258,22 @@ public interface GradleExecuter extends Stoppable {
      * @return this executer
      */
     GradleExecuter withDaemonBaseDir(File baseDir);
+
+    /**
+     * Sets the path to the read-only dependency cache
+     *
+     * @param cacheDir the path to the RO dependency cache
+     * @return this executer
+     */
+    GradleExecuter withReadOnlyCacheDir(File cacheDir);
+
+    /**
+     * Sets the path to the read-only dependency cache
+     *
+     * @param cacheDir the path to the RO dependency cache
+     * @return this executer
+     */
+    GradleExecuter withReadOnlyCacheDir(String cacheDir);
 
     /**
      * Returns the working space for any daemons used by the builds.
@@ -280,19 +324,39 @@ public interface GradleExecuter extends Stoppable {
      * or no warning is produced at all, the assertion fails.
      *
      * @see #expectDeprecationWarnings(int)
+     * @deprecated Use {@link #expectDeprecationWarning(String)} instead.
      */
+    @Deprecated
     GradleExecuter expectDeprecationWarning();
+
+    /**
+     * Expects exactly the given deprecation warning.
+     */
+    GradleExecuter expectDeprecationWarning(String warning);
+
+    /**
+     * Expects the given deprecation warning, allowing to pass documentation url with /current/ version and asserting against the actual current version instead.
+     */
+    GradleExecuter expectDocumentedDeprecationWarning(String warning);
 
     /**
      * Expects exactly the given number of deprecation warnings. If fewer or more warnings are produced during
      * the execution, the assertion fails.
+     *
+     * @deprecated Use {@link #expectDeprecationWarning(String)} instead.
      */
+    @Deprecated
     GradleExecuter expectDeprecationWarnings(int count);
 
     /**
      * Disable deprecation warning checks.
      */
     GradleExecuter noDeprecationChecks();
+
+    /**
+     * Disable crash daemon checks
+     */
+    GradleExecuter noDaemonCrashChecks();
 
     /**
      * Disables asserting that class loaders were not eagerly created, potentially leading to performance problems.
@@ -308,14 +372,6 @@ public interface GradleExecuter extends Stoppable {
      * An executer may decide to implicitly bump the logging level, unless this is called.
      */
     GradleExecuter noExtraLogging();
-
-    /**
-     * Requires that there is a real gradle distribution for the execution, which in-process execution does not.
-     *
-     * <p>Note: try to avoid using this method. It has some major drawbacks when it comes to development: 1. It requires a Gradle distribution or installation, and this will need to be rebuilt after
-     * each change in order to use the test, and 2. it requires that the build run in a different JVM, which makes it very difficult to debug.</p>
-     */
-    GradleExecuter requireGradleDistribution();
 
     /**
      * Configures that any daemons used by the execution are unique to the test.
@@ -423,7 +479,7 @@ public interface GradleExecuter extends Stoppable {
     GradleExecuter withConsole(ConsoleOutput consoleOutput);
 
     /**
-     * Executes the build with {@code "--warning-mode=none, summary, all"} argument.
+     * Executes the build with {@code "--warning-mode=none, summary, fail, all"} argument.
      *
      * @see WarningMode
      */
@@ -475,4 +531,11 @@ public interface GradleExecuter extends Stoppable {
     GradleExecuter withPluginRepositoryMirror();
 
     GradleExecuter ignoreMissingSettingsFile();
+
+    GradleExecuter ignoreCleanupAssertions();
+
+    GradleExecuter withToolchainDetectionEnabled();
+
+    GradleExecuter withToolchainDownloadEnabled();
+
 }

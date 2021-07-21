@@ -17,13 +17,13 @@ package org.gradle.reporting
 
 import org.gradle.internal.html.SimpleHtmlWriter
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
-import org.gradle.util.TextUtil
+import org.gradle.util.internal.TextUtil
 import org.junit.Rule
 import spock.lang.Specification
 
 class HtmlReportRendererTest extends Specification {
     @Rule
-    final TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
+    final TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider(getClass())
     final HtmlReportRenderer renderer = new HtmlReportRenderer()
 
     def "renders HTML to file encoded with UTF-8"() {

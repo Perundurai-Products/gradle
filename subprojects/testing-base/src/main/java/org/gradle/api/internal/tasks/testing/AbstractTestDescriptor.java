@@ -16,8 +16,9 @@
 
 package org.gradle.api.internal.tasks.testing;
 
-import javax.annotation.Nullable;
+import org.gradle.internal.scan.UsedByScanPlugin;
 
+@UsedByScanPlugin("test-distribution")
 public abstract class AbstractTestDescriptor implements TestDescriptorInternal {
     private final Object id;
     private final String name;
@@ -47,12 +48,6 @@ public abstract class AbstractTestDescriptor implements TestDescriptorInternal {
         return null;
     }
 
-    @Nullable
-    @Override
-    public Object getOwnerBuildOperationId() {
-        return null;
-    }
-
     @Override
     public String getDisplayName() {
         return getName();
@@ -63,8 +58,4 @@ public abstract class AbstractTestDescriptor implements TestDescriptorInternal {
         return getClassName();
     }
 
-    @Override
-    public boolean isRoot() {
-        return false;
-    }
 }

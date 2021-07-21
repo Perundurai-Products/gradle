@@ -16,69 +16,52 @@
 
 package org.gradle.tooling.internal.provider.runner
 
-import org.gradle.BuildListener
-import org.gradle.BuildResult
 import org.gradle.api.internal.GradleInternal
 import org.gradle.api.internal.StartParameterInternal
-import org.gradle.execution.ProjectConfigurer
-import org.gradle.initialization.BuildEventConsumer
-import org.gradle.internal.invocation.BuildController
-import org.gradle.internal.service.ServiceRegistry
+import org.gradle.internal.build.event.BuildEventSubscriptions
+import org.gradle.internal.buildtree.BuildTreeLifecycleController
 import org.gradle.tooling.internal.protocol.InternalBuildAction
 import org.gradle.tooling.internal.protocol.InternalBuildActionFailureException
 import org.gradle.tooling.internal.protocol.InternalBuildActionVersion2
-import org.gradle.tooling.internal.provider.BuildClientSubscriptions
-import org.gradle.tooling.internal.provider.ClientProvidedBuildAction
+import org.gradle.tooling.internal.provider.action.ClientProvidedBuildAction
 import org.gradle.tooling.internal.provider.serialization.PayloadSerializer
 import org.gradle.tooling.internal.provider.serialization.SerializedPayload
 import spock.lang.Specification
+
+import java.util.function.Function
 
 class ClientProvidedBuildActionRunnerTest extends Specification {
 
     def startParameter = Mock(StartParameterInternal)
     def action = Mock(SerializedPayload)
-    def clientSubscriptions = Mock(BuildClientSubscriptions)
-    def buildEventConsumer = Mock(BuildEventConsumer)
+    def clientSubscriptions = Mock(BuildEventSubscriptions)
     def payloadSerializer = Mock(PayloadSerializer)
-    def projectConfigurer = Mock(ProjectConfigurer)
-    BuildListener listener
-    def gradle = Stub(GradleInternal) {
-        addBuildListener(_) >> { BuildListener listener ->
-            this.listener = listener
-        }
-        getServices() >> Stub(ServiceRegistry) {
-            get(PayloadSerializer) >> payloadSerializer
-            get(ProjectConfigurer) >> projectConfigurer
-            get(BuildEventConsumer) >> buildEventConsumer
-        }
-    }
-    def buildController = Mock(BuildController) {
-        configure() >> {
-            listener.buildFinished(Stub(BuildResult) {
-                getFailure() >> null
-            })
-        }
-        getGradle() >> gradle
+    def gradle = Stub(GradleInternal)
+    def buildController = Mock(BuildTreeLifecycleController) {
+        getGradle() >> this.gradle
     }
     def clientProvidedBuildAction = new ClientProvidedBuildAction(startParameter, action, false /* isRunTasks */, clientSubscriptions)
-    def runner = new ClientProvidedBuildActionRunner()
+    def runner = new ClientProvidedBuildActionRunner(Stub(BuildControllerFactory), payloadSerializer)
 
     def "can run action and returns result when completed"() {
         given:
         def model = new Object()
+        def serialized = Stub(SerializedPayload)
         def internalAction = Mock(InternalBuildAction)
 
         when:
         def result = runner.run(clientProvidedBuildAction, buildController)
 
         then:
-        result.clientResult == model
+        result.clientResult == serialized
         result.buildFailure == null
         result.clientFailure == null
 
         and:
-        1 * internalAction.execute(_) >> model
         1 * payloadSerializer.deserialize(action) >> internalAction
+        1 * buildController.fromBuildModel(false, _) >> { Boolean b, Function function -> function.apply(gradle) }
+        1 * internalAction.execute(_) >> model
+        1 * payloadSerializer.serialize(model) >> serialized
     }
 
     def "can run action and reports failure"() {
@@ -97,13 +80,14 @@ class ClientProvidedBuildActionRunnerTest extends Specification {
 
         and:
         1 * payloadSerializer.deserialize(action) >> internalAction
+        1 * buildController.fromBuildModel(false, _) >> { Boolean b, Function function -> function.apply(gradle) }
         1 * internalAction.execute(_) >> { throw failure }
     }
 
     def "can run action and propagate build exception"() {
         given:
         def failure = new RuntimeException()
-        def buildController = Mock(BuildController)
+        def buildController = Mock(BuildTreeLifecycleController)
         def internalAction = Mock(InternalBuildAction)
 
         when:
@@ -117,7 +101,7 @@ class ClientProvidedBuildActionRunnerTest extends Specification {
         and:
         1 * payloadSerializer.deserialize(action) >> internalAction
         _ * buildController.gradle >> gradle
-        1 * buildController.configure() >> { throw failure }
+        1 * buildController.fromBuildModel(false, _) >> { throw failure }
     }
 
     def "can run tasks before run action"() {
@@ -128,24 +112,27 @@ class ClientProvidedBuildActionRunnerTest extends Specification {
         runner.run(clientProvidedBuildActionRunTasks, buildController)
 
         then:
-        1 * buildController.run()
+        1 * buildController.fromBuildModel(true, _) >> { Boolean b, Function function -> function.apply(gradle) }
     }
 
     def "can run action InternalActionVersion2"() {
         given:
         def model = new Object()
         def internalAction = Mock(InternalBuildActionVersion2)
+        def serializedResult = Stub(SerializedPayload)
 
         when:
         def result = runner.run(clientProvidedBuildAction, buildController)
 
         then:
-        result.clientResult == model
+        result.clientResult == serializedResult
         result.buildFailure == null
         result.clientFailure == null
 
         and:
-        1 * internalAction.execute(_) >> model
         1 * payloadSerializer.deserialize(action) >> internalAction
+        1 * buildController.fromBuildModel(false, _) >> { Boolean b, Function function -> function.apply(gradle) }
+        1 * internalAction.execute(_) >> model
+        1 * payloadSerializer.serialize(model) >> serializedResult
     }
 }

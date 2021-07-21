@@ -16,32 +16,37 @@
 
 package org.gradle.api.internal.tasks.compile
 
-import org.gradle.internal.jvm.JavaInfo
-import org.gradle.testing.internal.util.Specification
+import org.gradle.api.JavaVersion
+import org.gradle.internal.jvm.Jvm
 import org.gradle.util.Requires
 import org.gradle.util.TestPrecondition
+import spock.lang.Specification
+import spock.lang.Subject
 
 import javax.tools.JavaCompiler
 
 import static org.gradle.util.TestPrecondition.JDK
 
 class JdkToolsTest extends Specification {
+    @Subject
+    JdkTools current = new JdkTools(Jvm.current(), [])
+
     @Requires(JDK)
     def "can get java compiler"() {
-        def compiler = JdkTools.current().systemJavaCompiler
+        def compiler = current.systemJavaCompiler
 
         expect:
         compiler instanceof JavaCompiler
-        compiler.class == JdkTools.current().systemJavaCompiler.class
+        compiler.class == current.systemJavaCompiler.class
     }
 
-    @Requires(TestPrecondition.JDK8_OR_EARLIER)
     def "throws when no tools"() {
         when:
-        new JdkTools(Mock(JavaInfo) {
+        new JdkTools(Mock(Jvm) {
             getToolsJar() >> null
+            getJavaVersion() >> JavaVersion.VERSION_1_8
             getJavaHome() >> new File('.')
-        })
+        }, [])
 
         then:
         thrown IllegalStateException
@@ -53,9 +58,9 @@ class JdkToolsTest extends Specification {
         if (defaultCompilerClassAlreadyInjectedIntoExtensionClassLoader()) {
             throw new IllegalStateException()
         }
-        new JdkTools(Mock(JavaInfo) {
+        new JdkTools(Mock(Jvm) {
             getToolsJar() >> new File("/nothing")
-        }).systemJavaCompiler
+        }, []).systemJavaCompiler
 
         then:
         thrown IllegalStateException

@@ -49,9 +49,36 @@ public class Describables {
     }
 
     /**
-     * Returns a describable for an object that has a type and name.
+     * Returns a describable for a description and quoted value.
      */
-    public static DisplayName withTypeAndName(final String type, final String name) {
+    public static DisplayName quoted(final Object description, final Object value) {
+        return new AbstractDescribable() {
+            @Override
+            public String getCapitalizedDisplayName() {
+                StringBuilder builder = new StringBuilder(64);
+                appendCapDisplayName(description, builder);
+                builder.append(" '");
+                appendDisplayName(value, builder);
+                builder.append('\'');
+                return builder.toString();
+            }
+
+            @Override
+            public String getDisplayName() {
+                StringBuilder builder = new StringBuilder(64);
+                appendDisplayName(description, builder);
+                builder.append(" '");
+                appendDisplayName(value, builder);
+                builder.append('\'');
+                return builder.toString();
+            }
+        };
+    }
+
+    /**
+     * Returns a describable for an object that has a type and name. Quotes are added around the name.
+     */
+    public static DisplayName withTypeAndName(final Object type, final String name) {
         return new AbstractDescribable() {
             @Override
             public String getCapitalizedDisplayName() {
@@ -66,8 +93,9 @@ public class Describables {
             }
 
             private StringBuilder asMutable() {
-                StringBuilder result = new StringBuilder(type.length() + name.length() + 3);
-                result.append(type);
+                String typeStr = type.toString();
+                StringBuilder result = new StringBuilder(typeStr.length() + name.length() + 3);
+                result.append(typeStr);
                 result.append(" '");
                 result.append(name);
                 result.append('\'');
@@ -269,7 +297,7 @@ public class Describables {
         public String getCapitalizedDisplayName() {
             synchronized (this) {
                 if (capDisplayName == null) {
-                    capDisplayName = describable instanceof DisplayName ? ((DisplayName)describable).getCapitalizedDisplayName() : StringUtils.capitalize(getDisplayName());
+                    capDisplayName = describable instanceof DisplayName ? ((DisplayName) describable).getCapitalizedDisplayName() : StringUtils.capitalize(getDisplayName());
                     if (displayName != null) {
                         describable = null;
                     }

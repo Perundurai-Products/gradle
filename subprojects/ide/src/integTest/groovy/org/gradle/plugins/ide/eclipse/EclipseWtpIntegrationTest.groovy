@@ -15,19 +15,21 @@
  */
 package org.gradle.plugins.ide.eclipse
 
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.junit.Test
 import spock.lang.Issue
 
 class EclipseWtpIntegrationTest extends AbstractEclipseIntegrationTest {
     @Test
     @Issue("GRADLE-1415")
+    @ToBeFixedForConfigurationCache
     void canUseSelfResolvingFiles() {
         def buildFile = """
 apply plugin: "war"
 apply plugin: "eclipse"
 
 dependencies {
-    compile fileTree(dir: "libs", includes: ["*.jar"])
+    implementation fileTree(dir: "libs", includes: ["*.jar"])
 }
         """
 
@@ -44,6 +46,7 @@ dependencies {
 
     @Test
     @Issue("GRADLE-2526")
+    @ToBeFixedForConfigurationCache
     void overwritesDependentModules() {
         generateEclipseFilesForWebProject()
         def projectModules = parseComponentFile(project: "web")
@@ -63,6 +66,7 @@ dependencies {
     }
 
     @Test
+    @ToBeFixedForConfigurationCache
     void respectsDependencySubstitutionRules() {
         //given
         mavenRepo.module("gradle", "foo").publish()
@@ -84,14 +88,14 @@ dependencies {
            }
 
            dependencies {
-               compile 'gradle:foo:1.0'
-               compile project(':sub')
+               implementation 'gradle:foo:1.0'
+               implementation project(':sub')
            }
 
            configurations.all {
                resolutionStrategy.dependencySubstitution {
-                   substitute module("gradle:foo") with module("gradle:bar:1.0")
-                   substitute project(":sub") with module("gradle:baz:1.0")
+                   substitute module("gradle:foo") using module("gradle:bar:1.0")
+                   substitute project(":sub") using module("gradle:baz:1.0")
                }
            }
         """
@@ -130,9 +134,9 @@ repositories {
 }
 
 dependencies {
-    compile project(":java1")
-    compile project(":groovy")
-    runtime "mygroup:myartifact:$myArtifactVersion"
+    implementation project(":java1")
+    implementation project(":groovy")
+    runtimeOnly "mygroup:myartifact:$myArtifactVersion"
 }
         """
 
@@ -148,8 +152,8 @@ repositories {
 }
 
 dependencies {
-    compile project(":java2")
-    runtime "mygroup:myartifact:$myArtifactVersion"
+    implementation project(":java2")
+    runtimeOnly "mygroup:myartifact:$myArtifactVersion"
 }
         """
 
@@ -165,7 +169,7 @@ repositories {
 }
 
 dependencies {
-    runtime "mygroup:myartifact:$myArtifactVersion"
+    runtimeOnly "mygroup:myartifact:$myArtifactVersion"
 }
         """
 
@@ -178,7 +182,7 @@ apply plugin: "eclipse-wtp"
 apply plugin: "groovy"
         """
 
-        executer.usingSettingsFile(settingsFile).withTasks("eclipse").run()
+        executer.withTasks("eclipse").run()
     }
 
 	private Set getHandleFilenames(projectModules) {

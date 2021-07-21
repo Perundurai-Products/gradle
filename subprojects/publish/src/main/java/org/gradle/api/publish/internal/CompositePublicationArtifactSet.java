@@ -19,6 +19,7 @@ package org.gradle.api.publish.internal;
 import org.gradle.api.file.FileCollection;
 import org.gradle.api.internal.CompositeDomainObjectSet;
 import org.gradle.api.internal.DelegatingDomainObjectSet;
+import org.gradle.api.internal.file.FileCollectionInternal;
 import org.gradle.api.internal.file.UnionFileCollection;
 import org.gradle.api.publish.PublicationArtifact;
 
@@ -26,11 +27,13 @@ public class CompositePublicationArtifactSet<T extends PublicationArtifact> exte
 
     private final FileCollection files;
 
+    @SafeVarargs
+    @SuppressWarnings("varargs")
     public CompositePublicationArtifactSet(Class<T> type, PublicationArtifactSet<T>... artifactSets) {
         super(CompositeDomainObjectSet.create(type, artifactSets));
-        FileCollection[] fileCollections = new FileCollection[artifactSets.length];
+        FileCollectionInternal[] fileCollections = new FileCollectionInternal[artifactSets.length];
         for (int i = 0; i < artifactSets.length; i++) {
-            fileCollections[i] = artifactSets[i].getFiles();
+            fileCollections[i] = (FileCollectionInternal) artifactSets[i].getFiles();
         }
         files = new UnionFileCollection(fileCollections);
     }

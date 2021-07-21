@@ -15,27 +15,28 @@
  */
 package org.gradle.api.internal.artifacts.repositories
 
+import org.gradle.api.Action
 import org.gradle.api.InvalidUserDataException
 import org.gradle.api.artifacts.ComponentMetadataListerDetails
 import org.gradle.api.artifacts.ComponentMetadataSupplier
 import org.gradle.api.artifacts.ComponentMetadataSupplierDetails
 import org.gradle.api.artifacts.ComponentMetadataVersionLister
 import org.gradle.api.artifacts.repositories.AuthenticationContainer
-import org.gradle.api.internal.artifacts.ImmutableModuleIdentifierFactory
+import org.gradle.api.artifacts.repositories.MavenArtifactRepository
+import org.gradle.api.internal.artifacts.DependencyManagementTestUtil
+import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.parser.GradleModuleMetadataParser
 import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.parser.MetaDataParser
-import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.parser.ModuleMetadataParser
 import org.gradle.api.internal.artifacts.repositories.metadata.MavenMutableModuleMetadataFactory
 import org.gradle.api.internal.artifacts.repositories.resolver.MavenResolver
 import org.gradle.api.internal.artifacts.repositories.transport.RepositoryTransport
 import org.gradle.api.internal.artifacts.repositories.transport.RepositoryTransportFactory
 import org.gradle.api.internal.file.FileResolver
-import org.gradle.api.internal.filestore.ivy.ArtifactIdentifierFileStore
-import org.gradle.api.model.ObjectFactory
+import org.gradle.api.internal.filestore.DefaultArtifactIdentifierFileStore
+import org.gradle.api.provider.ProviderFactory
 import org.gradle.internal.resource.ExternalResourceRepository
-import org.gradle.internal.resource.cached.ExternalResourceFileStore
+import org.gradle.internal.resource.cached.DefaultExternalResourceFileStore
 import org.gradle.internal.resource.local.FileResourceRepository
 import org.gradle.internal.resource.local.LocallyAvailableResourceFinder
-import org.gradle.util.AttributeTestUtil
 import org.gradle.util.SnapshotTestUtil
 import org.gradle.util.TestUtil
 import spock.lang.Specification
@@ -47,23 +48,27 @@ class DefaultMavenArtifactRepositoryTest extends Specification {
     final RepositoryTransportFactory transportFactory = Mock()
     final LocallyAvailableResourceFinder locallyAvailableResourceFinder = Mock()
     final ExternalResourceRepository resourceRepository = Mock()
-    final ArtifactIdentifierFileStore artifactIdentifierFileStore = Stub()
-    final ExternalResourceFileStore externalResourceFileStore = Stub()
+    final DefaultArtifactIdentifierFileStore artifactIdentifierFileStore = Stub()
+    final DefaultExternalResourceFileStore externalResourceFileStore = Stub()
     final MetaDataParser pomParser = Stub()
-    final ModuleMetadataParser metadataParser = Stub()
+    final GradleModuleMetadataParser metadataParser = Stub()
     final AuthenticationContainer authenticationContainer = Stub()
-    final ImmutableModuleIdentifierFactory moduleIdentifierFactory = Stub()
-    final MavenMutableModuleMetadataFactory mavenMetadataFactory = new MavenMutableModuleMetadataFactory(moduleIdentifierFactory, AttributeTestUtil.attributesFactory(), TestUtil.objectInstantiator(), TestUtil.featurePreviews())
+    final MavenMutableModuleMetadataFactory mavenMetadataFactory = DependencyManagementTestUtil.mavenMetadataFactory()
+    final DefaultUrlArtifactRepository.Factory urlArtifactRepositoryFactory = new DefaultUrlArtifactRepository.Factory(resolver)
+    final ProviderFactory providerFactory = Mock()
 
     final DefaultMavenArtifactRepository repository = new DefaultMavenArtifactRepository(
-        resolver, transportFactory, locallyAvailableResourceFinder, TestUtil.instantiatorFactory(), artifactIdentifierFileStore, pomParser, metadataParser, authenticationContainer, moduleIdentifierFactory, externalResourceFileStore, Mock(FileResourceRepository), TestUtil.featurePreviews(), mavenMetadataFactory, SnapshotTestUtil.valueSnapshotter(), Mock(ObjectFactory))
+        resolver, transportFactory, locallyAvailableResourceFinder, TestUtil.instantiatorFactory(),
+        artifactIdentifierFileStore, pomParser, metadataParser, authenticationContainer, externalResourceFileStore,
+        Mock(FileResourceRepository), mavenMetadataFactory, SnapshotTestUtil.valueSnapshotter(),
+        TestUtil.objectFactory(), urlArtifactRepositoryFactory, TestUtil.checksumService, providerFactory)
 
     def "creates local repository"() {
         given:
         def file = new File('repo')
         def uri = file.toURI()
         _ * resolver.resolveUri('repo-dir') >> uri
-        transportFactory.createTransport('file', 'repo', _) >> transport()
+        transportFactory.createTransport('file', 'repo', _, _) >> transport()
 
         and:
         repository.name = 'repo'
@@ -79,9 +84,9 @@ class DefaultMavenArtifactRepositoryTest extends Specification {
 
     def "creates http repository"() {
         given:
-        def uri = new URI("http://localhost:9090/repo")
+        def uri = new URI("https://localhost:9090/repo")
         _ * resolver.resolveUri('repo-dir') >> uri
-        transportFactory.createTransport('http', 'repo', _) >> transport()
+        transportFactory.createTransport('https', 'repo', _, _) >> transport()
 
         and:
         repository.name = 'repo'
@@ -97,13 +102,13 @@ class DefaultMavenArtifactRepositoryTest extends Specification {
 
     def "creates repository with additional artifact URLs"() {
         given:
-        def uri = new URI("http://localhost:9090/repo")
-        def uri1 = new URI("http://localhost:9090/repo1")
-        def uri2 = new URI("http://localhost:9090/repo2")
+        def uri = new URI("https://localhost:9090/repo")
+        def uri1 = new URI("https://localhost:9090/repo1")
+        def uri2 = new URI("https://localhost:9090/repo2")
         _ * resolver.resolveUri('repo-dir') >> uri
         _ * resolver.resolveUri('repo1') >> uri1
         _ * resolver.resolveUri('repo2') >> uri2
-        transportFactory.createTransport('http', 'repo', _) >> transport()
+        transportFactory.createTransport('https', 'repo', _, _) >> transport()
 
         and:
         repository.name = 'repo'
@@ -126,7 +131,7 @@ class DefaultMavenArtifactRepositoryTest extends Specification {
         given:
         def uri = new URI("s3://localhost:9090/repo")
         _ * resolver.resolveUri(_) >> uri
-        transportFactory.createTransport(_, 'repo', _) >> transport()
+        transportFactory.createTransport(_, 'repo', _, _) >> transport()
 
         and:
         repository.name = 'repo'
@@ -152,9 +157,9 @@ class DefaultMavenArtifactRepositoryTest extends Specification {
 
     def "create repository from strongly typed URI"() {
         given:
-        def uri = new URI("http://localhost:9090/repo")
+        def uri = new URI("https://localhost:9090/repo")
         _ * resolver.resolveUri(_) >> uri
-        transportFactory.createTransport(_, 'repo', _) >> transport()
+        transportFactory.createTransport(_, 'repo', _, _) >> transport()
 
         and:
         repository.name = 'repo'
@@ -170,9 +175,9 @@ class DefaultMavenArtifactRepositoryTest extends Specification {
 
     def "can set a custom metadata rule"() {
         repository.name = 'name'
-        repository.url = 'http://host'
-        resolver.resolveUri('http://host') >> new URI('http://host/')
-        transportFactory.createTransport('http', 'name', _) >> transport()
+        repository.url = 'https://host'
+        resolver.resolveUri('https://host') >> new URI('https://host/')
+        transportFactory.createTransport('https', 'name', _, _) >> transport()
 
         given:
         repository.setMetadataSupplier(CustomMetadataSupplier)
@@ -188,9 +193,9 @@ class DefaultMavenArtifactRepositoryTest extends Specification {
 
     def "can inject configuration into a custom metadata rule"() {
         repository.name = 'name'
-        repository.url = 'http://host'
-        resolver.resolveUri('http://host') >> new URI('http://host/')
-        transportFactory.createTransport('http', 'name', _) >> transport()
+        repository.url = 'https://host'
+        resolver.resolveUri('https://host') >> new URI('https://host/')
+        transportFactory.createTransport('https', 'name', _, _) >> transport()
 
         given:
         repository.setMetadataSupplier(CustomMetadataSupplierWithParams) { it.params("a", 12, [1, 2, 3]) }
@@ -206,9 +211,9 @@ class DefaultMavenArtifactRepositoryTest extends Specification {
 
     def "can set a custom version lister"() {
         repository.name = 'name'
-        repository.url = 'http://host'
-        resolver.resolveUri('http://host') >> new URI('http://host/')
-        transportFactory.createTransport('http', 'name', _) >> transport()
+        repository.url = 'https://host'
+        resolver.resolveUri('https://host') >> new URI('https://host/')
+        transportFactory.createTransport('https', 'name', _, _) >> transport()
 
         given:
         repository.setComponentVersionsLister(CustomVersionLister)
@@ -223,9 +228,9 @@ class DefaultMavenArtifactRepositoryTest extends Specification {
 
     def "can inject configuration into a custom version lister"() {
         repository.name = 'name'
-        repository.url = 'http://host'
-        resolver.resolveUri('http://host') >> new URI('http://host/')
-        transportFactory.createTransport('http', 'name', _) >> transport()
+        repository.url = 'https://host'
+        resolver.resolveUri('https://host') >> new URI('https://host/')
+        transportFactory.createTransport('https', 'name', _, _) >> transport()
 
         given:
         repository.setComponentVersionsLister(CustomVersionListerWithParams) { it.params("a", 12, [1, 2, 3]) }
@@ -236,6 +241,33 @@ class DefaultMavenArtifactRepositoryTest extends Specification {
         then:
         lister.rules.configurableRules[0].ruleClass == CustomVersionListerWithParams
         lister.rules.configurableRules[0].ruleParams.isolate() == ["a", 12, [1, 2, 3]] as Object[]
+    }
+
+    def "can retrieve metadataSources"() {
+        repository.name = 'name'
+        repository.url = 'https://host'
+        resolver.resolveUri('https://host') >> new URI('https://host/')
+        transportFactory.createTransport('https', 'name', _, _) >> transport()
+
+        given:
+        repository.metadataSources(new Action<MavenArtifactRepository.MetadataSources>() {
+            @Override
+            void execute(MavenArtifactRepository.MetadataSources metadataSources) {
+                metadataSources.mavenPom()
+                metadataSources.artifact()
+                metadataSources.gradleMetadata()
+                metadataSources.ignoreGradleMetadataRedirection()
+            }
+        })
+
+        when:
+        MavenArtifactRepository.MetadataSources metadataSources = repository.getMetadataSources()
+
+        then:
+        metadataSources.isMavenPomEnabled()
+        metadataSources.isArtifactEnabled()
+        metadataSources.isGradleMetadataEnabled()
+        metadataSources.isIgnoreGradleMetadataRedirectionEnabled()
     }
 
     static class CustomVersionLister implements ComponentMetadataVersionLister {

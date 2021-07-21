@@ -16,17 +16,15 @@
 
 package org.gradle.api.internal.artifacts;
 
+import org.gradle.api.internal.artifacts.ivyservice.resolveengine.artifact.ArtifactSetToFileCollectionFactory;
 import org.gradle.api.internal.artifacts.transform.ArtifactTransformListener;
-import org.gradle.api.internal.artifacts.transform.DefaultTransformationNodeFactory;
 import org.gradle.api.internal.artifacts.transform.TransformationNodeDependencyResolver;
-import org.gradle.api.internal.artifacts.transform.TransformationNodeExecutor;
-import org.gradle.api.internal.artifacts.transform.TransformationNodeFactory;
 import org.gradle.internal.event.ListenerManager;
-import org.gradle.internal.operations.BuildOperationExecutor;
 import org.gradle.internal.service.ServiceRegistration;
 import org.gradle.internal.service.scopes.AbstractPluginServiceRegistry;
 
 public class DependencyServices extends AbstractPluginServiceRegistry {
+    @Override
     public void registerGlobalServices(ServiceRegistration registration) {
         registration.addProvider(new DependencyManagementGlobalScopeServices());
     }
@@ -42,6 +40,12 @@ public class DependencyServices extends AbstractPluginServiceRegistry {
     }
 
     @Override
+    public void registerBuildSessionServices(ServiceRegistration registration) {
+        registration.add(ArtifactSetToFileCollectionFactory.class);
+        registration.addProvider(new DependencyManagementBuildSessionScopeServices());
+    }
+
+    @Override
     public void registerBuildTreeServices(ServiceRegistration registration) {
         registration.addProvider(new DependencyManagementBuildTreeScopeServices());
     }
@@ -51,21 +55,14 @@ public class DependencyServices extends AbstractPluginServiceRegistry {
         registration.addProvider(new DependencyManagementGradleServices());
     }
 
+    @SuppressWarnings("unused")
     private static class DependencyManagementGradleServices {
         ArtifactTransformListener createArtifactTransformListener(ListenerManager listenerManager) {
             return listenerManager.getBroadcaster(ArtifactTransformListener.class);
         }
 
-        TransformationNodeFactory createTransformationNodeFactory() {
-            return new DefaultTransformationNodeFactory();
-        }
-
-        TransformationNodeDependencyResolver createTransformationNodeDependencyResolver(TransformationNodeFactory transformationNodeFactory) {
-            return new TransformationNodeDependencyResolver(transformationNodeFactory);
-        }
-
-        TransformationNodeExecutor createTransformationNodeExecutor(BuildOperationExecutor buildOperationExecutor, ArtifactTransformListener transformListener) {
-            return new TransformationNodeExecutor(buildOperationExecutor, transformListener);
+        TransformationNodeDependencyResolver createTransformationNodeDependencyResolver() {
+            return new TransformationNodeDependencyResolver();
         }
     }
 }

@@ -148,6 +148,7 @@ public class DaemonStateCoordinator implements Stoppable, DaemonStateControl {
      *
      * @see #requestStop(String reason)
      */
+    @Override
     public void stop() {
         stopNow("service stop");
     }
@@ -290,6 +291,7 @@ public class DaemonStateCoordinator implements Stoppable, DaemonStateControl {
         onStartCommand(commandDisplayName);
         try {
             executor.execute(new Runnable() {
+                @Override
                 public void run() {
                     try {
                         command.run();
@@ -370,7 +372,7 @@ public class DaemonStateCoordinator implements Stoppable, DaemonStateControl {
                     throw new DaemonUnavailableException(String.format("This daemon is currently executing: %s", currentCommandExecution));
             }
 
-            LOGGER.error("Command execution: started {} after {} minutes of idle", commandDisplayName, getIdleMinutes());
+            LOGGER.debug("Command execution: started {} after {} minutes of idle", commandDisplayName, getIdleMinutes());
             try {
                 setState(State.Busy);
                 onStartCommand.run();

@@ -23,12 +23,12 @@ import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.junit.Rule
 import spock.lang.Specification
 
-import static org.gradle.util.WrapUtil.toSet
+import static org.gradle.util.internal.WrapUtil.toSet
 
 @CleanupTestDirectory
 public class ProjectDirectoryProjectSpecTest extends Specification {
     @Rule
-    public TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider();
+    public TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider(getClass());
     private final File dir = temporaryFolder.createDir("build");
     private final ProjectDirectoryProjectSpec spec = new ProjectDirectoryProjectSpec(dir);
     private int counter;

@@ -16,6 +16,7 @@
 
 package org.gradle.api.plugins
 
+
 import org.gradle.integtests.fixtures.WellBehavedPluginTest
 import spock.lang.Unroll
 

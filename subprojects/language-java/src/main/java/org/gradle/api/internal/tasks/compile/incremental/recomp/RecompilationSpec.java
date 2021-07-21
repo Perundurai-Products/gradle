@@ -16,26 +16,92 @@
 
 package org.gradle.api.internal.tasks.compile.incremental.recomp;
 
-import java.io.File;
+import org.gradle.api.internal.tasks.compile.incremental.compilerapi.deps.GeneratedResource;
+
 import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedHashSet;
+import java.util.Set;
+
+import static org.gradle.api.internal.tasks.compile.incremental.recomp.WellKnownSourceFileClassNameConverter.isModuleInfo;
+import static org.gradle.api.internal.tasks.compile.incremental.recomp.WellKnownSourceFileClassNameConverter.isPackageInfo;
 
 public class RecompilationSpec {
-
-    private final Collection<String> classesToCompile = new NormalizingClassNamesSet();
-    private final Collection<String> classesToProcess = new NormalizingClassNamesSet();
+    private final Set<String> classesToCompile = new LinkedHashSet<>();
+    private final Collection<String> classesToProcess = new LinkedHashSet<>();
+    private final Collection<GeneratedResource> resourcesToGenerate = new LinkedHashSet<>();
+    private final Set<String> relativeSourcePathsToCompile = new LinkedHashSet<>();
+    private final PreviousCompilation previousCompilation;
     private String fullRebuildCause;
 
-    public Collection<String> getClassesToCompile() {
-        return classesToCompile;
+    public RecompilationSpec(PreviousCompilation previousCompilation) {
+        this.previousCompilation = previousCompilation;
+    }
+
+    @Override
+    public String toString() {
+        return "RecompilationSpec{" +
+            "classesToCompile=" + classesToCompile +
+            ", classesToProcess=" + classesToProcess +
+            ", resourcesToGenerate=" + resourcesToGenerate +
+            ", relativeSourcePathsToCompile=" + relativeSourcePathsToCompile +
+            ", fullRebuildCause='" + fullRebuildCause + '\'' +
+            ", buildNeeded=" + isBuildNeeded() +
+            ", fullRebuildNeeded=" + isFullRebuildNeeded() +
+            '}';
+    }
+
+    public void addClassesToCompile(Collection<String> classes) {
+        classesToCompile.addAll(classes);
+    }
+
+    public Set<String> getClassesToCompile() {
+        return Collections.unmodifiableSet(classesToCompile);
+    }
+
+    public PreviousCompilation getPreviousCompilation() {
+        return previousCompilation;
+    }
+
+    public void addRelativeSourcePathsToCompile(Collection<String> paths) {
+        relativeSourcePathsToCompile.addAll(paths);
+    }
+
+    public void addRelativeSourcePathToCompile(String path) {
+        relativeSourcePathsToCompile.add(path);
+    }
+
+    /**
+     * @return the relative paths of files we clearly know to recompile
+     */
+    public Set<String> getRelativeSourcePathsToCompile() {
+        return Collections.unmodifiableSet(relativeSourcePathsToCompile);
+    }
+
+    public void addClassesToProcess(Collection<String> classes) {
+        classes.forEach(classToReprocess -> {
+            if (isPackageInfo(classToReprocess) || isModuleInfo(classToReprocess)) {
+                classesToCompile.add(classToReprocess);
+            } else {
+                classesToProcess.add(classToReprocess);
+            }
+        });
     }
 
     public Collection<String> getClassesToProcess() {
-        return classesToProcess;
+        return Collections.unmodifiableCollection(classesToProcess);
+    }
+
+    public void addResourcesToGenerate(Collection<GeneratedResource> resources) {
+        resourcesToGenerate.addAll(resources);
+    }
+
+    public Collection<GeneratedResource> getResourcesToGenerate() {
+        return Collections.unmodifiableCollection(resourcesToGenerate);
     }
 
     public boolean isBuildNeeded() {
-        return isFullRebuildNeeded() || !classesToCompile.isEmpty() || !classesToProcess.isEmpty();
+        return isFullRebuildNeeded() || !classesToCompile.isEmpty() || !classesToProcess.isEmpty() || !relativeSourcePathsToCompile.isEmpty();
     }
 
     public boolean isFullRebuildNeeded() {
@@ -46,27 +112,8 @@ public class RecompilationSpec {
         return fullRebuildCause;
     }
 
-    public void setFullRebuildCause(String description, File file) {
-        fullRebuildCause = description != null ? description : "'" + file.getName() + "' was changed";
+    public void setFullRebuildCause(String description) {
+        fullRebuildCause = description;
     }
 
-    private static class NormalizingClassNamesSet extends LinkedHashSet<String> {
-        @Override
-        public boolean add(String className) {
-            int idx = className.indexOf('$');
-            if (idx > 0) {
-                className = className.substring(0, idx);
-            }
-            return super.add(className);
-        }
-
-        @Override
-        public boolean addAll(Collection<? extends String> classNames) {
-            boolean added = false;
-            for (String cn : classNames) {
-                added |= add(cn);
-            }
-            return added;
-        }
-    }
 }

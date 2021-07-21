@@ -68,20 +68,44 @@ public class TestBuildOperationExecutor implements BuildOperationExecutor {
     }
 
     @Override
-    public ExecutingBuildOperation start(BuildOperationDescriptor.Builder descriptor) {
+    public <O extends BuildOperation> void execute(O buildOperation, BuildOperationWorker<O> worker, @Nullable BuildOperationState defaultParent) {
+        log.execute(buildOperation, worker);
+    }
+
+    @Override
+    public BuildOperationContext start(BuildOperationDescriptor.Builder descriptor) {
         return log.start(descriptor);
     }
 
     @Override
-    public <O extends RunnableBuildOperation> void runAll(Action<BuildOperationQueue<O>> generator) {
-        generator.execute(new TestBuildOperationQueue<O>(log));
+    public <O extends RunnableBuildOperation> void runAll(Action<BuildOperationQueue<O>> schedulingAction) {
+        runAll(schedulingAction, BuildOperationConstraint.MAX_WORKERS);
+    }
+
+    @Override
+    public <O extends RunnableBuildOperation> void runAll(Action<BuildOperationQueue<O>> schedulingAction, BuildOperationConstraint buildOperationConstraint) {
+        schedulingAction.execute(new TestBuildOperationQueue<O>(log));
+    }
+
+    @Override
+    public <O extends RunnableBuildOperation> void runAllWithAccessToProjectState(Action<BuildOperationQueue<O>> schedulingAction) {
+        runAllWithAccessToProjectState(schedulingAction, BuildOperationConstraint.MAX_WORKERS);
+    }
+
+    @Override
+    public <O extends RunnableBuildOperation> void runAllWithAccessToProjectState(Action<BuildOperationQueue<O>> schedulingAction, BuildOperationConstraint buildOperationConstraint) {
+        runAll(schedulingAction);
     }
 
     @Override
     public <O extends BuildOperation> void runAll(BuildOperationWorker<O> worker, Action<BuildOperationQueue<O>> schedulingAction) {
-        throw new UnsupportedOperationException();
+        runAll(worker, schedulingAction, BuildOperationConstraint.MAX_WORKERS);
     }
 
+    @Override
+    public <O extends BuildOperation> void runAll(BuildOperationWorker<O> worker, Action<BuildOperationQueue<O>> schedulingAction, BuildOperationConstraint buildOperationConstraint) {
+        throw new UnsupportedOperationException();
+    }
 
     private static class TestBuildOperationContext implements BuildOperationContext {
 
@@ -151,7 +175,7 @@ public class TestBuildOperationExecutor implements BuildOperationExecutor {
             });
         }
 
-        private <D, R, T extends BuildOperationType<D, R>> TypedRecord<D, R> mostRecent(Class<T> type) {
+        public <D, R, T extends BuildOperationType<D, R>> TypedRecord<D, R> mostRecent(Class<T> type) {
             Class<D> detailsType = BuildOperationTypes.detailsType(type);
             Iterator<Record> iterator = records.descendingIterator();
             while (iterator.hasNext()) {
@@ -193,6 +217,11 @@ public class TestBuildOperationExecutor implements BuildOperationExecutor {
 
         public <D, R, T extends BuildOperationType<D, R>> Throwable mostRecentFailure(Class<T> type) {
             return mostRecent(type).failure;
+        }
+
+        @Override
+        public String toString() {
+            return records.toString();
         }
 
         public static class Record {
@@ -277,16 +306,25 @@ public class TestBuildOperationExecutor implements BuildOperationExecutor {
             return t;
         }
 
-        private ExecutingBuildOperation start(final BuildOperationDescriptor.Builder descriptor) {
+        private <O extends BuildOperation> void execute(O buildOperation, BuildOperationWorker<O> worker) {
+            Record record = new Record(buildOperation.description().build());
+            records.add(record);
+            TestBuildOperationContext context = new TestBuildOperationContext(record);
+            try {
+                worker.execute(buildOperation, context);
+            } catch (Throwable failure) {
+                if (record.failure == null) {
+                    record.failure = failure;
+                }
+                throw UncheckedException.throwAsUncheckedException(failure);
+            }
+        }
+
+        private BuildOperationContext start(final BuildOperationDescriptor.Builder descriptor) {
             Record record = new Record(descriptor.build());
             records.add(record);
             final TestBuildOperationContext context = new TestBuildOperationContext(record);
-            return new ExecutingBuildOperation() {
-                @Override
-                public BuildOperationDescriptor.Builder description() {
-                    return descriptor;
-                }
-
+            return new BuildOperationContext() {
                 @Override
                 public void failed(@Nullable Throwable failure) {
                     context.failed(failure);

@@ -17,8 +17,10 @@
 package org.gradle.language.base
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.integtests.fixtures.UnsupportedWithConfigurationCache
 import spock.lang.Unroll
 
+@UnsupportedWithConfigurationCache(because = "software model")
 class ComponentModelReportIntegrationTest extends AbstractIntegrationSpec {
 
     def "model report for unmanaged software components shows them all"() {
@@ -58,6 +60,7 @@ class ComponentModelReportIntegrationTest extends AbstractIntegrationSpec {
                                  ⤷ ComponentModelBasePlugin.PluginRules.AttachInputs#initializeBinarySourceSets(ModelMap<BinarySpec>) > withType()
                                  ⤷ BinaryBasePlugin.Rules#defineBuildLifecycleTask(BinarySpecInternal, NamedEntityInstantiator<Task>)
                                  ⤷ BinaryBasePlugin.Rules#addSourceSetsOwnedByBinariesToTheirInputs(BinarySpecInternal)
+                                 ⤷ ComponentModelBasePlugin.PluginRules#defineBinariesCheckTasks(BinarySpecInternal, NamedEntityInstantiator<Task>)
                             + sources
                                   | Type:   	org.gradle.model.ModelMap<org.gradle.language.base.LanguageSourceSet>
                                   | Creator: 	myComponent(UnmanagedComponent) { ... } @ build.gradle line 89, column 9 > create(myBinary)
@@ -83,7 +86,7 @@ class ComponentModelReportIntegrationTest extends AbstractIntegrationSpec {
                                  ⤷ DeclarationRules#mutateMyComponentSource(UnmanagedLanguageSourceSet)
                                  ⤷ ComponentModelBasePlugin.PluginRules#addComponentSourcesSetsToProjectSourceSet(SourceComponentSpec, ProjectSourceSet) > afterEach()
                                  ⤷ ComponentModelBasePlugin.PluginRules#applyFallbackSourceConventions(LanguageSourceSet, ProjectIdentifier)
-        """.stripIndent().trim()
+            """.stripIndent().trim()
     }
 
     def "model report for managed software components show them all with their managed properties"() {
@@ -123,6 +126,7 @@ class ComponentModelReportIntegrationTest extends AbstractIntegrationSpec {
                                  ⤷ ComponentModelBasePlugin.PluginRules.AttachInputs#initializeBinarySourceSets(ModelMap<BinarySpec>) > withType()
                                  ⤷ BinaryBasePlugin.Rules#defineBuildLifecycleTask(BinarySpecInternal, NamedEntityInstantiator<Task>)
                                  ⤷ BinaryBasePlugin.Rules#addSourceSetsOwnedByBinariesToTheirInputs(BinarySpecInternal)
+                                 ⤷ ComponentModelBasePlugin.PluginRules#defineBinariesCheckTasks(BinarySpecInternal, NamedEntityInstantiator<Task>)
                             + data
                                   | Type:   	java.lang.String
                                   | Value:  	my binary
@@ -162,7 +166,7 @@ class ComponentModelReportIntegrationTest extends AbstractIntegrationSpec {
                                   | Type:   	java.lang.String
                                   | Value:  	my component sources
                                   | Creator: 	myComponent(ManagedComponent) { ... } @ build.gradle line 89, column 9 > create(myComponentSource)
-        """.stripIndent().trim()
+            """.stripIndent().trim()
     }
 
     @Unroll

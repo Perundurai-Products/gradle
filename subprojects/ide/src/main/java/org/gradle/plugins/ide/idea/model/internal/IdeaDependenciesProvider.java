@@ -30,18 +30,18 @@ import org.gradle.api.artifacts.result.UnresolvedDependencyResult;
 import org.gradle.api.internal.artifacts.DefaultModuleVersionIdentifier;
 import org.gradle.api.internal.project.ProjectInternal;
 import org.gradle.api.internal.project.ProjectStateRegistry;
-import org.gradle.internal.Factory;
+import org.gradle.internal.jvm.JavaModuleDetector;
 import org.gradle.plugins.ide.idea.model.Dependency;
 import org.gradle.plugins.ide.idea.model.FilePath;
 import org.gradle.plugins.ide.idea.model.IdeaModule;
 import org.gradle.plugins.ide.idea.model.Path;
 import org.gradle.plugins.ide.idea.model.SingleEntryModuleLibrary;
 import org.gradle.plugins.ide.internal.IdeArtifactRegistry;
+import org.gradle.plugins.ide.internal.resolver.GradleApiSourcesResolver;
 import org.gradle.plugins.ide.internal.resolver.IdeDependencySet;
 import org.gradle.plugins.ide.internal.resolver.IdeDependencyVisitor;
 import org.gradle.plugins.ide.internal.resolver.UnresolvedIdeDependencyHandler;
 
-import javax.annotation.Nullable;
 import java.io.File;
 import java.util.Collection;
 import java.util.Collections;
@@ -56,11 +56,13 @@ public class IdeaDependenciesProvider {
     private final ModuleDependencyBuilder moduleDependencyBuilder;
     private final IdeaDependenciesOptimizer optimizer;
     private final ProjectComponentIdentifier currentProjectId;
+    private final GradleApiSourcesResolver gradleApiSourcesResolver;
 
-    public IdeaDependenciesProvider(Project project, IdeArtifactRegistry artifactRegistry, ProjectStateRegistry projectRegistry) {
+    public IdeaDependenciesProvider(Project project, IdeArtifactRegistry artifactRegistry, ProjectStateRegistry projectRegistry, GradleApiSourcesResolver gradleApiSourcesResolver) {
         moduleDependencyBuilder = new ModuleDependencyBuilder(artifactRegistry);
         currentProjectId = projectRegistry.stateFor(project).getComponentIdentifier();
         optimizer = new IdeaDependenciesOptimizer();
+        this.gradleApiSourcesResolver = gradleApiSourcesResolver;
     }
 
     public Set<Dependency> provide(final IdeaModule ideaModule) {
@@ -104,17 +106,13 @@ public class IdeaDependenciesProvider {
         final DependencyHandler handler = projectInternal.getDependencies();
         final Collection<Configuration> plusConfigurations = getPlusConfigurations(ideaModule, scope);
         final Collection<Configuration> minusConfigurations = getMinusConfigurations(ideaModule, scope);
+        final JavaModuleDetector javaModuleDetector = projectInternal.getServices().get(JavaModuleDetector.class);
 
         final IdeaDependenciesVisitor visitor = new IdeaDependenciesVisitor(ideaModule, scope.name());
-        return projectInternal.getMutationState().withMutableState(new Factory<IdeaDependenciesVisitor>() {
-            @Nullable
-            @Override
-            public IdeaDependenciesVisitor create() {
-                new IdeDependencySet(handler, plusConfigurations, minusConfigurations).visit(visitor);
-                return visitor;
-            }
+        return projectInternal.getOwner().fromMutableState(p -> {
+            new IdeDependencySet(handler, javaModuleDetector, plusConfigurations, minusConfigurations, false, gradleApiSourcesResolver).visit(visitor);
+            return visitor;
         });
-
     }
 
     private Collection<Configuration> getPlusConfigurations(IdeaModule ideaModule, GeneratedIdeaScope scope) {
@@ -170,7 +168,7 @@ public class IdeaDependenciesProvider {
         }
 
         @Override
-        public void visitProjectDependency(ResolvedArtifactResult artifact) {
+        public void visitProjectDependency(ResolvedArtifactResult artifact, boolean asJavaModule) {
             ProjectComponentIdentifier projectId = (ProjectComponentIdentifier) artifact.getId().getComponentIdentifier();
             if (!projectId.equals(currentProjectId)) {
                 projectDependencies.add(moduleDependencyBuilder.create(projectId, scope));
@@ -178,7 +176,7 @@ public class IdeaDependenciesProvider {
         }
 
         @Override
-        public void visitModuleDependency(ResolvedArtifactResult artifact, Set<ResolvedArtifactResult> sources, Set<ResolvedArtifactResult> javaDoc) {
+        public void visitModuleDependency(ResolvedArtifactResult artifact, Set<ResolvedArtifactResult> sources, Set<ResolvedArtifactResult> javaDoc, boolean testDependency, boolean asJavaModule) {
             ModuleComponentIdentifier moduleId = (ModuleComponentIdentifier) artifact.getId().getComponentIdentifier();
             SingleEntryModuleLibrary library = new SingleEntryModuleLibrary(toPath(ideaModule, artifact.getFile()), scope);
             library.setModuleVersion(DefaultModuleVersionIdentifier.newId(moduleId.getModuleIdentifier(), moduleId.getVersion()));
@@ -188,16 +186,21 @@ public class IdeaDependenciesProvider {
             }
             library.setSources(sourcePaths);
             Set<Path> javaDocPaths = Sets.newLinkedHashSet();
-            for (ResolvedArtifactResult javaDocArtifcat : javaDoc) {
-                javaDocPaths.add(toPath(ideaModule, javaDocArtifcat.getFile()));
+            for (ResolvedArtifactResult javaDocArtifact : javaDoc) {
+                javaDocPaths.add(toPath(ideaModule, javaDocArtifact.getFile()));
             }
             library.setJavadoc(javaDocPaths);
             moduleDependencies.add(library);
         }
 
         @Override
-        public void visitFileDependency(ResolvedArtifactResult artifact) {
+        public void visitFileDependency(ResolvedArtifactResult artifact, boolean testDependency) {
             fileDependencies.add(new SingleEntryModuleLibrary(toPath(ideaModule, artifact.getFile()), scope));
+        }
+
+        @Override
+        public void visitGradleApiDependency(ResolvedArtifactResult artifact, File sources, boolean testDependency) {
+            fileDependencies.add(new SingleEntryModuleLibrary(toPath(ideaModule, artifact.getFile()), null, toPath(ideaModule, sources), scope));
         }
 
         /*

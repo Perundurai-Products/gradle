@@ -18,11 +18,14 @@ package org.gradle.integtests.resolve.capabilities
 
 import org.gradle.integtests.fixtures.GradleMetadataResolveRunner
 import org.gradle.integtests.fixtures.RequiredFeature
-import org.gradle.integtests.fixtures.RequiredFeatures
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.integtests.resolve.AbstractModuleDependencyResolveTest
+import spock.lang.Issue
+import spock.lang.Unroll
 
 class CapabilitiesRulesIntegrationTest extends AbstractModuleDependencyResolveTest {
 
+    @ToBeFixedForConfigurationCache
     def "can declare capabilities using a component metadata rule"() {
         given:
         repository {
@@ -32,7 +35,7 @@ class CapabilitiesRulesIntegrationTest extends AbstractModuleDependencyResolveTe
 
         buildFile << """
             class CapabilityRule implements ComponentMetadataRule {
-            
+
                 @Override
                 void execute(ComponentMetadataContext context) {
                     def details = context.details
@@ -47,7 +50,7 @@ class CapabilitiesRulesIntegrationTest extends AbstractModuleDependencyResolveTe
             dependencies {
                conf "cglib:cglib-nodep:3.2.5"
                conf "cglib:cglib:3.2.5"
-            
+
                components {
                   withModule('cglib:cglib-nodep', CapabilityRule)
                }
@@ -66,10 +69,78 @@ class CapabilitiesRulesIntegrationTest extends AbstractModuleDependencyResolveTe
         fails ':checkDeps'
 
         then:
-        failure.assertHasCause("Cannot choose between cglib:cglib-nodep:3.2.5 and cglib:cglib:3.2.5 because they provide the same capability: cglib:cglib:3.2.5")
+        def variant = 'runtime'
+        if (!isGradleMetadataPublished() && useIvy()) {
+            variant = 'default'
+        }
+        failure.assertHasCause("""Module 'cglib:cglib-nodep' has been rejected:
+   Cannot select module with conflict on capability 'cglib:cglib:3.2.5' also provided by [cglib:cglib:3.2.5($variant)]""")
+        failure.assertHasCause("""Module 'cglib:cglib' has been rejected:
+   Cannot select module with conflict on capability 'cglib:cglib:3.2.5' also provided by [cglib:cglib-nodep:3.2.5($variant)]""")
     }
 
-    def "can detect conflict with capability in different versions and upgrade automatically to latest version"() {
+    @ToBeFixedForConfigurationCache
+    def "implicit capability conflict is detected if implicit capability is discovered late"() {
+        given:
+        repository {
+            'cglib:cglib:3.2.5'()
+            'cglib:cglib-nodep:3.2.5'()
+            'org:lib:1.0' {
+                dependsOn 'cglib:cglib:3.2.5'
+            }
+        }
+
+        buildFile << """
+            class CapabilityRule implements ComponentMetadataRule {
+
+                @Override
+                void execute(ComponentMetadataContext context) {
+                    def details = context.details
+                    details.allVariants {
+                         withCapabilities {
+                             addCapability('cglib', 'cglib', details.id.version)
+                         }
+                     }
+                }
+            }
+
+            dependencies {
+               conf "cglib:cglib-nodep:3.2.5"
+               conf "org:lib:1.0"
+
+               components {
+                  withModule('cglib:cglib-nodep', CapabilityRule)
+               }
+            }
+        """
+
+        when:
+        repositoryInteractions {
+            'cglib:cglib-nodep:3.2.5' {
+                expectGetMetadata()
+            }
+            'cglib:cglib:3.2.5' {
+                expectGetMetadata()
+            }
+            'org:lib:1.0' {
+                expectGetMetadata()
+            }
+        }
+        fails ':checkDeps'
+
+        then:
+        def variant = 'runtime'
+        if (!isGradleMetadataPublished() && useIvy()) {
+            variant = 'default'
+        }
+        failure.assertHasCause("""Module 'cglib:cglib-nodep' has been rejected:
+   Cannot select module with conflict on capability 'cglib:cglib:3.2.5' also provided by [cglib:cglib:3.2.5($variant)]""")
+        failure.assertHasCause("""Module 'cglib:cglib' has been rejected:
+   Cannot select module with conflict on capability 'cglib:cglib:3.2.5' also provided by [cglib:cglib-nodep:3.2.5($variant)]""")
+    }
+
+    @Unroll
+    def "can detect conflict with capability in different versions (#rule)"() {
         given:
         repository {
             'cglib:cglib:3.2.5'()
@@ -78,7 +149,7 @@ class CapabilitiesRulesIntegrationTest extends AbstractModuleDependencyResolveTe
 
         buildFile << """
             class CapabilityRule implements ComponentMetadataRule {
-            
+
                 @Override
                 void execute(ComponentMetadataContext context) {
                     def details = context.details
@@ -93,10 +164,14 @@ class CapabilitiesRulesIntegrationTest extends AbstractModuleDependencyResolveTe
             dependencies {
                conf "cglib:cglib-nodep:3.2.4"
                conf "cglib:cglib:3.2.5"
-            
+
                components {
                   withModule('cglib:cglib-nodep', CapabilityRule)
                }
+            }
+
+            configurations.conf.resolutionStrategy.capabilitiesResolution {
+                $rule
             }
         """
 
@@ -115,12 +190,20 @@ class CapabilitiesRulesIntegrationTest extends AbstractModuleDependencyResolveTe
         resolve.expectGraph {
             root(":", ":test:") {
                 edge('cglib:cglib-nodep:3.2.4', 'cglib:cglib:3.2.5')
-                    .byConflictResolution('latest version of capability cglib:cglib')
+                    .byConflictResolution(reason)
                 module('cglib:cglib:3.2.5')
             }
         }
+
+        where:
+        rule                                                                                  | reason
+        'all { selectHighestVersion() }'                                                      | 'latest version of capability cglib:cglib'
+        'withCapability("cglib:cglib") { selectHighestVersion() }'                            | 'latest version of capability cglib:cglib'
+        'withCapability("cglib", "cglib") { selectHighestVersion() }'                         | 'latest version of capability cglib:cglib'
+        'all { select(candidates.find { it.id.module == "cglib" }) because "custom reason" }' | 'On capability cglib:cglib custom reason'
     }
 
+    @ToBeFixedForConfigurationCache
     def "can detect conflict between local project and capability from external dependency"() {
         given:
         repository {
@@ -129,9 +212,9 @@ class CapabilitiesRulesIntegrationTest extends AbstractModuleDependencyResolveTe
 
         buildFile << """
             apply plugin: 'java-library'
-            
+
             class CapabilityRule implements ComponentMetadataRule {
-            
+
                 @Override
                 void execute(ComponentMetadataContext context) {
                     context.details.allVariants {
@@ -148,12 +231,12 @@ class CapabilitiesRulesIntegrationTest extends AbstractModuleDependencyResolveTe
 
             dependencies {
                 conf 'org:test:1.0'
-                
+
                 components {
                    withModule('org:test', CapabilityRule)
                 }
             }
-            
+
             configurations {
                 conf.extendsFrom(api)
             }
@@ -168,12 +251,11 @@ class CapabilitiesRulesIntegrationTest extends AbstractModuleDependencyResolveTe
         fails ':checkDeps'
 
         then:
-        failure.assertHasCause("Cannot choose between :test:unspecified and org:test:1.0 because they provide the same capability: org:capability:1.0")
+        failure.assertHasCause("""Module 'org:test' has been rejected:
+   Cannot select module with conflict on capability 'org:capability:1.0' also provided by [:test:unspecified(conf)]""")
     }
 
-    @RequiredFeatures(
-        [@RequiredFeature(feature = GradleMetadataResolveRunner.GRADLE_METADATA, value="true")]
-    )
+    @RequiredFeature(feature = GradleMetadataResolveRunner.GRADLE_METADATA, value="true")
     def "can remove a published capability"() {
         given:
         repository {
@@ -205,7 +287,7 @@ class CapabilitiesRulesIntegrationTest extends AbstractModuleDependencyResolveTe
             dependencies {
                 conf 'org:a:1.0'
                 conf 'org:b:1.0'
-                
+
                 components.all(CapabilityRule)
             }
         """
@@ -228,5 +310,72 @@ class CapabilitiesRulesIntegrationTest extends AbstractModuleDependencyResolveTe
                 module('org:b:1.0')
             }
         }
+    }
+
+    @Issue("gradle/gradle#12011")
+    @ToBeFixedForConfigurationCache
+    @Unroll
+    def "can detect capability conflict even when participants belong to a virtual platform (#first, #second)"() {
+        given:
+        repository {
+            'aligned:foo:1.0'()
+            'indirect:bar:1.0' {
+                dependsOn 'other:baz:1.0'
+            }
+            'other:baz:1.0'()
+        }
+
+        buildFile << """
+            class TheOneRule implements ComponentMetadataRule {
+
+                @Override
+                void execute(ComponentMetadataContext context) {
+                    def id = context.details.id
+                    if (id.group == "aligned") {
+                        context.details.belongsTo('aligned:virtual:1.0')
+                        context.details.allVariants {
+                            withCapabilities {
+                                addCapability('org.test', 'test_capability', '1.0')
+                            }
+                        }
+                    } else if (id.group == "other") {
+                        context.details.allVariants {
+                            withCapabilities {
+                                addCapability('org.test', 'test_capability', '1.0')
+                            }
+                        }
+                    }
+                }
+            }
+
+            dependencies {
+                conf '$first'
+                conf '$second'
+
+                components.all(TheOneRule)
+            }
+"""
+
+        when:
+        repositoryInteractions {
+            'aligned:foo:1.0' {
+                expectGetMetadata()
+            }
+            'indirect:bar:1.0' {
+                expectGetMetadata()
+            }
+            'other:baz:1.0' {
+                expectGetMetadata()
+            }
+        }
+        fails ":checkDeps"
+
+        then:
+        failure.assertHasCause("Module 'aligned:foo' has been rejected")
+
+        where:
+        first   | second
+        'aligned:foo:1.0'   | 'indirect:bar:1.0'
+        'indirect:bar:1.0'  | 'aligned:foo:1.0'
     }
 }

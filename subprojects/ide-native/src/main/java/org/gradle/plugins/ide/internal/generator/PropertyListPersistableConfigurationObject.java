@@ -25,7 +25,7 @@ import org.gradle.api.internal.PropertyListTransformer;
 import java.io.InputStream;
 import java.io.OutputStream;
 
-import static org.gradle.util.ConfigureUtil.configureUsing;
+import static org.gradle.util.internal.ConfigureUtil.configureUsing;
 
 public abstract class PropertyListPersistableConfigurationObject<T extends NSObject> extends AbstractPersistableConfigurationObject {
     private final Class<T> clazz;
@@ -58,7 +58,7 @@ public abstract class PropertyListPersistableConfigurationObject<T extends NSObj
 
     protected abstract void load(T rootObject);
 
-    public void transformAction(Closure action) {
+    public void transformAction(Closure<?> action) {
         transformAction(configureUsing(action));
     }
 

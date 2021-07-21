@@ -15,29 +15,28 @@
  */
 package org.gradle.plugins.ide.idea.model;
 
-import com.google.common.base.Function;
 import com.google.common.base.Predicate;
-import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import groovy.lang.Closure;
 import org.gradle.api.Action;
-import org.gradle.api.Incubating;
 import org.gradle.api.JavaVersion;
 import org.gradle.api.Project;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.internal.project.ProjectInternal;
 import org.gradle.api.internal.project.ProjectStateRegistry;
-import org.gradle.language.scala.ScalaPlatform;
 import org.gradle.plugins.ide.idea.model.internal.IdeaDependenciesProvider;
 import org.gradle.plugins.ide.internal.IdeArtifactRegistry;
+import org.gradle.plugins.ide.internal.resolver.DefaultGradleApiSourcesResolver;
 
 import java.io.File;
 import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
-import static org.gradle.util.ConfigureUtil.configure;
+import static org.gradle.util.internal.ConfigureUtil.configure;
 
 /**
  * Enables fine-tuning module details (*.iml file) of the IDEA plugin.
@@ -46,8 +45,10 @@ import static org.gradle.util.ConfigureUtil.configure;
  * Typically you don't have to configure this model directly because Gradle configures it for you.
  *
  * <pre class='autoTested'>
- * apply plugin: 'java'
- * apply plugin: 'idea'
+ * plugins {
+ *     id 'java'
+ *     id 'idea'
+ * }
  *
  * //for the sake of this example, let's introduce a 'performanceTestCompile' configuration
  * configurations {
@@ -118,8 +119,10 @@ import static org.gradle.util.ConfigureUtil.configure;
  * Examples of advanced configuration:
  *
  * <pre class='autoTested'>
- * apply plugin: 'java'
- * apply plugin: 'idea'
+ * plugins {
+ *     id 'java'
+ *     id 'idea'
+ * }
  *
  * idea {
  *   module {
@@ -172,7 +175,6 @@ public class IdeaModule {
     private String jdkName;
     private IdeaLanguageLevel languageLevel;
     private JavaVersion targetBytecodeVersion;
-    private ScalaPlatform scalaPlatform;
     private final IdeaModuleIml iml;
     private final Project project;
     private PathFactory pathFactory;
@@ -195,17 +197,17 @@ public class IdeaModule {
      * <p>
      * <b>since</b> 1.0-milestone-2
      * <p>
-     * If your project has problems with unique names it is recommended to always run <code>gradle idea</code> from the
+     * If your project has problems with unique names it is recommended to always run <tt>gradle idea</tt> from the
      * root, i.e. for all subprojects.
      * If you run the generation of the IDEA module only for a single subproject then you may have different results
      * because the unique names are calculated based on IDEA modules that are involved in the specific build run.
      * <p>
-     * If you update the module names then make sure you run <code>gradle idea</code> from the root, e.g. for all
+     * If you update the module names then make sure you run <tt>gradle idea</tt> from the root, e.g. for all
      * subprojects, including generation of IDEA project.
      * The reason is that there may be subprojects that depend on the subproject with amended module name.
      * So you want them to be generated as well because the module dependencies need to refer to the amended project
      * name.
-     * Basically, for non-trivial projects it is recommended to always run <code>gradle idea</code> from the root.
+     * Basically, for non-trivial projects it is recommended to always run <tt>gradle idea</tt> from the root.
      * <p>
      * For example see docs for {@link IdeaModule}
      */
@@ -250,8 +252,10 @@ public class IdeaModule {
      * <p>
      * Example how to use scopes property to enable 'performanceTestCompile' dependencies in the output *.iml file:
      * <pre class='autoTested'>
-     * apply plugin: 'java'
-     * apply plugin: 'idea'
+     * plugins {
+     *     id 'java'
+     *     id 'idea'
+     * }
      *
      * configurations {
      *   performanceTestCompile
@@ -328,7 +332,6 @@ public class IdeaModule {
      * The directories containing resources. <p> For example see docs for {@link IdeaModule}
      * @since 4.7
      */
-    @Incubating
     public Set<File> getResourceDirs() {
         return resourceDirs;
     }
@@ -337,7 +340,6 @@ public class IdeaModule {
      * Sets the directories containing resources. <p> For example see docs for {@link IdeaModule}
      * @since 4.7
      */
-    @Incubating
     public void setResourceDirs(Set<File> resourceDirs) {
         this.resourceDirs = resourceDirs;
     }
@@ -346,7 +348,6 @@ public class IdeaModule {
      * The directories containing the test resources. <p> For example see docs for {@link IdeaModule}
      * @since 4.7
      */
-    @Incubating
     public Set<File> getTestResourceDirs() {
         return testResourceDirs;
     }
@@ -355,7 +356,6 @@ public class IdeaModule {
      * Sets the directories containing the test resources. <p> For example see docs for {@link IdeaModule}
      * @since 4.7
      */
-    @Incubating
     public void setTestResourceDirs(Set<File> testResourceDirs) {
         this.testResourceDirs = testResourceDirs;
     }
@@ -471,17 +471,6 @@ public class IdeaModule {
     }
 
     /**
-     * The Scala version used by this module.
-     */
-    public ScalaPlatform getScalaPlatform() {
-        return scalaPlatform;
-    }
-
-    public void setScalaPlatform(ScalaPlatform scalaPlatform) {
-        this.scalaPlatform = scalaPlatform;
-    }
-
-    /**
      * See {@link #iml(Action)}
      */
     public IdeaModuleIml getIml() {
@@ -571,10 +560,11 @@ public class IdeaModule {
         ProjectInternal projectInternal = (ProjectInternal) project;
         IdeArtifactRegistry ideArtifactRegistry = projectInternal.getServices().get(IdeArtifactRegistry.class);
         ProjectStateRegistry projectRegistry = projectInternal.getServices().get(ProjectStateRegistry.class);
-        IdeaDependenciesProvider ideaDependenciesProvider = new IdeaDependenciesProvider(projectInternal, ideArtifactRegistry, projectRegistry);
+        IdeaDependenciesProvider ideaDependenciesProvider = new IdeaDependenciesProvider(projectInternal, ideArtifactRegistry, projectRegistry, new DefaultGradleApiSourcesResolver(project));
         return ideaDependenciesProvider.provide(this);
     }
 
+    @SuppressWarnings("unchecked")
     public void mergeXmlModule(Module xmlModule) {
         iml.getBeforeMerged().execute(xmlModule);
 
@@ -614,12 +604,7 @@ public class IdeaModule {
     }
 
     private Set<Path> pathsOf(Set<File> files) {
-        return Sets.newLinkedHashSet(Iterables.transform(files, new Function<File, Path>() {
-            @Override
-            public Path apply(File file) {
-                return getPathFactory().path(file);
-            }
-        }));
+        return files.stream().map(file -> getPathFactory().path(file)).collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
 }

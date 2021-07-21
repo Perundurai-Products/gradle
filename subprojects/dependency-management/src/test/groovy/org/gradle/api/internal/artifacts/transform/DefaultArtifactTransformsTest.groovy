@@ -16,12 +16,7 @@
 
 package org.gradle.api.internal.artifacts.transform
 
-import com.google.common.collect.ImmutableList
-import org.gradle.api.Buildable
-import org.gradle.api.artifacts.component.ComponentArtifactIdentifier
-import org.gradle.api.artifacts.component.ComponentIdentifier
 import org.gradle.api.internal.artifacts.ivyservice.resolveengine.artifact.ArtifactVisitor
-import org.gradle.api.internal.artifacts.ivyservice.resolveengine.artifact.ResolvableArtifact
 import org.gradle.api.internal.artifacts.ivyservice.resolveengine.artifact.ResolvedArtifactSet
 import org.gradle.api.internal.artifacts.ivyservice.resolveengine.artifact.ResolvedVariant
 import org.gradle.api.internal.artifacts.ivyservice.resolveengine.artifact.ResolvedVariantSet
@@ -30,27 +25,27 @@ import org.gradle.api.internal.attributes.AttributesSchemaInternal
 import org.gradle.api.internal.attributes.DefaultMutableAttributeContainer
 import org.gradle.api.internal.attributes.ImmutableAttributes
 import org.gradle.internal.Describables
-import org.gradle.internal.Try
 import org.gradle.internal.component.AmbiguousVariantSelectionException
 import org.gradle.internal.component.NoMatchingVariantSelectionException
-import org.gradle.internal.component.local.model.ComponentFileArtifactIdentifier
 import org.gradle.internal.component.model.AttributeMatcher
-import org.gradle.internal.operations.BuildOperationQueue
-import org.gradle.internal.operations.RunnableBuildOperation
-import org.gradle.internal.operations.TestBuildOperationExecutor
+import org.gradle.internal.component.model.AttributeMatchingExplanationBuilder
 import org.gradle.util.AttributeTestUtil
 import spock.lang.Specification
 
 import static org.gradle.api.internal.artifacts.ArtifactAttributes.ARTIFACT_FORMAT
-import static org.gradle.util.TextUtil.toPlatformLineSeparators
+import static org.gradle.util.internal.TextUtil.toPlatformLineSeparators
 
 class DefaultArtifactTransformsTest extends Specification {
     def matchingCache = Mock(ConsumerProvidedVariantFinder)
     def producerSchema = Mock(AttributesSchemaInternal)
-    def consumerSchema = Mock(AttributesSchemaInternal)
+    def consumerSchema = Mock(AttributesSchemaInternal) {
+        getConsumerDescribers() >> []
+    }
     def attributeMatcher = Mock(AttributeMatcher)
+    def factory = Mock(VariantSelector.Factory)
     def dependenciesResolver = Stub(ExtraExecutionGraphDependenciesResolverFactory)
-    def transforms = new DefaultArtifactTransforms(matchingCache, consumerSchema, AttributeTestUtil.attributesFactory())
+    def transformedVariantFactory = Mock(TransformedVariantFactory)
+    def transforms = new DefaultArtifactTransforms(matchingCache, consumerSchema, AttributeTestUtil.attributesFactory(), transformedVariantFactory)
 
     def "selects producer variant with requested attributes"() {
         def variant1 = resolvedVariant()
@@ -67,10 +62,10 @@ class DefaultArtifactTransformsTest extends Specification {
         variant2.attributes >> typeAttributes("jar")
 
         consumerSchema.withProducer(producerSchema) >> attributeMatcher
-        attributeMatcher.matches(variants, typeAttributes("classes")) >> [variant1]
+        attributeMatcher.matches(variants, typeAttributes("classes"), _ as AttributeMatchingExplanationBuilder) >> [variant1]
 
         expect:
-        def result = transforms.variantSelector(typeAttributes("classes"), true, dependenciesResolver).select(set)
+        def result = transforms.variantSelector(typeAttributes("classes"), true, dependenciesResolver).select(set, factory)
         result == variant1Artifacts
     }
 
@@ -90,19 +85,18 @@ class DefaultArtifactTransformsTest extends Specification {
         variant2.attributes >> typeAttributes("jar")
 
         consumerSchema.withProducer(producerSchema) >> attributeMatcher
-        attributeMatcher.matches(variants, typeAttributes("classes")) >> [variant1, variant2]
+        attributeMatcher.matches(variants, typeAttributes("classes"), _ as AttributeMatchingExplanationBuilder) >> [variant1, variant2]
+        attributeMatcher.isMatching(_, _, _) >> true
 
         when:
-        def result = transforms.variantSelector(typeAttributes("classes"), true, dependenciesResolver).select(set)
+        def result = transforms.variantSelector(typeAttributes("classes"), true, dependenciesResolver).select(set, factory)
         visit(result)
 
         then:
         def e = thrown(AmbiguousVariantSelectionException)
-        e.message == toPlatformLineSeparators("""More than one variant of <component> matches the consumer attributes:
-  - <variant1>:
-      - Required artifactType 'classes' and found incompatible value 'classes'.
-  - <variant2>:
-      - Required artifactType 'classes' and found incompatible value 'jar'.""")
+        e.message == toPlatformLineSeparators("""The consumer was configured to find attribute 'artifactType' with value 'classes'. However we cannot choose between the following variants of <component>:
+  - <variant1> declares attribute 'artifactType' with value 'classes'
+  - <variant2> declares attribute 'artifactType' with value 'jar'""")
     }
 
     private ResolvedVariant resolvedVariant() {
@@ -113,75 +107,6 @@ class DefaultArtifactTransformsTest extends Specification {
         Stub(ResolvedVariantSet) {
             getOverriddenAttributes() >> ImmutableAttributes.EMPTY
         }
-    }
-
-    def "selects variant with attributes that can be transformed to requested format"() {
-        def variant1 = resolvedVariant()
-        def variant2 = resolvedVariant()
-        def variant1Artifacts = Stub(ResolvedArtifactSet)
-        def id = Stub(ComponentIdentifier)
-        def sourceArtifactId = Stub(ComponentArtifactIdentifier)
-        def sourceArtifact = Stub(TestArtifact)
-        def sourceArtifactFile = new File("thing-1.0.jar")
-        def sourceFile = new File("thing-file.jar")
-        def outFile1 = new File("out1.classes")
-        def outFile2 = new File("out2.classes")
-        def outFile3 = new File("out3.classes")
-        def outFile4 = new File("out4.classes")
-        def set = resolvedVariantSet()
-        def variants = [variant1, variant2] as Set
-        def transformation = Mock(Transformation)
-        def listener = Mock(ResolvedArtifactSet.AsyncArtifactListener)
-        def visitor = Mock(ArtifactVisitor)
-        def targetAttributes = typeAttributes("classes")
-        def variant1DisplayName = Describables.of('variant1')
-
-        given:
-        sourceArtifact.id >> sourceArtifactId
-        set.schema >> producerSchema
-        set.variants >> variants
-        variant1.attributes >> typeAttributes("jar")
-        variant1.artifacts >> variant1Artifacts
-        variant2.attributes >> typeAttributes("dll")
-
-        consumerSchema.withProducer(producerSchema) >> attributeMatcher
-        attributeMatcher.matches(_, _) >> []
-
-        matchingCache.collectConsumerVariants(typeAttributes("jar"), targetAttributes, _) >> { AttributeContainerInternal from, AttributeContainerInternal to, ConsumerVariantMatchResult result ->
-            result.matched(to, transformation, 1)
-        }
-        matchingCache.collectConsumerVariants(typeAttributes("dll"), targetAttributes, _) >> { }
-        def result = transforms.variantSelector(targetAttributes, true, dependenciesResolver).select(set)
-
-        when:
-        result.startVisit(new TestBuildOperationExecutor.TestBuildOperationQueue<RunnableBuildOperation>(), listener).visit(visitor)
-
-        then:
-
-        _ * variant1Artifacts.startVisit(_, _) >> { BuildOperationQueue q, ResolvedArtifactSet.AsyncArtifactListener l ->
-            l.artifactAvailable(sourceArtifact)
-            l.fileAvailable(sourceFile)
-            return new ResolvedArtifactSet.Completion() {
-                @Override
-                void visit(ArtifactVisitor v) {
-                    v.visitArtifact(variant1DisplayName, targetAttributes, sourceArtifact)
-                    v.visitFile(new ComponentFileArtifactIdentifier(id, sourceFile.name), variant1DisplayName, targetAttributes, sourceFile)
-                }
-            }
-        }
-        _ * transformation.getDisplayName() >> "transform"
-        _ * transformation.requiresDependencies() >> false
-
-        1 * transformation.transform({ it.files == [sourceArtifactFile]}, _ as ExecutionGraphDependenciesResolver) >> Try.successful(TransformationSubject.initial(sourceArtifactId, sourceArtifactFile).createSubjectFromResult(ImmutableList.of(outFile1, outFile2)))
-
-        1 * transformation.transform({ it.files == [sourceFile] }, _ as ExecutionGraphDependenciesResolver) >> Try.successful(TransformationSubject.initial(sourceFile).createSubjectFromResult(ImmutableList.of(outFile3, outFile4)))
-
-        1 * visitor.visitArtifact(variant1DisplayName, targetAttributes, {it.file == outFile1})
-        1 * visitor.visitArtifact(variant1DisplayName, targetAttributes, {it.file == outFile2})
-        1 * visitor.visitFile(new ComponentFileArtifactIdentifier(id, outFile3.name), variant1DisplayName, targetAttributes, outFile3)
-        1 * visitor.visitFile(new ComponentFileArtifactIdentifier(id, outFile4.name), variant1DisplayName, targetAttributes, outFile4)
-        0 * visitor._
-        0 * transformation._
     }
 
     def "fails when multiple transforms match"() {
@@ -200,25 +125,31 @@ class DefaultArtifactTransformsTest extends Specification {
         variant2.asDescribable() >> Describables.of('<variant2>')
 
         consumerSchema.withProducer(producerSchema) >> attributeMatcher
-        attributeMatcher.matches(_, _) >> []
+        attributeMatcher.matches(_, _, _) >> []
 
-        matchingCache.collectConsumerVariants(_, _, _) >> { AttributeContainerInternal from, AttributeContainerInternal to, ConsumerVariantMatchResult result ->
-                result.matched(to, Stub(Transformation), 1)
+        matchingCache.collectConsumerVariants(_, _) >> { ImmutableAttributes from, ImmutableAttributes to ->
+            match(to, Stub(TransformationStep), 1)
         }
 
         def selector = transforms.variantSelector(typeAttributes("dll"), true, dependenciesResolver)
 
         when:
-        def result = selector.select(set)
+        def result = selector.select(set, factory)
         visit(result)
 
         then:
         def e = thrown(AmbiguousTransformException)
-        e.message == toPlatformLineSeparators("""Found multiple transforms that can produce a variant of <component> for consumer attributes:
+        e.message == toPlatformLineSeparators("""Found multiple transforms that can produce a variant of <component> with requested attributes:
   - artifactType 'dll'
 Found the following transforms:
-  - Transform from <variant1>: artifactType 'jar'
-  - Transform from <variant2>: artifactType 'classes'""")
+  - From '<variant1>':
+      - With source attributes: artifactType 'jar'
+      - Candidate transform(s):
+          - Transform '' producing attributes: artifactType 'dll'
+  - From '<variant2>':
+      - With source attributes: artifactType 'classes'
+      - Candidate transform(s):
+          - Transform '' producing attributes: artifactType 'dll'""")
     }
 
     def "returns empty variant when no variants match and ignore no matching enabled"() {
@@ -234,13 +165,12 @@ Found the following transforms:
         variant2.attributes >> typeAttributes("classes")
 
         consumerSchema.withProducer(producerSchema) >> attributeMatcher
-        attributeMatcher.matches(_, _) >> []
+        attributeMatcher.matches(_, _, _) >> []
 
-        matchingCache.collectConsumerVariants(typeAttributes("dll"), typeAttributes("jar"), _) >> null
-        matchingCache.collectConsumerVariants(typeAttributes("dll"), typeAttributes("classes"), _) >> null
+        matchingCache.collectConsumerVariants(_, _) >> new MutableConsumerVariantMatchResult(0)
 
         expect:
-        def result = transforms.variantSelector(typeAttributes("dll"), true, dependenciesResolver).select(set)
+        def result = transforms.variantSelector(typeAttributes("dll"), true, dependenciesResolver).select(set, factory)
         result == ResolvedArtifactSet.EMPTY
     }
 
@@ -260,28 +190,29 @@ Found the following transforms:
         variant2.asDescribable() >> Describables.of('<variant2>')
 
         consumerSchema.withProducer(producerSchema) >> attributeMatcher
-        attributeMatcher.matches(_, _) >> []
+        attributeMatcher.matches(_, _, _) >> []
 
-        matchingCache.collectConsumerVariants(typeAttributes("dll"), typeAttributes("jar"), _) >> null
-        matchingCache.collectConsumerVariants(typeAttributes("dll"), typeAttributes("classes"), _) >> null
+        matchingCache.collectConsumerVariants(_, _) >> new MutableConsumerVariantMatchResult(0)
 
         when:
-        def result = transforms.variantSelector(typeAttributes("dll"), false, dependenciesResolver).select(set)
+        def result = transforms.variantSelector(typeAttributes("dll"), false, dependenciesResolver).select(set, factory)
         visit(result)
 
         then:
         def e = thrown(NoMatchingVariantSelectionException)
-        e.message == toPlatformLineSeparators("""No variants of <component> match the consumer attributes:
+        e.message == toPlatformLineSeparators("""No variants of  match the consumer attributes:
   - <variant1>:
-      - Required artifactType 'dll' and found incompatible value 'jar'.
+      - Incompatible because this component declares attribute 'artifactType' with value 'jar' and the consumer needed attribute 'artifactType' with value 'dll'
   - <variant2>:
-      - Required artifactType 'dll' and found incompatible value 'classes'.""")
+      - Incompatible because this component declares attribute 'artifactType' with value 'classes' and the consumer needed attribute 'artifactType' with value 'dll'""")
     }
 
     def visit(ResolvedArtifactSet set) {
-        def visitor = Stub(ArtifactVisitor)
-        _ * visitor.visitFailure(_) >> { Throwable t -> throw t }
-        set.startVisit(new TestBuildOperationExecutor.TestBuildOperationQueue<RunnableBuildOperation>(), Stub(ResolvedArtifactSet.AsyncArtifactListener)).visit(visitor)
+        def artifactVisitor = Stub(ArtifactVisitor)
+        _ * artifactVisitor.visitFailure(_) >> { Throwable t -> throw t }
+        def visitor = Stub(ResolvedArtifactSet.Visitor)
+        _ * visitor.visitArtifacts(_) >> { ResolvedArtifactSet.Artifacts artifacts -> artifacts.visit(artifactVisitor) }
+        set.visit(visitor)
     }
 
     private static AttributeContainerInternal typeAttributes(String artifactType) {
@@ -290,5 +221,9 @@ Found the following transforms:
         attributeContainer.asImmutable()
     }
 
-    interface TestArtifact extends ResolvableArtifact, Buildable {}
+    static MutableConsumerVariantMatchResult match(ImmutableAttributes output, TransformationStep trn, int depth) {
+        def result = new MutableConsumerVariantMatchResult(2)
+        result.matched(output, trn, null, depth)
+        result
+    }
 }

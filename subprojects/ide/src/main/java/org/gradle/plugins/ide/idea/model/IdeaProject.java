@@ -36,7 +36,7 @@ import java.io.File;
 import java.util.List;
 import java.util.Set;
 
-import static org.gradle.util.ConfigureUtil.configure;
+import static org.gradle.util.internal.ConfigureUtil.configure;
 
 /**
  * Enables fine-tuning project details (*.ipr file) of the IDEA plugin.
@@ -47,8 +47,10 @@ import static org.gradle.util.ConfigureUtil.configure;
  * <pre class='autoTested'>
  * import org.gradle.plugins.ide.idea.model.*
  *
- * apply plugin: 'java'
- * apply plugin: 'idea'
+ * plugins {
+ *     id 'java'
+ *     id 'idea'
+ * }
  *
  * idea {
  *   project {
@@ -63,7 +65,7 @@ import static org.gradle.util.ConfigureUtil.configure;
  *     vcs = 'Git'
  *
  *     //you can change the modules of the *.ipr
- *     //modules = project(':someProject').idea.module
+ *     //modules = project(':some-project').idea.module
  *
  *     //you can change the output file
  *     outputFile = new File(outputFile.parentFile, 'someBetterName.ipr')
@@ -83,8 +85,10 @@ import static org.gradle.util.ConfigureUtil.configure;
  * Examples of advanced configuration:
  *
  * <pre class='autoTested'>
- * apply plugin: 'java'
- * apply plugin: 'idea'
+ * plugins {
+ *     id 'java'
+ *     id 'idea'
+ * }
  *
  * idea {
  *   project {
@@ -334,6 +338,7 @@ public class IdeaProject implements IdeWorkspace {
         this.pathFactory = pathFactory;
     }
 
+    @SuppressWarnings("unchecked")
     public void mergeXmlProject(Project xmlProject) {
         ipr.getBeforeMerged().execute(xmlProject);
         xmlProject.configure(getModules(), getJdkName(), getLanguageLevel(), getTargetBytecodeVersion(), getWildcards(), getProjectLibraries(), getVcs());

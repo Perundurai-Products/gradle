@@ -17,6 +17,7 @@
 package org.gradle.integtests.resolve.locking
 
 import org.gradle.integtests.fixtures.AbstractDependencyResolutionTest
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 
 class MixedDependencyLockingIntegrationTest extends AbstractDependencyResolutionTest {
 
@@ -26,6 +27,7 @@ class MixedDependencyLockingIntegrationTest extends AbstractDependencyResolution
         settingsFile << "rootProject.name = 'mixedDepLock'"
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def 'can resolve locked and unlocked configurations'() {
         mavenRepo.module('org', 'foo', '1.0').publish()
         mavenRepo.module('org', 'foo', '1.1').publish()
@@ -41,7 +43,7 @@ configurations {
     lockedConf {
         resolutionStrategy.activateDependencyLocking()
     }
-    
+
     unlockedConf
 }
 
@@ -51,7 +53,7 @@ dependencies {
 }
 """
 
-        lockfileFixture.createLockfile('lockedConf', ['org:foo:1.0'])
+        lockfileFixture.createLockfile('lockedConf', ['org:foo:1.0'], false)
 
         when:
         succeeds 'dependencyInsight', '--configuration', 'lockedConf', '--dependency', 'foo'
@@ -69,6 +71,7 @@ dependencies {
 
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def 'ignores the lockfile of a parent configuration when resolving an unlocked child configuration'() {
         mavenRepo.module('org', 'foo', '1.0').publish()
         mavenRepo.module('org', 'foo', '1.1').publish()
@@ -84,7 +87,7 @@ configurations {
     lockedConf {
         resolutionStrategy.activateDependencyLocking()
     }
-    
+
     unlockedConf.extendsFrom lockedConf
 }
 
@@ -93,7 +96,7 @@ dependencies {
 }
 """
 
-        lockfileFixture.createLockfile('lockedConf', ['org:foo:1.0'])
+        lockfileFixture.createLockfile('lockedConf', ['org:foo:1.0'], false)
 
         when:
         succeeds 'dependencyInsight', '--configuration', 'unlockedConf', '--dependency', 'foo'
@@ -103,6 +106,7 @@ dependencies {
         outputDoesNotContain('constraint')
     }
 
+    @ToBeFixedForConfigurationCache(because = ":dependencyInsight")
     def 'applies the lock file to inherited dependencies'() {
         mavenRepo.module('org', 'foo', '1.0').publish()
         mavenRepo.module('org', 'foo', '1.1').publish()
@@ -128,7 +132,7 @@ dependencies {
 }
 """
 
-        lockfileFixture.createLockfile('lockedConf', ['org:foo:1.0'])
+        lockfileFixture.createLockfile('lockedConf', ['org:foo:1.0'], false)
 
         when:
         succeeds 'dependencyInsight', '--configuration', 'lockedConf', '--dependency', 'foo'
@@ -138,6 +142,7 @@ dependencies {
         outputContains('dependency was locked to version \'1.0\'')
     }
 
+    @ToBeFixedForConfigurationCache
     def 'writes lock file entries for inherited dependencies'() {
         mavenRepo.module('org', 'foo', '1.0').publish()
         mavenRepo.module('org', 'foo', '1.1').publish()

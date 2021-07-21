@@ -16,8 +16,6 @@
 
 package org.gradle.api.internal.tasks.testing;
 
-import javax.annotation.Nullable;
-
 public class DecoratingTestDescriptor implements TestDescriptorInternal {
     private final TestDescriptorInternal descriptor;
     private final TestDescriptorInternal parent;
@@ -46,12 +44,6 @@ public class DecoratingTestDescriptor implements TestDescriptorInternal {
         return descriptor.getId();
     }
 
-    @Nullable
-    @Override
-    public Object getOwnerBuildOperationId() {
-        return descriptor.getOwnerBuildOperationId();
-    }
-
     @Override
     public String getDisplayName() {
         return descriptor.getDisplayName();
@@ -75,10 +67,5 @@ public class DecoratingTestDescriptor implements TestDescriptorInternal {
     @Override
     public boolean isComposite() {
         return descriptor.isComposite();
-    }
-
-    @Override
-    public boolean isRoot() {
-        return descriptor.isRoot();
     }
 }

@@ -16,26 +16,43 @@
 
 package org.gradle.api.internal.tasks;
 
-import org.gradle.api.internal.file.FileResolver;
+import org.gradle.api.Action;
+import org.gradle.api.internal.file.FileOperations;
+import org.gradle.internal.file.ReservedFileSystemLocationRegistry;
+import org.gradle.internal.reflect.validation.PropertyProblemBuilder;
+import org.gradle.internal.reflect.validation.TypeProblemBuilder;
+import org.gradle.internal.reflect.validation.TypeValidationContext;
 
-import java.util.Collection;
+import java.io.File;
 
-public class DefaultTaskValidationContext implements TaskValidationContext {
-    private final FileResolver resolver;
-    private final Collection<String> messages;
+public class DefaultTaskValidationContext implements TaskValidationContext, TypeValidationContext {
+    private final FileOperations fileOperations;
+    private final ReservedFileSystemLocationRegistry reservedFileSystemLocationRegistry;
+    private final TypeValidationContext delegate;
 
-    public DefaultTaskValidationContext(FileResolver resolver, Collection<String> messages) {
-        this.resolver = resolver;
-        this.messages = messages;
+    public DefaultTaskValidationContext(FileOperations fileOperations, ReservedFileSystemLocationRegistry reservedFileSystemLocationRegistry, TypeValidationContext delegate) {
+        this.fileOperations = fileOperations;
+        this.reservedFileSystemLocationRegistry = reservedFileSystemLocationRegistry;
+        this.delegate = delegate;
     }
 
     @Override
-    public FileResolver getResolver() {
-        return resolver;
+    public void visitTypeProblem(Action<? super TypeProblemBuilder> problemSpec) {
+        delegate.visitTypeProblem(problemSpec);
     }
 
     @Override
-    public void recordValidationMessage(String message) {
-        messages.add(message);
+    public void visitPropertyProblem(Action<? super PropertyProblemBuilder> problemSpec) {
+        delegate.visitPropertyProblem(problemSpec);
+    }
+
+    @Override
+    public FileOperations getFileOperations() {
+        return fileOperations;
+    }
+
+    @Override
+    public boolean isInReservedFileSystemLocation(File location) {
+        return reservedFileSystemLocationRegistry.isInReservedFileSystemLocation(location);
     }
 }

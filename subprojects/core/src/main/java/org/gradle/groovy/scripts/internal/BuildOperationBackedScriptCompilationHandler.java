@@ -19,14 +19,14 @@ package org.gradle.groovy.scripts.internal;
 import groovy.lang.Script;
 import org.codehaus.groovy.ast.ClassNode;
 import org.gradle.api.Action;
-import org.gradle.api.internal.initialization.loadercache.ClassLoaderId;
+import org.gradle.api.internal.initialization.ClassLoaderScope;
 import org.gradle.groovy.scripts.ScriptSource;
+import org.gradle.internal.classpath.ClassPath;
 import org.gradle.internal.hash.HashCode;
 import org.gradle.internal.operations.BuildOperationContext;
 import org.gradle.internal.operations.BuildOperationDescriptor;
 import org.gradle.internal.operations.BuildOperationExecutor;
 import org.gradle.internal.operations.RunnableBuildOperation;
-import org.gradle.internal.resource.ResourceLocation;
 import org.gradle.internal.scripts.CompileScriptBuildOperationType;
 
 import java.io.File;
@@ -57,10 +57,8 @@ public class BuildOperationBackedScriptCompilationHandler implements ScriptCompi
 
             @Override
             public BuildOperationDescriptor.Builder description() {
-                final ResourceLocation resourceLocation = source.getResource().getLocation();
-                final File file = resourceLocation.getFile();
                 String stage = transformer.getStage();
-                String name = "Compile script " + (file != null ? file.getName() : source.getDisplayName()) + " (" + stage + ")";
+                String name = "Compile " + source.getShortDisplayName() + " (" + stage + ")";
                 return BuildOperationDescriptor.displayName(name)
                     .name(name)
                     .details(new Details(stage));
@@ -69,11 +67,11 @@ public class BuildOperationBackedScriptCompilationHandler implements ScriptCompi
     }
 
     @Override
-    public <T extends Script, M> CompiledScript<T, M> loadFromDir(ScriptSource source, HashCode sourceHashCode, ClassLoader classLoader, File scriptCacheDir, File metadataCacheDir, CompileOperation<M> transformer, Class<T> scriptBaseClass, ClassLoaderId classLoaderId) {
-        return delegate.loadFromDir(source, sourceHashCode, classLoader, scriptCacheDir, metadataCacheDir, transformer, scriptBaseClass, classLoaderId);
+    public <T extends Script, M> CompiledScript<T, M> loadFromDir(ScriptSource source, HashCode sourceHashCode, ClassLoaderScope targetScope, ClassPath scriptClassPath, File metadataCacheDir, CompileOperation<M> transformer, Class<T> scriptBaseClass) {
+        return delegate.loadFromDir(source, sourceHashCode, targetScope, scriptClassPath, metadataCacheDir, transformer, scriptBaseClass);
     }
 
-    private class Details implements CompileScriptBuildOperationType.Details {
+    private static class Details implements CompileScriptBuildOperationType.Details {
 
         private final String stage;
 

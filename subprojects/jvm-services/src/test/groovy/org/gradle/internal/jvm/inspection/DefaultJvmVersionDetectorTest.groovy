@@ -16,13 +16,24 @@
 
 package org.gradle.internal.jvm.inspection
 
+import org.gradle.api.GradleException
 import org.gradle.api.JavaVersion
 import org.gradle.api.internal.file.TestFiles
 import org.gradle.internal.jvm.Jvm
+import org.gradle.process.internal.ExecException
+import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
+import org.junit.Rule
 import spock.lang.Specification
 
 class DefaultJvmVersionDetectorTest extends Specification {
-    def detector = new DefaultJvmVersionDetector(TestFiles.execHandleFactory())
+    @Rule
+    TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider(DefaultJvmVersionDetectorTest)
+    DefaultJvmVersionDetector detector = new DefaultJvmVersionDetector(
+        new DefaultJvmMetadataDetector(
+            TestFiles.execHandleFactory(),
+            TestFiles.tmpDirTemporaryFileProvider(tmpDir.root)
+        )
+    )
 
     def "can determine version of current jvm"() {
         expect:
@@ -34,61 +45,38 @@ class DefaultJvmVersionDetectorTest extends Specification {
         detector.getJavaVersion(Jvm.current().getJavaExecutable().path) == JavaVersion.current()
     }
 
-    def "can parse version number"() {
+    def "can determine version of java command without file extension"() {
         expect:
-        detector.parseJavaVersionCommandOutput("/usr/bin/java", new BufferedReader(new StringReader(output))) == JavaVersion.toVersion(version)
-
-        where:
-        output                             | version
-        'java version "1.5"'               | "1.5"
-        'java version "1.5"\ntrailers'     | "1.5"
-        'headers\njava version "1.5"'      | "1.5"
-        'java version "1.5"\r\ntrailers'   | "1.5"
-        'headers\r\njava version "1.5"'    | "1.5"
-        'java version "1.8.0_11"'          | "1.8"
-        'openjdk version "1.8.0-internal"' | "1.8"
-        """java version "1.9.0-ea"
-Java(TM) SE Runtime Environment (build 1.9.0-ea-b53)
-Java HotSpot(TM) 64-Bit Server VM (build 1.9.0-ea-b53, mixed mode)
-"""                             | "1.9"
-        """Picked up _JAVA_OPTIONS: -Dset_by_java_options=1
-java version "1.8.0_91"
-Java(TM) SE Runtime Environment (build 1.8.0_91-b14)
-Java HotSpot(TM) 64-Bit Server VM (build 25.91-b14, mixed mode)
-"""                             | "1.8"
-        """java version "1.8.0_91"
-        Java(TM) SE Runtime Environment (build 1.8.0_91-b14)
-        Java HotSpot(TM) 64-Bit Server VM (build 25.91-b14, mixed mode)
-        """                     | "1.8"
-        """java version "9.0.1"
-        Java(TM) SE Runtime Environment (build 9.0.1+11)
-        Java HotSpot(TM) 64-Bit Server VM (build 9.0.1+11, mixed mode)
-        """                     | "9.0.1"
-        """java version "10-ea"
-        Java(TM) SE Runtime Environment 18.3 (build 10-ea+35)
-        Java HotSpot(TM) 64-Bit Server VM 18.3 (build 10-ea+35, mixed mode)
-        """                     | "10"
-        """java version "10-ea" 2018-03-20
-        Java(TM) SE Runtime Environment 18.3 (build 10-ea+36)
-        Java HotSpot(TM) 64-Bit Server VM 18.3 (build 10-ea+36, mixed mode)
-        """                     | "10"
+        detector.getJavaVersion(Jvm.current().getJavaExecutable().path.replace(".exe", "")) == JavaVersion.current()
     }
 
-    def "fails to parse version number"() {
+    def "fails for unknown java command"() {
         when:
-        detector.parseJavaVersionCommandOutput("/usr/bin/java", new BufferedReader(new StringReader(output)))
+        detector.getJavaVersion("unknown")
 
         then:
-        RuntimeException e = thrown()
-        e.message == "Could not determine Java version using executable /usr/bin/java."
-
-        where:
-        output << [
-                '',
-                '\n',
-                'foo',
-                'foo\nbar',
-                'foo\r\nbar'
-        ]
+        def e = thrown(ExecException)
+        e.message.contains("A problem occurred starting process 'command 'unknown''")
     }
+
+    def "fails for invalid jvm"() {
+        given:
+        def cause = new NullPointerException("cause");
+        def metadataDetector = Mock(JvmMetadataDetector) {
+            getMetadata(_ as File) >> {
+                return JvmInstallationMetadata.failure(new File("invalid"), cause)
+            }
+        }
+        def detector = new DefaultJvmVersionDetector(metadataDetector)
+
+        when:
+        detector.getJavaVersion(Jvm.current())
+
+        then:
+        def e = thrown(GradleException)
+        e.message.contains("Unable to determine version for JDK located")
+        e.message.contains("invalid")
+        e.cause == cause
+    }
+
 }

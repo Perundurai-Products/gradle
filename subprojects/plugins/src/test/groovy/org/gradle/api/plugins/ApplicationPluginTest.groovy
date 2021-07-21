@@ -26,7 +26,7 @@ import org.gradle.api.tasks.bundling.Zip
 import org.gradle.test.fixtures.AbstractProjectBuilderSpec
 
 class ApplicationPluginTest extends AbstractProjectBuilderSpec {
-    private final ApplicationPlugin plugin = new ApplicationPlugin();
+    private final ApplicationPlugin plugin = new ApplicationPlugin()
 
     def "applies JavaPlugin and adds convention object with default values"() {
         when:
@@ -54,11 +54,11 @@ class ApplicationPluginTest extends AbstractProjectBuilderSpec {
         then:
         def task = project.tasks[ApplicationPlugin.TASK_RUN_NAME]
         task instanceof JavaExec
-        task.classpath == project.sourceSets[SourceSet.MAIN_SOURCE_SET_NAME].runtimeClasspath
+        task.classpath.from.files == [project.sourceSets[SourceSet.MAIN_SOURCE_SET_NAME].runtimeClasspath.files]
         task TaskDependencyMatchers.dependsOn('classes')
     }
 
-    public void "adds startScripts task to project"() {
+    void "adds startScripts task to project"() {
         when:
         plugin.apply(project)
 
@@ -77,7 +77,7 @@ class ApplicationPluginTest extends AbstractProjectBuilderSpec {
         then:
         def task = project.tasks[ApplicationPlugin.TASK_DIST_ZIP_NAME]
         task instanceof Zip
-        task.archiveName == "${project.applicationName}.zip"
+        task.archiveFileName.get() == "${project.applicationName}.zip"
     }
 
     def "adds distTar task to project"() {
@@ -87,10 +87,10 @@ class ApplicationPluginTest extends AbstractProjectBuilderSpec {
         then:
         def task = project.tasks[ApplicationPlugin.TASK_DIST_TAR_NAME]
         task instanceof Tar
-        task.archiveName == "${project.applicationName}.tar"
+        task.archiveFileName.get() == "${project.applicationName}.tar"
     }
 
-    public void "applicationName is configurable"() {
+    void "applicationName is configurable"() {
         when:
         plugin.apply(project)
         project.applicationName = "SuperApp";
@@ -103,10 +103,10 @@ class ApplicationPluginTest extends AbstractProjectBuilderSpec {
         installTest.destinationDir == project.file("build/install/SuperApp")
 
         def distZipTask = project.tasks[ApplicationPlugin.TASK_DIST_ZIP_NAME]
-        distZipTask.archiveName == "SuperApp.zip"
+        distZipTask.archiveFileName.get() == "SuperApp.zip"
     }
 
-    public void "executableDir is configurable"() {
+    void "executableDir is configurable"() {
         when:
         plugin.apply(project)
         project.applicationName = "myApp";
@@ -117,7 +117,7 @@ class ApplicationPluginTest extends AbstractProjectBuilderSpec {
         startScripts.executableDir == "custom_bin"
     }
 
-    public void "mainClassName in project delegates to main in run task"() {
+    void "mainClassName in project delegates to main in run task"() {
         when:
         plugin.apply(project)
         project.mainClassName = "Acme";
@@ -127,7 +127,7 @@ class ApplicationPluginTest extends AbstractProjectBuilderSpec {
         run.main == "Acme"
     }
 
-    public void "mainClassName in project delegates to mainClassName in startScripts task"() {
+    void "mainClassName in project delegates to mainClassName in startScripts task"() {
         when:
         plugin.apply(project);
         project.mainClassName = "Acme"
@@ -137,7 +137,7 @@ class ApplicationPluginTest extends AbstractProjectBuilderSpec {
         startScripts.mainClassName == "Acme"
     }
 
-    public void "applicationDefaultJvmArgs in project delegates to jvmArgs in run task"() {
+    void "applicationDefaultJvmArgs in project delegates to jvmArgs in run task"() {
         when:
         plugin.apply(project)
         project.applicationDefaultJvmArgs = ['-Dfoo=bar', '-Xmx500m']
@@ -147,13 +147,38 @@ class ApplicationPluginTest extends AbstractProjectBuilderSpec {
         run.jvmArgs == ['-Dfoo=bar', '-Xmx500m']
     }
 
-    public void "applicationDefaultJvmArgs in project delegates to defaultJvmOpts in startScripts task"() {
+    void "applicationDefaultJvmArgs in project delegates to defaultJvmOpts in startScripts task"() {
         when:
-        plugin.apply(project);
+        plugin.apply(project)
         project.applicationDefaultJvmArgs = ['-Dfoo=bar', '-Xmx500m']
 
         then:
         def startScripts = project.tasks[ApplicationPlugin.TASK_START_SCRIPTS_NAME]
         startScripts.defaultJvmOpts == ['-Dfoo=bar', '-Xmx500m']
+    }
+
+    void "module path inference is turned on for all tasks by default"() {
+        when:
+        plugin.apply(project)
+
+        then:
+        project.tasks.getByName("compileJava").modularity.inferModulePath.get()
+        project.tasks.getByName("compileTestJava").modularity.inferModulePath.get()
+        project.tasks.getByName("test").modularity.inferModulePath.get()
+        project.tasks.getByName("run").modularity.inferModulePath.get()
+        project.tasks.getByName("startScripts").modularity.inferModulePath.get()
+    }
+
+    void "module path inference can be turned off for all tasks"() {
+        when:
+        plugin.apply(project)
+        project.extensions.getByType(JavaPluginExtension).modularity.inferModulePath.set(false)
+
+        then:
+        !project.tasks.getByName("compileJava").modularity.inferModulePath.get()
+        !project.tasks.getByName("compileTestJava").modularity.inferModulePath.get()
+        !project.tasks.getByName("test").modularity.inferModulePath.get()
+        !project.tasks.getByName("run").modularity.inferModulePath.get()
+        !project.tasks.getByName("startScripts").modularity.inferModulePath.get()
     }
 }

@@ -16,11 +16,9 @@
 
 package org.gradle.language.swift.plugins;
 
-import org.gradle.api.Incubating;
 import org.gradle.api.Plugin;
 import org.gradle.api.Project;
 import org.gradle.api.internal.attributes.ImmutableAttributesFactory;
-import org.gradle.api.internal.file.FileOperations;
 import org.gradle.api.model.ObjectFactory;
 import org.gradle.api.provider.ProviderFactory;
 import org.gradle.language.internal.NativeComponentFactory;
@@ -30,9 +28,11 @@ import org.gradle.language.swift.SwiftApplication;
 import org.gradle.language.swift.SwiftExecutable;
 import org.gradle.language.swift.SwiftPlatform;
 import org.gradle.language.swift.internal.DefaultSwiftApplication;
+import org.gradle.language.swift.internal.DefaultSwiftPlatform;
 import org.gradle.nativeplatform.TargetMachineFactory;
+import org.gradle.nativeplatform.platform.internal.Architectures;
 import org.gradle.nativeplatform.platform.internal.DefaultNativePlatform;
-import org.gradle.util.GUtil;
+import org.gradle.util.internal.GUtil;
 
 import javax.inject.Inject;
 
@@ -47,7 +47,6 @@ import static org.gradle.language.nativeplatform.internal.Dimensions.tryToBuildO
  *
  * @since 4.5
  */
-@Incubating
 public class SwiftApplicationPlugin implements Plugin<Project> {
     private final NativeComponentFactory componentFactory;
     private final ToolChainSelector toolChainSelector;
@@ -55,7 +54,7 @@ public class SwiftApplicationPlugin implements Plugin<Project> {
     private final TargetMachineFactory targetMachineFactory;
 
     /**
-     * Injects a {@link FileOperations} instance.
+     * SwiftApplicationPlugin.
      *
      * @since 4.2
      */
@@ -87,7 +86,7 @@ public class SwiftApplicationPlugin implements Plugin<Project> {
             return application.getBinaries().get().stream()
                     .filter(SwiftExecutable.class::isInstance)
                     .map(SwiftExecutable.class::cast)
-                    .filter(binary -> !binary.isOptimized() && binary.getTargetPlatform().getArchitecture().equals(DefaultNativePlatform.host().getArchitecture()))
+                    .filter(binary -> !binary.isOptimized() && Architectures.forInput(binary.getTargetMachine().getArchitecture().getName()).equals(DefaultNativePlatform.host().getArchitecture()))
                     .findFirst()
                     .orElse(application.getBinaries().get().stream()
                             .filter(SwiftExecutable.class::isInstance)
@@ -103,7 +102,8 @@ public class SwiftApplicationPlugin implements Plugin<Project> {
                     providers.provider(() -> project.getGroup().toString()), providers.provider(() -> project.getVersion().toString()),
                     variantIdentity -> {
                         if (tryToBuildOnHost(variantIdentity)) {
-                            ToolChainSelector.Result<SwiftPlatform> result = toolChainSelector.select(SwiftPlatform.class, variantIdentity.getTargetMachine());
+                            application.getSourceCompatibility().finalizeValue();
+                            ToolChainSelector.Result<SwiftPlatform> result = toolChainSelector.select(SwiftPlatform.class, new DefaultSwiftPlatform(variantIdentity.getTargetMachine(), application.getSourceCompatibility().getOrNull()));
                             application.addExecutable(variantIdentity, variantIdentity.isDebuggable() && !variantIdentity.isOptimized(), result.getTargetPlatform(), result.getToolChain(), result.getPlatformToolProvider());
                         }
                     });

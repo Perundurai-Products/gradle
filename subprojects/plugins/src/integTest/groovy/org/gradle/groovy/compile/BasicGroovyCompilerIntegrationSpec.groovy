@@ -17,25 +17,30 @@ package org.gradle.groovy.compile
 
 import com.google.common.collect.Ordering
 import org.gradle.api.Action
+import org.gradle.integtests.fixtures.FeaturePreviewsFixture
 import org.gradle.integtests.fixtures.MultiVersionIntegrationSpec
 import org.gradle.integtests.fixtures.TargetCoverage
 import org.gradle.integtests.fixtures.TestResources
 import org.gradle.integtests.fixtures.executer.ExecutionFailure
 import org.gradle.integtests.fixtures.executer.ExecutionResult
+import org.gradle.internal.reflect.problems.ValidationProblemId
+import org.gradle.internal.reflect.validation.ValidationMessageChecker
+import org.gradle.internal.reflect.validation.ValidationTestFor
 import org.gradle.test.fixtures.file.TestFile
 import org.gradle.testing.fixture.GroovyCoverage
 import org.gradle.util.Requires
 import org.gradle.util.TestPrecondition
+import org.junit.Assume
 import org.junit.Rule
 import spock.lang.Ignore
 import spock.lang.Issue
 
-@TargetCoverage({GroovyCoverage.ALL})
-abstract class BasicGroovyCompilerIntegrationSpec extends MultiVersionIntegrationSpec {
+@TargetCoverage({ GroovyCoverage.SUPPORTED_BY_JDK })
+abstract class BasicGroovyCompilerIntegrationSpec extends MultiVersionIntegrationSpec implements ValidationMessageChecker {
     @Rule
     TestResources resources = new TestResources(temporaryFolder)
 
-    String groovyDependency = "org.codehaus.groovy:groovy-all:$version"
+    String groovyDependency
 
     String getGroovyVersionNumber() {
         version.split(":", 2)[0]
@@ -45,6 +50,7 @@ abstract class BasicGroovyCompilerIntegrationSpec extends MultiVersionIntegratio
         // necessary for picking up some of the output/errorOutput when forked executer is used
         executer.withArgument("-i")
         executer.withRepositoryMirrors()
+        groovyDependency = "org.codehaus.groovy:groovy-all:$version"
     }
 
     def "compileGoodCode"() {
@@ -60,9 +66,7 @@ abstract class BasicGroovyCompilerIntegrationSpec extends MultiVersionIntegratio
     }
 
     def "compileWithAnnotationProcessor"() {
-        if (versionLowerThan("1.7")) {
-            return
-        }
+        Assume.assumeFalse(versionLowerThan("1.7"))
 
         when:
         writeAnnotationProcessingBuild(
@@ -79,10 +83,61 @@ abstract class BasicGroovyCompilerIntegrationSpec extends MultiVersionIntegratio
         groovyClassFile('Groovy$$Generated.class').exists()
     }
 
+    def "can compile with annotation processor that takes arguments"() {
+        Assume.assumeFalse(versionLowerThan("1.7"))
+
+        when:
+        writeAnnotationProcessingBuild(
+            "", // no Java
+            "$annotationText class Groovy {}"
+        )
+        setupAnnotationProcessor()
+        enableAnnotationProcessingOfJavaStubs()
+        buildFile << """
+            compileGroovy.options.compilerArgumentProviders.add(new SuffixArgumentProvider("Gen"))
+            class SuffixArgumentProvider implements CommandLineArgumentProvider {
+                @Input
+                String suffix
+
+                SuffixArgumentProvider(String suffix) {
+                    this.suffix = suffix
+                }
+
+                @Override
+                List<String> asArguments() {
+                    ["-Asuffix=\${suffix}".toString()]
+                }
+            }
+        """
+
+        then:
+        succeeds("compileGroovy")
+        groovyClassFile('Groovy.class').exists()
+        groovyGeneratedSourceFile('Groovy$$Gen.java').exists()
+        groovyClassFile('Groovy$$Gen.class').exists()
+    }
+
+    def "disableIncrementalCompilationWithAnnotationProcessor"() {
+        Assume.assumeFalse(versionLowerThan("1.7"))
+
+        when:
+        writeAnnotationProcessingBuild(
+            "", // no Java
+            "$annotationText class Groovy {}"
+        )
+        setupAnnotationProcessor()
+        enableAnnotationProcessingOfJavaStubs()
+        enableIncrementalCompilation()
+
+        then:
+        fails("compileGroovy")
+        failure.assertHasCause(
+            'Enabling incremental compilation and configuring Java annotation processors for Groovy compilation is not allowed. ' +
+                'Disable incremental Groovy compilation or remove the Java annotation processor configuration.')
+    }
+
     def "compileBadCodeWithAnnotationProcessor"() {
-        if (versionLowerThan("1.7")) {
-            return
-        }
+        Assume.assumeFalse(versionLowerThan("1.7"))
 
         when:
         writeAnnotationProcessingBuild(
@@ -173,9 +228,7 @@ abstract class BasicGroovyCompilerIntegrationSpec extends MultiVersionIntegratio
     }
 
     def "jointCompileWithAnnotationProcessor"() {
-        if (versionLowerThan("1.7")) {
-            return
-        }
+        Assume.assumeFalse(versionLowerThan("1.7"))
 
         when:
         writeAnnotationProcessingBuild(
@@ -214,9 +267,7 @@ abstract class BasicGroovyCompilerIntegrationSpec extends MultiVersionIntegratio
     }
 
     def "jointCompileBadCodeWithAnnotationProcessor"() {
-        if (versionLowerThan("1.7")) {
-            return
-        }
+        Assume.assumeFalse(versionLowerThan("1.7"))
 
         when:
         writeAnnotationProcessingBuild(
@@ -302,9 +353,7 @@ abstract class BasicGroovyCompilerIntegrationSpec extends MultiVersionIntegratio
     }
 
     def "groovyToolClassesAreNotVisible"() {
-        if (versionLowerThan("2.0")) {
-            return
-        }
+        Assume.assumeFalse(versionLowerThan("2.0"))
 
         groovyDependency = "org.codehaus.groovy:groovy:$version"
 
@@ -313,7 +362,7 @@ abstract class BasicGroovyCompilerIntegrationSpec extends MultiVersionIntegratio
         failure.assertHasErrorOutput('unable to resolve class AntBuilder')
 
         when:
-        buildFile << "dependencies { compile 'org.codehaus.groovy:groovy-ant:${version}' }"
+        buildFile << "dependencies { implementation 'org.codehaus.groovy:groovy-ant:${version}' }"
 
         then:
         succeeds("compileGroovy")
@@ -348,9 +397,7 @@ abstract class BasicGroovyCompilerIntegrationSpec extends MultiVersionIntegratio
     }
 
     def "configurationScriptNotSupported"() {
-        if (!versionLowerThan("2.1")) {
-            return
-        }
+        Assume.assumeTrue(versionLowerThan("2.1"))
 
         expect:
         fails("compileGroovy")
@@ -358,37 +405,44 @@ abstract class BasicGroovyCompilerIntegrationSpec extends MultiVersionIntegratio
     }
 
     def "useConfigurationScript"() {
-        if (versionLowerThan("2.1")) {
-            return
-        }
+        Assume.assumeFalse(versionLowerThan("2.1"))
+        Assume.assumeFalse('Test must run with 9+, cannot guarantee that with a lower toolchain', getClass().name.contains("LowerToolchain"))
 
         expect:
         fails("compileGroovy")
         checkCompileOutput('Cannot find matching method java.lang.String#bar()')
     }
 
+    @ValidationTestFor(
+        ValidationProblemId.INPUT_FILE_DOES_NOT_EXIST
+    )
     def "failsBecauseOfMissingConfigFile"() {
-        if (versionLowerThan("2.1")) {
-            return
-        }
+        Assume.assumeFalse(versionLowerThan("2.1"))
+        expectReindentedValidationMessage()
+
         expect:
+        def configFile = file('groovycompilerconfig.groovy')
         fails("compileGroovy")
-        failure.assertHasCause("File '${file('groovycompilerconfig.groovy')}' specified for property 'groovyOptions.configurationScript' does not exist.")
+        failureDescriptionContains(inputDoesNotExist {
+            type('org.gradle.api.tasks.compile.GroovyCompile')
+                .property('groovyOptions.configurationScript')
+                .file(configFile)
+                .includeLink()
+        })
     }
 
     def "failsBecauseOfInvalidConfigFile"() {
-        if (versionLowerThan("2.1")) {
-            return
-        }
+        Assume.assumeFalse(versionLowerThan("2.1"))
         expect:
         fails("compileGroovy")
         failure.assertHasCause("Could not execute Groovy compiler configuration script: ${file('groovycompilerconfig.groovy')}")
     }
 
     // JavaFx was removed in JDK 10
-    // Only oracle distribution contains JavaFx
-    @Requires([TestPrecondition.JDK8_OR_LATER, TestPrecondition.JDK9_OR_EARLIER, TestPrecondition.NOT_JDK_IBM])
+    @Requires(TestPrecondition.JDK9_OR_EARLIER)
     def "compileJavaFx8Code"() {
+        Assume.assumeFalse("Setup invalid with toolchains", getClass().name.contains('Toolchain') && !getClass().name.contains('SameToolchain'))
+
         expect:
         succeeds("compileGroovy")
     }
@@ -420,7 +474,7 @@ abstract class BasicGroovyCompilerIntegrationSpec extends MultiVersionIntegratio
             apply plugin: 'groovy'
             ${mavenCentralRepository()}
             dependencies {
-                compile 'org.codehaus.groovy:groovy:2.4.3:grooid'
+                implementation 'org.codehaus.groovy:groovy:2.4.3:grooid'
             }
         """
 
@@ -541,7 +595,7 @@ abstract class BasicGroovyCompilerIntegrationSpec extends MultiVersionIntegratio
     private void configureGroovy() {
         buildFile << """
 dependencies {
-    compile '${groovyDependency.toString()}'
+    implementation '${groovyDependency.toString()}'
 }
 
 ${compilerConfiguration()}
@@ -575,7 +629,10 @@ ${compilerConfiguration()}
 
     def writeAnnotationProcessorProject() {
         file("processor").create {
-            file("build.gradle") << "apply plugin: 'java'"
+            file("build.gradle") << """apply plugin: 'java'
+
+${annotationProcessorExtraSetup()}
+"""
             "src/main" {
                 file("resources/META-INF/services/javax.annotation.processing.Processor") << "com.test.SimpleAnnotationProcessor"
                 "java/com/test/" {
@@ -599,25 +656,34 @@ ${compilerConfiguration()}
                         import java.io.IOException;
                         import java.io.Writer;
                         import java.util.Set;
+                        import java.util.Map;
 
-                        import javax.annotation.processing.AbstractProcessor;
-                        import javax.annotation.processing.RoundEnvironment;
-                        import javax.annotation.processing.SupportedAnnotationTypes;
+                        import javax.annotation.processing.*;
                         import javax.lang.model.element.Element;
                         import javax.lang.model.element.TypeElement;
                         import javax.lang.model.SourceVersion;
                         import javax.tools.JavaFileObject;
 
                         @SupportedAnnotationTypes("com.test.SimpleAnnotation")
+                        @SupportedOptions({ "suffix" })
                         public class SimpleAnnotationProcessor extends AbstractProcessor {
+                            private Map<String, String> options;
+
+                            @Override
+                            public synchronized void init(ProcessingEnvironment processingEnv) {
+                                super.init(processingEnv);
+                                options = processingEnv.getOptions();
+                            }
+
                             @Override
                             public boolean process(final Set<? extends TypeElement> annotations, final RoundEnvironment roundEnv) {
                                 if (isClasspathContaminated()) {
                                     throw new RuntimeException("Annotation Processor Classpath is contaminated by Gradle ClassLoader");
                                 }
 
+                                final String suffix = options.getOrDefault("suffix", "Generated");
                                 for (final Element classElement : roundEnv.getElementsAnnotatedWith(SimpleAnnotation.class)) {
-                                    final String className = String.format("%s\$\$Generated", classElement.getSimpleName().toString());
+                                    final String className = String.format("%s\$\$%s", classElement.getSimpleName().toString(), suffix);
 
                                     Writer writer = null;
                                     try {
@@ -662,6 +728,10 @@ ${compilerConfiguration()}
         }
     }
 
+    String annotationProcessorExtraSetup() {
+        ""
+    }
+
     String checkCompileOutput(String errorMessage) {
         failure.assertHasErrorOutput(errorMessage)
     }
@@ -701,5 +771,14 @@ ${compilerConfiguration()}
         buildFile << """
                 compileGroovy.groovyOptions.javaAnnotationProcessing = true
             """
+    }
+
+    private void enableIncrementalCompilation() {
+        FeaturePreviewsFixture.enableGroovyCompilationAvoidance(settingsFile)
+        buildFile << '''
+tasks.withType(GroovyCompile) {
+    options.incremental = true
+}
+'''
     }
 }

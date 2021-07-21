@@ -126,10 +126,10 @@ class IdeaPluginTest extends AbstractProjectBuilderSpec {
         project.idea.project.languageLevel.level == new IdeaLanguageLevel(project.sourceCompatibility).level
 
         project.idea.module.scopes == [
-                PROVIDED: [plus: [project.configurations.compileClasspath, project.configurations.annotationProcessor], minus: []],
+                PROVIDED: [plus: [project.configurations.compileClasspath], minus: []],
                 COMPILE: [plus: [], minus: []],
                 RUNTIME: [plus: [project.configurations.runtimeClasspath], minus: []],
-                TEST: [plus: [project.configurations.testCompileClasspath, project.configurations.testRuntimeClasspath, project.configurations.testAnnotationProcessor], minus: []],
+                TEST: [plus: [project.configurations.testCompileClasspath, project.configurations.testRuntimeClasspath], minus: []],
         ]
     }
 
@@ -211,6 +211,21 @@ class IdeaPluginTest extends AbstractProjectBuilderSpec {
 
         then:
         publicTypeOfExtension("idea") == typeOf(IdeaModel)
+    }
+
+    def "can add to file set properties"() {
+        given:
+        applyPluginToProjects()
+        def source = new File("foo")
+
+        when:
+        property(project.idea.module).add(source)
+
+        then:
+        property(project.idea.module).contains(source)
+
+        where:
+        property << [{ it.sourceDirs }, { it.testSourceDirs }, { it.resourceDirs }, { it.testResourceDirs }, { it.excludeDirs }]
     }
 
     private TypeOf<?> publicTypeOfExtension(String named) {

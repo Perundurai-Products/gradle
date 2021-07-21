@@ -18,8 +18,9 @@ package org.gradle.testing.jacoco.tasks;
 
 import org.gradle.api.Action;
 import org.gradle.api.GradleException;
-import org.gradle.api.specs.Spec;
+import org.gradle.api.tasks.CacheableTask;
 import org.gradle.api.tasks.Nested;
+import org.gradle.api.tasks.OutputFile;
 import org.gradle.api.tasks.TaskAction;
 import org.gradle.internal.jacoco.AntJacocoCheck;
 import org.gradle.internal.jacoco.JacocoCheckResult;
@@ -28,6 +29,7 @@ import org.gradle.internal.reflect.Instantiator;
 import org.gradle.testing.jacoco.tasks.rules.JacocoViolationRulesContainer;
 
 import java.io.File;
+import java.io.IOException;
 
 /**
  * Task for verifying code coverage metrics. Fails the task if violations are detected based on specified rules.
@@ -36,6 +38,7 @@ import java.io.File;
  *
  * @since 3.4
  */
+@CacheableTask
 public class JacocoCoverageVerification extends JacocoReportBase {
 
     private final JacocoViolationRulesContainer violationRules;
@@ -57,6 +60,16 @@ public class JacocoCoverageVerification extends JacocoReportBase {
     }
 
     /**
+     * For internal use only. This property exists, because only tasks with outputs can be up-to-date and cached.
+     */
+    @OutputFile
+    protected File getDummyOutputFile() {
+        return new File(getTemporaryDir(), "success.txt");
+    }
+
+    private final String projectName = getProject().getName();
+
+    /**
      * Configures the violation rules for this task.
      */
     public JacocoViolationRulesContainer violationRules(Action<? super JacocoViolationRulesContainer> configureAction) {
@@ -65,25 +78,20 @@ public class JacocoCoverageVerification extends JacocoReportBase {
     }
 
     @TaskAction
-    public void check() {
-        final Spec<File> fileExistsSpec = new Spec<File>() {
-            @Override
-            public boolean isSatisfiedBy(File file) {
-                return file.exists();
-            }
-        };
-
+    public void check() throws IOException {
         JacocoCheckResult checkResult = new AntJacocoCheck(getAntBuilder()).execute(
-                getJacocoClasspath(),
-                getProject().getName(),
-                getAllClassDirs().filter(fileExistsSpec),
-                getAllSourceDirs().filter(fileExistsSpec),
-                getExecutionData(),
-                getViolationRules()
+            getJacocoClasspath(),
+            projectName,
+            getAllClassDirs().filter(File::exists),
+            getAllSourceDirs().filter(File::exists),
+            getExecutionData(),
+            getViolationRules()
         );
 
         if (!checkResult.isSuccess()) {
             throw new GradleException(checkResult.getFailureMessage());
+        } else {
+            getDummyOutputFile().createNewFile();
         }
     }
 }

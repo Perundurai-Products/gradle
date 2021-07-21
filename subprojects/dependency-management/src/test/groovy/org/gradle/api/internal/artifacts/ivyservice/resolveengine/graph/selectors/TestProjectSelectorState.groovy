@@ -16,13 +16,14 @@
 
 package org.gradle.api.internal.artifacts.ivyservice.resolveengine.graph.selectors
 
+import org.gradle.api.artifacts.ClientModule
 import org.gradle.api.artifacts.component.ComponentSelector
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.api.internal.artifacts.DefaultModuleVersionIdentifier
 import org.gradle.api.internal.artifacts.ResolvedVersionConstraint
 import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.strategy.VersionSelector
 import org.gradle.internal.component.local.model.DefaultProjectComponentSelector
-import org.gradle.internal.resolve.ModuleVersionResolveException
+import org.gradle.internal.component.model.IvyArtifactName
 import org.gradle.internal.resolve.result.ComponentIdResolveResult
 import org.gradle.internal.resolve.result.DefaultBuildableComponentIdResolveResult
 
@@ -58,17 +59,12 @@ class TestProjectSelectorState implements ResolvableSelectorState {
     }
 
     @Override
-    void failed(ModuleVersionResolveException failure) {
-        throw new UnsupportedOperationException("To be implemented");
+    void markResolved() {
     }
 
     @Override
-    public void markResolved() {
-    }
-
-    @Override
-    public boolean isForce() {
-        return false;
+    boolean isForce() {
+        return false
     }
 
     @Override
@@ -78,6 +74,26 @@ class TestProjectSelectorState implements ResolvableSelectorState {
 
     @Override
     boolean isFromLock() {
+        return false
+    }
+
+    @Override
+    boolean hasStrongOpinion() {
+        return false
+    }
+
+    @Override
+    IvyArtifactName getFirstDependencyArtifact() {
+        return null
+    }
+
+    @Override
+    ClientModule getClientModule() {
+        return null
+    }
+
+    @Override
+    boolean isChanging() {
         return false
     }
 }

@@ -17,18 +17,18 @@ package org.gradle.launcher.daemon.server.exec;
 
 import org.gradle.api.logging.Logger;
 import org.gradle.api.logging.Logging;
+import org.gradle.internal.Factory;
 import org.gradle.internal.IoActions;
 import org.gradle.internal.UncheckedException;
 import org.gradle.launcher.daemon.protocol.ForwardInput;
 import org.gradle.launcher.daemon.server.api.DaemonCommandAction;
 import org.gradle.launcher.daemon.server.api.DaemonCommandExecution;
 import org.gradle.launcher.daemon.server.api.StdinHandler;
-import org.gradle.util.StdinSwapper;
+import org.gradle.util.internal.StdinSwapper;
 
 import java.io.IOException;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
-import java.util.concurrent.Callable;
 
 /**
  * Listens for ForwardInput commands during the execution and sends that to a piped input stream that we install.
@@ -36,6 +36,7 @@ import java.util.concurrent.Callable;
 public class ForwardClientInput implements DaemonCommandAction {
     private static final Logger LOGGER = Logging.getLogger(ForwardClientInput.class);
 
+    @Override
     public void execute(final DaemonCommandExecution execution) {
         final PipedOutputStream inputSource = new PipedOutputStream();
         final PipedInputStream replacementStdin;
@@ -46,6 +47,7 @@ public class ForwardClientInput implements DaemonCommandAction {
         }
 
         execution.getConnection().onStdin(new StdinHandler() {
+            @Override
             public void onInput(ForwardInput input) {
                 LOGGER.debug("Writing forwarded input on daemon's stdin.");
                 try {
@@ -55,6 +57,7 @@ public class ForwardClientInput implements DaemonCommandAction {
                 }
             }
 
+            @Override
             public void onEndOfInput() {
                 LOGGER.info("Closing daemon's stdin at end of input.");
                 try {
@@ -69,8 +72,9 @@ public class ForwardClientInput implements DaemonCommandAction {
 
         try {
             try {
-                new StdinSwapper().swap(replacementStdin, new Callable<Void>() {
-                    public Void call() {
+                new StdinSwapper().swap(replacementStdin, new Factory<Object>() {
+                    @Override
+                    public Void create() {
                         execution.proceed();
                         return null;
                     }

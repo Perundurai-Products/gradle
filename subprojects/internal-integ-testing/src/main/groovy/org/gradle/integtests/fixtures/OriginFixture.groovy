@@ -18,20 +18,23 @@ package org.gradle.integtests.fixtures
 
 import groovy.json.JsonSlurper
 import org.gradle.api.internal.tasks.execution.ExecuteTaskBuildOperationType
+import org.gradle.api.services.BuildService
+import org.gradle.api.services.BuildServiceParameters
 import org.gradle.caching.internal.origin.OriginMetadata
 import org.gradle.integtests.fixtures.executer.GradleExecuter
 import org.gradle.integtests.fixtures.executer.UserInitScriptExecuterFixture
-import org.gradle.internal.id.UniqueId
+import org.gradle.internal.build.event.BuildEventListenerRegistryInternal
 import org.gradle.internal.operations.BuildOperationDescriptor
 import org.gradle.internal.operations.BuildOperationListener
-import org.gradle.internal.operations.BuildOperationListenerManager
 import org.gradle.internal.operations.OperationFinishEvent
 import org.gradle.internal.operations.OperationIdentifier
 import org.gradle.internal.operations.OperationProgressEvent
 import org.gradle.internal.operations.OperationStartEvent
 import org.gradle.test.fixtures.file.TestDirectoryProvider
 import org.gradle.test.fixtures.file.TestFile
-import org.gradle.util.TextUtil
+import org.gradle.util.internal.TextUtil
+
+import java.time.Duration
 
 class OriginFixture extends UserInitScriptExecuterFixture {
 
@@ -48,43 +51,50 @@ class OriginFixture extends UserInitScriptExecuterFixture {
     @Override
     String initScriptContent() {
         """
-            if (gradle.parent == null) {
-                def origins = Collections.synchronizedMap([:])
-                gradle.ext.origins = origins
-                def listener = new $BuildOperationListener.name() {
-                    void started($BuildOperationDescriptor.name buildOperation, $OperationStartEvent.name startEvent) {}
-                    void finished($BuildOperationDescriptor.name buildOperation, $OperationFinishEvent.name finishEvent) {
-                        if (finishEvent.result instanceof $ExecuteTaskBuildOperationType.Result.name) {
-                            def buildInvocationId = finishEvent.result.originBuildInvocationId
-                            def executionTime = finishEvent.result.originExecutionTime
-                            def entry = null
-                            if (buildInvocationId) {
-                                assert executionTime != null
-                                entry = [
-                                    buildInvocationId: buildInvocationId,
-                                    executionTime: executionTime
-                                ]                                    
-                            } else {
-                                assert executionTime == null
-                            }
-                            gradle.ext.origins[buildOperation.details.task.identityPath] = entry
-                            
-                            //  println "Finished task: " + buildOperation.details.task.identityPath
+            interface OriginCollectorParams extends ${BuildServiceParameters.name} {
+                RegularFileProperty getOriginJson()
+            }
+
+            abstract class OriginCollector implements ${BuildService.name}<OriginCollectorParams>, ${BuildOperationListener.name}, AutoCloseable {
+
+                private final Map<String, Map<String, Object>> origins = [:]
+
+                @Override
+                void started($BuildOperationDescriptor.name buildOperation, $OperationStartEvent.name startEvent) {}
+
+                @Override
+                void finished($BuildOperationDescriptor.name buildOperation, $OperationFinishEvent.name finishEvent) {
+                    if (finishEvent.result instanceof $ExecuteTaskBuildOperationType.Result.name) {
+                        def buildInvocationId = finishEvent.result.originBuildInvocationId
+                        def executionTime = finishEvent.result.originExecutionTime
+                        def entry = null
+                        if (buildInvocationId) {
+                            assert executionTime != null
+                            entry = [
+                                buildInvocationId: buildInvocationId,
+                                executionTime: executionTime
+                            ]
+                        } else {
+                            assert executionTime == null
                         }
+                        origins[buildOperation.details.task.getIdentityPath()] = entry
                     }
-                    void progress(${OperationIdentifier.name} buildOperationId, ${OperationProgressEvent.name} progressEvent){
-                    }
-                } 
-                
-                def buildOpListenerManager = gradle.services.get($BuildOperationListenerManager.name)
-                buildOpListenerManager.addListener(listener)
-                
-                gradle.buildFinished {
-                buildOpListenerManager.removeListener(listener)
-                    println "Build finished"
-                    println "--------------"
-                    gradle.rootProject.file("${TextUtil.normaliseFileSeparators(file.absolutePath)}").text = groovy.json.JsonOutput.toJson(origins)
                 }
+
+                @Override
+                void progress(${OperationIdentifier.name} buildOperationId, ${OperationProgressEvent.name} progressEvent) {}
+
+                @Override
+                void close() {
+                    parameters.originJson.get().asFile.text = groovy.json.JsonOutput.toJson(origins)
+                }
+            }
+
+            if (gradle.parent == null) {
+                def collector = gradle.sharedServices.registerIfAbsent("originsCollector", OriginCollector) {
+                    parameters.originJson.fileValue(new File("${TextUtil.normaliseFileSeparators(file.absolutePath)}"))
+                }
+                gradle.services.get(${BuildEventListenerRegistryInternal.name}).onOperationCompletion(collector)
             }
         """
     }
@@ -95,13 +105,13 @@ class OriginFixture extends UserInitScriptExecuterFixture {
         origins.clear()
         rawOrigins.each {
             origins[it.key] = it.value == null ? null : new OriginMetadata(
-                UniqueId.from(it.value.buildInvocationId as String),
-                it.value.executionTime as long
+                it.value.buildInvocationId as String,
+                Duration.ofMillis(it.value.executionTime as long)
             )
         }
     }
 
-    UniqueId originId(String path) {
+    String originId(String path) {
         origin(path)?.buildInvocationId
     }
 

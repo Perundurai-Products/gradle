@@ -26,6 +26,8 @@ import org.gradle.internal.serialize.Encoder
 import org.gradle.internal.serialize.Serializer
 import org.gradle.internal.serialize.Serializers
 import org.gradle.test.fixtures.concurrent.ConcurrentSpec
+import org.gradle.util.Requires
+import org.gradle.util.TestPrecondition
 import org.gradle.util.ports.ReleasingPortAllocator
 import org.junit.Rule
 import spock.lang.Issue
@@ -205,9 +207,9 @@ class TcpConnectorTest extends ConcurrentSpec {
 
         when:
         def acceptor = incomingConnector.accept({ ConnectCompletion event ->
-            def connection = event.create(serializer)
-            connection.dispatch("bye")
-            connection.stop()
+            def conn = event.create(serializer)
+            conn.dispatch("bye")
+            conn.stop()
             instant.closed
         } as Action, false)
 
@@ -229,9 +231,9 @@ class TcpConnectorTest extends ConcurrentSpec {
             encoder.writeInt(value.length())
         } as Serializer
         def action = { ConnectCompletion completion ->
-            def connection = completion.create(Serializers.stateful(incomingSerializer))
-            connection.dispatch("string")
-            connection.stop()
+            def conn = completion.create(Serializers.stateful(incomingSerializer))
+            conn.dispatch("string")
+            conn.stop()
         } as Action
         def outgoingSerializer = { Decoder decoder ->
             decoder.readInt()
@@ -257,9 +259,9 @@ class TcpConnectorTest extends ConcurrentSpec {
 
         given:
         def action = { ConnectCompletion completion ->
-            def connection = completion.create(serializer)
-            connection.dispatch("string")
-            connection.stop()
+            def conn = completion.create(serializer)
+            conn.dispatch("string")
+            conn.stop()
         } as Action
         outgoingSerializer.read(_) >> { Decoder decoder ->
             throw failure
@@ -281,10 +283,11 @@ class TcpConnectorTest extends ConcurrentSpec {
     }
 
     @Issue("GRADLE-2316")
+    @Requires(TestPrecondition.NOT_MAC_OS_X) // https://github.com/gradle/gradle-private/issues/2832
     def "detects self connect when outgoing connection binds to same port"() {
         given:
         def socketChannel = SocketChannel.open()
-        def communicationAddress = addressFactory.getCommunicationAddresses().find { it instanceof Inet6Address }
+        def communicationAddress = addressFactory.getLocalBindingAddress()
         def bindAnyPort = new InetSocketAddress(communicationAddress, 0)
         socketChannel.socket().bind(bindAnyPort)
         def selfConnect = new InetSocketAddress(communicationAddress, socketChannel.socket().getLocalPort())
@@ -305,7 +308,7 @@ class TcpConnectorTest extends ConcurrentSpec {
         def action = Mock(Action)
         def socketChannel = SocketChannel.open()
         def acceptor = incomingConnector.accept(action, false)
-        def communicationAddress = addressFactory.getCommunicationAddresses().find { it instanceof Inet6Address }
+        def communicationAddress = addressFactory.getLocalBindingAddress()
         def bindAnyPort = new InetSocketAddress(communicationAddress, 0)
         def connectAddress = new InetSocketAddress(communicationAddress, acceptor.address.port)
 

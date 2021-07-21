@@ -17,19 +17,34 @@
 package org.gradle.internal.resources;
 
 import org.gradle.internal.Factory;
+import org.gradle.internal.service.scopes.Scopes;
+import org.gradle.internal.service.scopes.ServiceScope;
 import org.gradle.util.Path;
 
 import java.util.Collection;
 
+@ServiceScope(Scopes.BuildSession.class)
 public interface ProjectLeaseRegistry {
     /**
      * Get a lock for the specified project.
-     *
-     * @param buildIdentityPath
-     * @param projectIdentityPath
-     * @return the requested {@link ResourceLock}
      */
     ResourceLock getProjectLock(Path buildIdentityPath, Path projectIdentityPath);
+
+    /**
+     * Returns any projects locks currently held by this thread.
+     */
+    Collection<? extends ResourceLock> getCurrentProjectLocks();
+
+    /**
+     * Releases any project locks currently held by this thread.
+     */
+    void releaseCurrentProjectLocks();
+
+    /**
+     * Returns {@code true} when this registry grants multiple threads access to projects (but no more than one thread per given project)
+     * and {@code false} when this registry grants only a single thread access to projects at any given time.
+     */
+    boolean getAllowsParallelExecution();
 
     /**
      * Releases all project locks held by the current thread and executes the {@link Factory}.  Upon completion of the
@@ -48,7 +63,31 @@ public interface ProjectLeaseRegistry {
     void withoutProjectLock(Runnable action);
 
     /**
-     * Returns any projects locks currently held by this thread.
+     * Allows the given code to access the mutable state of any project, regardless of which other threads may be accessing the project.
+     *
+     * DO NOT USE THIS METHOD. It is here to allow some very specific backwards compatibility.
      */
-    Collection<? extends ResourceLock> getCurrentProjectLocks();
+    <T> T allowUncontrolledAccessToAnyProject(Factory<T> factory);
+
+    boolean isAllowedUncontrolledAccessToAnyProject();
+
+    /**
+     * Performs some blocking action. If the current thread is allowed to make changes to project locks, then release all locks
+     * then run the action and reacquire any locks.
+     * If the current thread is not allowed to make changes to the project locks (via {@link #whileDisallowingProjectLockChanges(Factory)},
+     * then it is safe to run the action without releasing the locks.
+     */
+    void blocking(Runnable action);
+
+    /**
+     * Runs the given action and disallows the current thread from attempting to acquire or release any project locks.
+     * Applying this constraint means that the thread will not block waiting for a project lock and cause a deadlock.
+     * This constraint also means that it does not need to release its project locks when it needs to block while waiting for some operation to complete.
+     *
+     * <p>While in this method, calls to {@link #blocking(Runnable)} will not cause this thread to release or reacquire any project locks.</p>
+     *
+     * <p>This should become the default and only behaviour for all worker threads, and locks are acquired and released only when starting and finishing an execution node.
+     * For now, this is an opt-in behaviour.</p>
+     */
+    <T> T whileDisallowingProjectLockChanges(Factory<T> action);
 }

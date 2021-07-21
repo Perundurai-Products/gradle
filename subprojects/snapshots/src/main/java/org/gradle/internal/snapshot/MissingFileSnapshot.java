@@ -16,18 +16,25 @@
 
 package org.gradle.internal.snapshot;
 
+import org.gradle.internal.file.FileMetadata.AccessType;
 import org.gradle.internal.file.FileType;
 import org.gradle.internal.hash.HashCode;
 import org.gradle.internal.hash.Hashing;
 
+import java.util.Optional;
+
 /**
- * A snapshot of a missing file.
+ * A snapshot of a missing file or a broken symbolic link or a named pipe.
  */
-public class MissingFileSnapshot extends AbstractFileSystemLocationSnapshot {
+public class MissingFileSnapshot extends AbstractFileSystemLocationSnapshot implements FileSystemLeafSnapshot {
     private static final HashCode SIGNATURE = Hashing.signature(MissingFileSnapshot.class);
 
-    public MissingFileSnapshot(String absolutePath, String name) {
-        super(absolutePath, name);
+    public MissingFileSnapshot(String absolutePath, String name, AccessType accessType) {
+        super(absolutePath, name, accessType);
+    }
+
+    public MissingFileSnapshot(String absolutePath, AccessType accessType) {
+        this(absolutePath, PathUtil.getFileName(absolutePath), accessType);
     }
 
     @Override
@@ -42,11 +49,31 @@ public class MissingFileSnapshot extends AbstractFileSystemLocationSnapshot {
 
     @Override
     public boolean isContentAndMetadataUpToDate(FileSystemLocationSnapshot other) {
+        return isContentUpToDate(other);
+    }
+
+    @Override
+    public boolean isContentUpToDate(FileSystemLocationSnapshot other) {
         return other instanceof MissingFileSnapshot;
     }
 
     @Override
-    public void accept(FileSystemSnapshotVisitor visitor) {
-        visitor.visit(this);
+    public void accept(FileSystemLocationSnapshotVisitor visitor) {
+        visitor.visitMissing(this);
+    }
+
+    @Override
+    public <T> T accept(FileSystemLocationSnapshotTransformer<T> transformer) {
+        return transformer.visitMissing(this);
+    }
+
+    public Optional<FileSystemNode> invalidate(VfsRelativePath targetPath, CaseSensitivity caseSensitivity, SnapshotHierarchy.NodeDiffListener diffListener) {
+        diffListener.nodeRemoved(this);
+        return Optional.empty();
+    }
+
+    @Override
+    public String toString() {
+        return String.format("%s/%s", super.toString(), getName());
     }
 }

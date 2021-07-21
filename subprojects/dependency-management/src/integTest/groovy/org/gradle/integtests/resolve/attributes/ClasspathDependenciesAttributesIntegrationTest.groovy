@@ -18,14 +18,146 @@ package org.gradle.integtests.resolve.attributes
 
 import org.gradle.integtests.fixtures.GradleMetadataResolveRunner
 import org.gradle.integtests.fixtures.RequiredFeature
-import org.gradle.integtests.fixtures.RequiredFeatures
 import org.gradle.integtests.resolve.AbstractModuleDependencyResolveTest
 import org.gradle.test.fixtures.file.TestFile
+import org.gradle.test.fixtures.plugin.PluginBuilder
 import org.objectweb.asm.ClassWriter
 import org.objectweb.asm.Opcodes
-import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.ClassNode
 
 class ClasspathDependenciesAttributesIntegrationTest extends AbstractModuleDependencyResolveTest {
+
+    def pluginBuilder = new PluginBuilder(file('plugin'))
+
+    @RequiredFeature(feature = GradleMetadataResolveRunner.GRADLE_METADATA, value = "false")
+    @RequiredFeature(feature = GradleMetadataResolveRunner.REPOSITORY_TYPE, value = "maven")
+    def 'module metadata fetched through a settings useModule properly derives variants and subsequent project use of the dependency has access to derived variants'() {
+        given:
+        def module = mavenRepo.module('test', 'dep', '1.0').publish()
+        mavenRepo.module('test', 'bom', '1.0').hasPackaging('pom').dependencyConstraint(module).publish()
+
+        pluginBuilder.addPlugin("println 'test-plugin applied'")
+        def pluginModule = pluginBuilder.publishAs('test:plugin:1.0', mavenRepo, executer).pluginModule
+        def pomFile = pluginModule.pom.file
+        // Adds a dependency on the BOM to show that variant derivation is then available during project use
+        pomFile.text = pomFile.text.replace('</project>', """
+  <dependencies>
+    <dependency>
+      <groupId>test</groupId>
+      <artifactId>bom</artifactId>
+      <version>1.0</version>
+    </dependency>
+  </dependencies>
+
+</project>
+""")
+
+        settingsFile.text = """
+pluginManagement {
+    repositories {
+        maven { url = '$mavenRepo.uri'}
+    }
+    resolutionStrategy {
+        eachPlugin {
+            if (requested.id.id == 'test-plugin') {
+                useModule('test:plugin:1.0')
+            }
+        }
+    }
+}
+$settingsFile.text
+"""
+        buildFile.text = """
+plugins {
+    id 'java'
+    id 'test-plugin'
+}
+
+repositories {
+    maven { url = '$mavenRepo.uri'}
+}
+
+dependencies {
+    implementation platform('test:bom:1.0')
+    implementation 'test:dep'
+}
+
+task printDeps {
+    doLast {
+        println configurations.compileClasspath.files
+    }
+}
+"""
+
+        when:
+        succeeds 'printDeps'
+
+        then:
+        outputContains 'test-plugin applied'
+    }
+
+
+    @RequiredFeature(feature = GradleMetadataResolveRunner.GRADLE_METADATA, value = "true")
+    @RequiredFeature(feature = GradleMetadataResolveRunner.REPOSITORY_TYPE, value = "maven")
+    def 'module metadata fetched through a settings useModule properly uses Java ecosystem'() {
+        given:
+
+        // Create module that will match only if compatibility and disambiguation rules are in place
+        mavenRepo.module('test', 'dep', '1.0')
+            .variant("runtime", ["org.gradle.usage": "java-runtime", 'org.gradle.dependency.bundling': 'embedded'])
+            .variant("conflictingRuntime", ["org.gradle.usage": "java-runtime", 'org.gradle.dependency.bundling': 'shadowed'])
+            .withModuleMetadata()
+            .publish()
+
+        pluginBuilder.addPlugin("println 'test-plugin applied'")
+        def pluginModule = pluginBuilder.publishAs('test:plugin:1.0', mavenRepo, executer).pluginModule
+        def pomFile = pluginModule.pom.file
+        // Adds a dependency on the BOM to show that variant derivation is then available during project use
+        pomFile.text = pomFile.text.replace('</project>', """
+  <dependencies>
+    <dependency>
+      <groupId>test</groupId>
+      <artifactId>dep</artifactId>
+      <version>1.0</version>
+    </dependency>
+  </dependencies>
+
+</project>
+""")
+
+        settingsFile.text = """
+pluginManagement {
+    repositories {
+        maven { url = '$mavenRepo.uri' }
+    }
+    resolutionStrategy {
+        eachPlugin {
+            if (requested.id.id == 'test-plugin') {
+                useModule('test:plugin:1.0')
+            }
+        }
+    }
+}
+$settingsFile.text
+"""
+        buildFile.text = """
+plugins {
+    id 'java'
+    id 'test-plugin'
+}
+
+repositories {
+    maven { url = '$mavenRepo.uri' }
+}
+"""
+
+
+        when:
+        succeeds 'help'
+
+        then:
+        outputContains 'test-plugin applied'
+    }
 
     def 'buildscript classpath resolves java-runtime variant'() {
         def otherSettings = file('other/settings.gradle')
@@ -66,10 +198,8 @@ buildscript {
         succeeds()
     }
 
-    @RequiredFeatures([
-        @RequiredFeature(feature = GradleMetadataResolveRunner.GRADLE_METADATA, value = "false"),
-        @RequiredFeature(feature = GradleMetadataResolveRunner.REPOSITORY_TYPE, value = "maven")
-    ])
+    @RequiredFeature(feature = GradleMetadataResolveRunner.GRADLE_METADATA, value = "false")
+    @RequiredFeature(feature = GradleMetadataResolveRunner.REPOSITORY_TYPE, value = "maven")
     def 'show that settings classpath respects attributes and thus will use the default java-runtime value'() {
         given:
         def jarFile = file('build/lib/foo.jar')
@@ -80,18 +210,17 @@ buildscript {
         mavenRepo.module('org', 'bar').dependsOn(['scope': 'runtime'], foo).publish()
 
         settingsFile << """
-import org.gradle.api.internal.model.NamedObjectInstantiator
 buildscript {
     $repositoryDeclaration
 
     configurations.classpath {
-        attributes.attribute(Usage.USAGE_ATTRIBUTE, NamedObjectInstantiator.INSTANCE.named(Usage, Usage.JAVA_API))
+        attributes.attribute(Usage.USAGE_ATTRIBUTE, services.get(ObjectFactory).named(Usage, Usage.JAVA_API))
     }
-    
+
     dependencies {
         classpath 'org:bar:1.0'
     }
-}    
+}
     Class.forName('org.gradle.MyClass')
 """
 

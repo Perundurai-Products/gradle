@@ -25,6 +25,10 @@ import org.gradle.api.internal.tasks.compile.incremental.analyzer.annotations.Us
 import org.gradle.api.internal.tasks.compile.incremental.analyzer.annotations.UsesRuntimeAnnotation
 import org.gradle.api.internal.tasks.compile.incremental.analyzer.annotations.UsesSourceAnnotation
 import org.gradle.api.internal.tasks.compile.incremental.deps.ClassAnalysis
+import org.gradle.api.internal.tasks.compile.incremental.test.AccessedFromPackagePrivateField
+import org.gradle.api.internal.tasks.compile.incremental.test.AccessedFromPrivateField
+import org.gradle.api.internal.tasks.compile.incremental.test.AccessedFromPrivateMethod
+import org.gradle.api.internal.tasks.compile.incremental.test.AccessedFromPrivateMethodBody
 import org.gradle.api.internal.tasks.compile.incremental.test.HasInnerClass
 import org.gradle.api.internal.tasks.compile.incremental.test.HasNonPrivateConstants
 import org.gradle.api.internal.tasks.compile.incremental.test.HasPrivateConstants
@@ -52,12 +56,31 @@ class DefaultClassDependenciesAnalyzerTest extends Specification {
     }
 
     def "knows dependencies of a java class"() {
-        expect:
-        analyze(SomeOtherClass).classDependencies == [YetAnotherClass.name, SomeClass.name] as Set
+        when:
+        def analysis = analyze(SomeOtherClass)
+
+        then:
+        analysis.accessibleClassDependencies == [SomeClass.name] as Set
+        analysis.privateClassDependencies == [YetAnotherClass.name] as Set
+    }
+
+    def "knows dependencies of a java class complex"() {
+        when:
+        def analysis = analyze(SomeClass)
+
+        then:
+        analysis.accessibleClassDependencies == [AccessedFromPackagePrivateField.name] as Set
+        analysis.privateClassDependencies == [AccessedFromPrivateField.name,
+                                              AccessedFromPrivateMethod.name,
+                                              AccessedFromPrivateMethodBody.name,
+                                              // AccessedFromPrivateClass.name, // would be in ClassAnalysis for SomeClass$Foo
+                                              // AccessedFromPrivateClassPublicField.name, // would be in ClassAnalysis for SomeClass$Foo
+                                              SomeClass.name + '$Foo',
+                                              SomeClass.name + '$1'] as Set
     }
 
     def "knows basic class dependencies of a groovy class"() {
-        def deps = analyze(DefaultClassDependenciesAnalyzerTest).classDependencies
+        def deps = analyze(DefaultClassDependenciesAnalyzerTest).accessibleClassDependencies
 
         expect:
         deps.contains(Specification.class.name)
@@ -68,40 +91,49 @@ class DefaultClassDependenciesAnalyzerTest extends Specification {
         def analysis = analyze(HasNonPrivateConstants)
 
         then:
-        analysis.classDependencies == [UsedByNonPrivateConstantsClass.name] as Set
-        !analysis.dependencyToAll
+        analysis.accessibleClassDependencies == [UsedByNonPrivateConstantsClass.name] as Set
+        analysis.privateClassDependencies == [] as Set
+        !analysis.dependencyToAllReason
         analysis.constants == ['X|1'.hashCode()] as Set
 
         when:
         analysis = analyze(HasPublicConstants)
 
         then:
-        analysis.classDependencies.isEmpty()
-        !analysis.dependencyToAll
+        analysis.accessibleClassDependencies.isEmpty()
+        analysis.privateClassDependencies.isEmpty()
+        !analysis.dependencyToAllReason
         analysis.constants == ['X|1'.hashCode()] as Set
 
         when:
         analysis = analyze(HasPrivateConstants)
 
         then:
-        analysis.classDependencies == [HasNonPrivateConstants.name] as Set
-        !analysis.dependencyToAll
+        analysis.accessibleClassDependencies == [] as Set
+        analysis.privateClassDependencies == [HasNonPrivateConstants.name] as Set
+        !analysis.dependencyToAllReason
         analysis.constants == [] as Set
     }
 
     def "knows if a class uses annotations with source retention"() {
         expect:
-        analyze(UsesRuntimeAnnotation).classDependencies  == ["org.gradle.api.internal.tasks.compile.incremental.analyzer.annotations.SomeRuntimeAnnotation"] as Set
-        analyze(SomeRuntimeAnnotation).classDependencies.isEmpty()
-        !analyze(SomeRuntimeAnnotation).dependencyToAll
+        analyze(UsesRuntimeAnnotation).accessibleClassDependencies  == ["org.gradle.api.internal.tasks.compile.incremental.analyzer.annotations.SomeRuntimeAnnotation"] as Set
+        analyze(UsesRuntimeAnnotation).privateClassDependencies  == [] as Set
+        analyze(SomeRuntimeAnnotation).accessibleClassDependencies.isEmpty()
+        analyze(SomeRuntimeAnnotation).privateClassDependencies.isEmpty()
+        !analyze(SomeRuntimeAnnotation).dependencyToAllReason
 
-        analyze(UsesClassAnnotation).classDependencies == ["org.gradle.api.internal.tasks.compile.incremental.analyzer.annotations.SomeClassAnnotation"] as Set
-        analyze(SomeClassAnnotation).classDependencies.isEmpty()
-        !analyze(SomeClassAnnotation).dependencyToAll
+        analyze(UsesClassAnnotation).accessibleClassDependencies == ["org.gradle.api.internal.tasks.compile.incremental.analyzer.annotations.SomeClassAnnotation"] as Set
+        analyze(UsesClassAnnotation).privateClassDependencies == [] as Set
+        analyze(SomeClassAnnotation).accessibleClassDependencies.isEmpty()
+        analyze(SomeClassAnnotation).privateClassDependencies.isEmpty()
+        !analyze(SomeClassAnnotation).dependencyToAllReason
 
-        analyze(UsesSourceAnnotation).classDependencies.isEmpty() //source annotations are wiped from the bytecode
-        analyze(SomeSourceAnnotation).classDependencies.isEmpty()
-        analyze(SomeSourceAnnotation).dependencyToAll
+        analyze(UsesSourceAnnotation).accessibleClassDependencies.isEmpty() //source annotations are wiped from the bytecode
+        analyze(UsesSourceAnnotation).privateClassDependencies.isEmpty() //source annotations are wiped from the bytecode
+        analyze(SomeSourceAnnotation).accessibleClassDependencies.isEmpty()
+        analyze(SomeSourceAnnotation).privateClassDependencies.isEmpty()
+        analyze(SomeSourceAnnotation).dependencyToAllReason
     }
 
     InputStream classStream(Class aClass) {

@@ -21,12 +21,13 @@ import org.gradle.api.initialization.ProjectDescriptor;
 import org.gradle.api.initialization.Settings;
 import org.gradle.api.internal.DocumentationRegistry;
 import org.gradle.api.internal.project.ProjectIdentifier;
+import org.gradle.internal.Cast;
 import org.gradle.internal.FileUtils;
 import org.gradle.internal.file.PathToFileResolver;
 import org.gradle.internal.scripts.DefaultScriptFileResolver;
 import org.gradle.internal.scripts.ScriptFileResolver;
-import org.gradle.util.NameValidator;
 import org.gradle.util.Path;
+import org.gradle.util.internal.NameValidator;
 
 import javax.annotation.Nullable;
 import java.io.File;
@@ -44,18 +45,18 @@ public class DefaultProjectDescriptor implements ProjectDescriptor, ProjectIdent
     private final ScriptFileResolver scriptFileResolver;
     private File dir;
     private File canonicalDir;
-    private DefaultProjectDescriptor parent;
-    private Set<ProjectDescriptor> children = new LinkedHashSet<ProjectDescriptor>();
+    private final DefaultProjectDescriptor parent;
+    private final Set<DefaultProjectDescriptor> children = new LinkedHashSet<>();
     private ProjectDescriptorRegistry projectDescriptorRegistry;
     private Path path;
     private String buildFileName;
 
-    public DefaultProjectDescriptor(DefaultProjectDescriptor parent, String name, File dir,
+    public DefaultProjectDescriptor(@Nullable DefaultProjectDescriptor parent, String name, File dir,
                                     ProjectDescriptorRegistry projectDescriptorRegistry, PathToFileResolver fileResolver) {
         this(parent, name, dir, projectDescriptorRegistry, fileResolver, null);
     }
 
-    public DefaultProjectDescriptor(DefaultProjectDescriptor parent, String name, File dir,
+    public DefaultProjectDescriptor(@Nullable DefaultProjectDescriptor parent, String name, File dir,
                                     ProjectDescriptorRegistry projectDescriptorRegistry, PathToFileResolver fileResolver,
                                     @Nullable ScriptFileResolver scriptFileResolver) {
         this.parent = parent;
@@ -90,10 +91,12 @@ public class DefaultProjectDescriptor implements ProjectDescriptor, ProjectIdent
         return parent == null;
     }
 
+    @Override
     public String getName() {
         return name;
     }
 
+    @Override
     public void setName(String name) {
         NameValidator.validate(name, "project name",
             INVALID_NAME_IN_INCLUDE_HINT);
@@ -101,6 +104,7 @@ public class DefaultProjectDescriptor implements ProjectDescriptor, ProjectIdent
         this.name = name;
     }
 
+    @Override
     public File getProjectDir() {
         if (canonicalDir == null) {
             canonicalDir = fileResolver.resolve(dir);
@@ -108,23 +112,32 @@ public class DefaultProjectDescriptor implements ProjectDescriptor, ProjectIdent
         return canonicalDir;
     }
 
+    @Override
     public void setProjectDir(File dir) {
         this.canonicalDir = null;
         this.dir = dir;
     }
 
+    @Override
     public DefaultProjectDescriptor getParent() {
         return parent;
     }
 
+    @Override
     public ProjectIdentifier getParentIdentifier() {
         return parent;
     }
 
+    @Override
     public Set<ProjectDescriptor> getChildren() {
+        return Cast.uncheckedCast(children);
+    }
+
+    public Set<? extends DefaultProjectDescriptor> children() {
         return children;
     }
 
+    @Override
     public String getPath() {
         return path.toString();
     }
@@ -133,14 +146,17 @@ public class DefaultProjectDescriptor implements ProjectDescriptor, ProjectIdent
         this.path = path;
     }
 
+    @Override
     public String getBuildFileName() {
         return buildFile().getName();
     }
 
+    @Override
     public void setBuildFileName(String name) {
         this.buildFileName = name;
     }
 
+    @Override
     public File getBuildFile() {
         return FileUtils.normalize(buildFile());
     }

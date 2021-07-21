@@ -40,19 +40,26 @@ class ApplicationPluginIntegrationTest extends WellBehavedPluginTest {
         succeeds('startScripts')
 
         then:
-        File unixStartScript = assertGeneratedUnixStartScript()
-        String unixStartScriptContent = unixStartScript.text
-        unixStartScriptContent.contains('##  sample start up script for UN*X')
-        unixStartScriptContent.contains('DEFAULT_JVM_OPTS=""')
-        unixStartScriptContent.contains('APP_NAME="sample"')
-        unixStartScriptContent.contains('CLASSPATH=\$APP_HOME/lib/sample.jar')
-        unixStartScriptContent.contains('exec "\$JAVACMD" "\$@"')
-        File windowsStartScript = assertGeneratedWindowsStartScript()
-        String windowsStartScriptContentText = windowsStartScript.text
-        windowsStartScriptContentText.contains('@rem  sample startup script for Windows')
-        windowsStartScriptContentText.contains('set DEFAULT_JVM_OPTS=')
-        windowsStartScriptContentText.contains('set CLASSPATH=%APP_HOME%\\lib\\sample.jar')
-        windowsStartScriptContentText.contains('"%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %SAMPLE_OPTS%  -classpath "%CLASSPATH%" org.gradle.test.Main %CMD_LINE_ARGS%')
+        assertGeneratedUnixStartScript()
+        assertGeneratedWindowsStartScript()
+    }
+
+    @Requires(TestPrecondition.JDK9_OR_LATER)
+    def "can generate start scripts with module path"() {
+        given:
+        configureMainModule()
+
+        when:
+        succeeds('startScripts')
+
+        then:
+        assertGeneratedUnixStartScript()
+        assertGeneratedWindowsStartScript()
+
+        when:
+        succeeds('installDist')
+        then:
+        runViaStartScript()
     }
 
     def "can generate starts script generation with custom user configuration"() {
@@ -66,19 +73,8 @@ applicationDefaultJvmArgs = ["-Dgreeting.language=en", "-DappId=\${project.name 
         succeeds('startScripts')
 
         then:
-        File unixStartScript = assertGeneratedUnixStartScript('myApp')
-        String unixStartScriptContent = unixStartScript.text
-        unixStartScriptContent.contains('##  myApp start up script for UN*X')
-        unixStartScriptContent.contains('APP_NAME="myApp"')
-        unixStartScriptContent.contains('DEFAULT_JVM_OPTS=\'"-Dgreeting.language=en" "-DappId=sample"\'')
-        unixStartScriptContent.contains('CLASSPATH=\$APP_HOME/lib/sample.jar')
-        unixStartScriptContent.contains('exec "\$JAVACMD" "\$@"')
-        File windowsStartScript = assertGeneratedWindowsStartScript('myApp.bat')
-        String windowsStartScriptContentText = windowsStartScript.text
-        windowsStartScriptContentText.contains('@rem  myApp startup script for Windows')
-        windowsStartScriptContentText.contains('set DEFAULT_JVM_OPTS="-Dgreeting.language=en" "-DappId=sample"')
-        windowsStartScriptContentText.contains('set CLASSPATH=%APP_HOME%\\lib\\sample.jar')
-        windowsStartScriptContentText.contains('"%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %MY_APP_OPTS%  -classpath "%CLASSPATH%" org.gradle.test.Main %CMD_LINE_ARGS%')
+        assertGeneratedUnixStartScript('myApp')
+        assertGeneratedWindowsStartScript('myApp')
     }
 
     def "can change template file for default start script generators"() {
@@ -143,7 +139,7 @@ class CustomWindowsStartScriptGenerator implements ScriptGenerator {
         file('build/install/sample').exists()
 
         when:
-        runViaUnixStartScript()
+        runViaStartScript()
 
         then:
         outputContains('Hello World!')
@@ -172,17 +168,18 @@ class CustomWindowsStartScriptGenerator implements ScriptGenerator {
     }
 
     @Requires(TestPrecondition.UNIX_DERIVATIVE)
-    public void "java PID equals script PID"() {
+    def "java PID equals script PID"() {
         given:
         succeeds('installDist')
         def binFile = file('build/install/sample/bin/sample')
-        binFile.text = """echo Script PID: \$\$
+        binFile.text = """#!/usr/bin/env sh
+echo Script PID: \$\$
 
 $binFile.text
 """
 
         when:
-        ExecutionResult result = runViaUnixStartScript()
+        runViaStartScript()
         def pids = result.output.findAll(/PID: \d+/)
 
         then:
@@ -199,18 +196,18 @@ $binFile.text
         file('build/install/sample').exists()
 
         when:
-        runViaWindowsStartScript()
+        runViaStartScript()
 
         then:
         outputContains('Hello World!')
     }
 
-    ExecutionResult runViaUnixStartScript() {
-        TestFile startScriptDir = file('build/install/sample/bin')
+    ExecutionResult runViaUnixStartScript(TestFile startScriptDir) {
         buildFile << """
 task execStartScript(type: Exec) {
     workingDir '$startScriptDir.canonicalPath'
     commandLine './sample'
+    environment JAVA_OPTS: ''
 }
 """
         return succeeds('execStartScript')
@@ -224,18 +221,19 @@ task execStartScript(type: Exec) {
     workingDir '$startScriptDir.canonicalPath'
     commandLine './sample'
     environment JAVA_HOME: "$javaHome"
+    environment JAVA_OPTS: ''
 }
 """
         return succeeds('execStartScript')
     }
 
-    ExecutionResult runViaWindowsStartScript() {
-        TestFile startScriptDir = file('build/install/sample/bin')
+    ExecutionResult runViaWindowsStartScript(TestFile startScriptDir) {
         String escapedStartScriptDir = startScriptDir.canonicalPath.replaceAll('\\\\', '\\\\\\\\')
         buildFile << """
 task execStartScript(type: Exec) {
     workingDir '$escapedStartScriptDir'
     commandLine 'cmd', '/c', 'sample.bat'
+    environment JAVA_OPTS: ''
 }
 """
         return succeeds('execStartScript')
@@ -253,7 +251,7 @@ repositories {
 }
 
 dependencies {
-    compile 'org.gradle.test:compile:1.0'
+    implementation 'org.gradle.test:compile:1.0'
     compileOnly 'org.gradle.test:compileOnly:1.0'
 }
 """
@@ -275,6 +273,11 @@ executableDir = ''
         then:
         file('build/install/sample/sample').exists()
         file('build/install/sample/sample.bat').exists()
+
+        when:
+        runViaStartScript(file('build/install/sample'))
+        then:
+        outputContains("Hello World")
     }
 
     def "executables can be placed in a custom directory"() {
@@ -288,6 +291,11 @@ executableDir = 'foo/bar'
         then:
         file('build/install/sample/foo/bar/sample').exists()
         file('build/install/sample/foo/bar/sample.bat').exists()
+
+        when:
+        runViaStartScript(file('build/install/sample/foo/bar'))
+        then:
+        outputContains("Hello World")
     }
 
     def "includes transitive implementation dependencies in distribution"() {
@@ -295,11 +303,11 @@ executableDir = 'foo/bar'
 
         given:
         buildFile << """
-        allprojects {
-            repositories {
-                maven { url '$mavenRepo.uri' }
+            allprojects {
+                repositories {
+                    maven { url '$mavenRepo.uri' }
+                }
             }
-        }
         """
 
         file('settings.gradle') << "include 'utils', 'core'"
@@ -319,11 +327,11 @@ executableDir = 'foo/bar'
             }
         '''
         file('core/build.gradle') << '''
-apply plugin: 'java-library'
+            apply plugin: 'java-library'
 
-dependencies {
-    implementation 'org.gradle.test:implementation:1.0'
-}
+            dependencies {
+                implementation 'org.gradle.test:implementation:1.0'
+            }
         '''
 
         when:
@@ -371,7 +379,7 @@ dependencies {
 
             dependencies {
                api project(':core')
-               runtime project(':foo')
+               runtimeOnly project(':foo')
             }
         '''
         file('core/build.gradle') << '''
@@ -432,7 +440,7 @@ apply plugin: 'java-library'
 
 dependencies {
     implementation 'org.gradle.test:implementation:1.0'
-    runtime project(':bar')
+    runtimeOnly project(':bar')
 }
         '''
 
@@ -474,8 +482,46 @@ startScripts {
         outputContains("App Home: ${file('build/install/sample').absolutePath}")
     }
 
-    ExecutionResult runViaStartScript() {
-        OperatingSystem.current().isWindows() ? runViaWindowsStartScript() : runViaUnixStartScript()
+    ExecutionResult runViaStartScript(TestFile startScriptDir = file('build/install/sample/bin')) {
+        OperatingSystem.current().isWindows() ? runViaWindowsStartScript(startScriptDir) : runViaUnixStartScript(startScriptDir)
+    }
+
+    def "setMainClassName method startScripts task is deprecated"() {
+        when:
+        buildFile.setText("""
+            plugins {
+                id("application")
+            }
+
+            tasks.named("startScripts") {
+                mainClassName = 'org.gradle.test.Main'
+            }
+        """)
+
+        executer.expectDocumentedDeprecationWarning("The CreateStartScripts.mainClassName property has been deprecated. This is scheduled to be removed in Gradle 8.0. Please use the mainClass property instead. See https://docs.gradle.org/current/dsl/org.gradle.jvm.application.tasks.CreateStartScripts.html#org.gradle.jvm.application.tasks.CreateStartScripts:mainClassName for more details.")
+
+        then:
+        succeeds("startScripts")
+    }
+
+    def "getMainClassName method in startScripts task deprecated"() {
+        when:
+        buildFile.setText("""
+            plugins {
+                id("application")
+            }
+
+            tasks.named("startScripts") {
+                doLast {
+                    println(mainClassName)
+                }
+            }
+        """)
+
+        executer.expectDocumentedDeprecationWarning("The CreateStartScripts.mainClassName property has been deprecated. This is scheduled to be removed in Gradle 8.0. Please use the mainClass property instead. See https://docs.gradle.org/current/dsl/org.gradle.jvm.application.tasks.CreateStartScripts.html#org.gradle.jvm.application.tasks.CreateStartScripts:mainClassName for more details.")
+
+        then:
+        succeeds("startScripts")
     }
 
     private void createSampleProjectSetup() {
@@ -488,6 +534,7 @@ startScripts {
         generateMainClass """
             System.out.println("App Home: " + System.getProperty("appHomeSystemProp"));
             System.out.println("App PID: " + java.lang.management.ManagementFactory.getRuntimeMXBean().getName().split("@")[0]);
+            System.out.println("FOO: " + System.getProperty("FOO"));
             System.out.println("Hello World!");
         """
     }
@@ -508,7 +555,18 @@ public class Main {
         buildFile << """
 apply plugin: 'application'
 
-mainClassName = 'org.gradle.test.Main'
+application {
+    mainClass = 'org.gradle.test.Main'
+}
+"""
+    }
+
+    private void configureMainModule() {
+        file("src/main/java/module-info.java") << "module org.gradle.test.main { requires java.management; }"
+        buildFile << """
+application {
+    mainModule.set('org.gradle.test.main')
+}
 """
     }
 
@@ -552,25 +610,21 @@ rootProject.name = 'sample'
         succeeds("startScripts")
 
         then:
-        nonSkippedTasks.contains(":startScripts")
+        executedAndNotSkipped(":startScripts")
 
         and:
         succeeds("startScripts")
 
         then:
-        skippedTasks.contains(":startScripts")
+        skipped(":startScripts")
     }
 
-    def "up-to-date if only the content change"() {
-        given:
-        succeeds("startScripts")
-
+    def "start script generation depends on jar creation"() {
         when:
-        generateMainClass """System.out.println("Goodbye World!");"""
-        succeeds("startScripts")
+        succeeds('startScripts')
 
         then:
-        skippedTasks.contains(":startScripts")
+        executed ":processResources", ":classes", ":jar"
     }
 
     @Issue("https://github.com/gradle/gradle/issues/4627")
@@ -593,5 +647,155 @@ rootProject.name = 'sample'
         then:
         file('build/install/sample/').allDescendants() == ["not-the-root/bin/sample", "not-the-root/bin/sample.bat", "not-the-root/lib/sample.jar"] as Set
         assert file("build/install/sample/not-the-root/bin/sample").permissions == "rwxr-xr-x"
+    }
+
+    def "runs the classes folder for traditional applications"() {
+        when:
+        succeeds("run")
+
+        then:
+        executed(':compileJava', ':processResources', ':classes', ':run')
+    }
+
+    @Requires(TestPrecondition.JDK9_OR_LATER)
+    def "runs the jar for modular applications"() {
+        given:
+        configureMainModule()
+
+        when:
+        succeeds("run")
+
+        then:
+        executed(':compileJava', ':processResources', ':classes', ':jar', ':run')
+    }
+
+    @Issue("https://github.com/gradle/gradle-private/issues/3386")
+    @Requires(TestPrecondition.UNIX_DERIVATIVE)
+    def "does not execute code in user-set environment variable"() {
+        when:
+        succeeds('installDist')
+
+        then:
+        file('build/install/sample').exists()
+
+        when:
+        def exploit = file("i-do-whatever-i-want")
+        assert !exploit.exists()
+
+        buildFile << """
+            task execStartScript(type: Exec) {
+                workingDir 'build/install/sample/bin'
+                commandLine './sample'
+                environment ${envVar}: '`\$(touch "${exploit.absolutePath}")`'
+            }
+        """
+        fails('execStartScript')
+
+        then:
+        result.assertTaskExecuted(":execStartScript")
+        !exploit.exists()
+
+        where:
+        envVar << ["JAVA_OPTS", "SAMPLE_OPTS"]
+    }
+
+    @Requires(TestPrecondition.UNIX_DERIVATIVE)
+    def "environment variables can have spaces in their values"() {
+        when:
+        succeeds('installDist')
+
+        then:
+        file('build/install/sample').exists()
+
+        when:
+        buildFile << """
+            task execStartScript(type: Exec) {
+                workingDir 'build/install/sample/bin'
+                commandLine './sample'
+                environment ${envVar}: '-DFOO="with a space"'
+            }
+        """
+        succeeds('execStartScript')
+
+        then:
+        outputContains("FOO: with a space")
+
+        where:
+        envVar << ["JAVA_OPTS", "SAMPLE_OPTS"]
+    }
+
+    @Requires(TestPrecondition.UNIX_DERIVATIVE)
+    def "environment variables can have spaces in their values that should be treated as separate tokens"() {
+        when:
+        succeeds('installDist')
+
+        then:
+        file('build/install/sample').exists()
+
+        when:
+        buildFile << """
+            task execStartScript(type: Exec) {
+                workingDir 'build/install/sample/bin'
+                commandLine './sample'
+                environment ${envVar}: '-DNOTFOO "-DFOO=with a space"'
+            }
+        """
+        succeeds('execStartScript')
+
+        then:
+        outputContains("FOO: with a space")
+
+        where:
+        envVar << ["JAVA_OPTS", "SAMPLE_OPTS"]
+    }
+
+    @Requires(TestPrecondition.UNIX_DERIVATIVE)
+    def "environment variables that do not have spaces in their values that should be treated as separate tokens"() {
+        when:
+        succeeds('installDist')
+
+        then:
+        file('build/install/sample').exists()
+
+        when:
+        buildFile << """
+            task execStartScript(type: Exec) {
+                workingDir 'build/install/sample/bin'
+                commandLine './sample'
+                environment ${envVar}: '-DNOTFOO -DFOO="withoutspaces"'
+            }
+        """
+        succeeds('execStartScript')
+
+        then:
+        outputContains("FOO: withoutspaces")
+
+        where:
+        envVar << ["JAVA_OPTS", "SAMPLE_OPTS"]
+    }
+
+    @Requires(TestPrecondition.UNIX_DERIVATIVE)
+    def "environment variables that do not have spaces in their values that should be treated as one token"() {
+        when:
+        succeeds('installDist')
+
+        then:
+        file('build/install/sample').exists()
+
+        when:
+        buildFile << """
+            task execStartScript(type: Exec) {
+                workingDir 'build/install/sample/bin'
+                commandLine './sample'
+                environment ${envVar}: '-DFOO=withoutspaces'
+            }
+        """
+        succeeds('execStartScript')
+
+        then:
+        outputContains("FOO: withoutspaces")
+
+        where:
+        envVar << ["JAVA_OPTS", "SAMPLE_OPTS"]
     }
 }

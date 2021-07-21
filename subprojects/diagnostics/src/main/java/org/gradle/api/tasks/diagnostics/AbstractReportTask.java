@@ -16,19 +16,17 @@
 package org.gradle.api.tasks.diagnostics;
 
 import org.gradle.api.Project;
-import org.gradle.api.Task;
 import org.gradle.api.internal.ConventionTask;
-import org.gradle.api.specs.Spec;
 import org.gradle.api.tasks.Internal;
 import org.gradle.api.tasks.Optional;
 import org.gradle.api.tasks.OutputFile;
 import org.gradle.api.tasks.TaskAction;
-import org.gradle.api.tasks.diagnostics.internal.ProjectReportGenerator;
 import org.gradle.api.tasks.diagnostics.internal.ReportGenerator;
 import org.gradle.api.tasks.diagnostics.internal.ReportRenderer;
 import org.gradle.initialization.BuildClientMetaData;
 import org.gradle.internal.logging.ConsoleRenderer;
 import org.gradle.internal.logging.text.StyledTextOutputFactory;
+import org.gradle.work.DisableCachingByDefault;
 
 import javax.annotation.Nullable;
 import javax.inject.Inject;
@@ -40,7 +38,13 @@ import java.util.TreeSet;
 
 /**
  * The base class for all project report tasks.
+ *
+ * Preserved for backward compatibility.
+ *
+ * @deprecated Use {@link ProjectBasedReportTask} instead.
  */
+@Deprecated
+@DisableCachingByDefault(because = "Abstract super-class, not to be instantiated directly")
 public abstract class AbstractReportTask extends ConventionTask {
     private File outputFile;
 
@@ -48,12 +52,8 @@ public abstract class AbstractReportTask extends ConventionTask {
     private Set<Project> projects;
 
     protected AbstractReportTask() {
-        getOutputs().upToDateWhen(new Spec<Task>() {
-            public boolean isSatisfiedBy(Task element) {
-                return false;
-            }
-        });
-        projects = new HashSet<Project>();
+        getOutputs().upToDateWhen(element -> false);
+        projects = new HashSet<>();
         projects.add(getProject());
     }
 
@@ -69,23 +69,35 @@ public abstract class AbstractReportTask extends ConventionTask {
 
     @TaskAction
     public void generate() {
-        ProjectReportGenerator projectReportGenerator = new ProjectReportGenerator() {
-            @Override
-            public void generateReport(Project project) throws IOException {
+        reportGenerator().generateReport(
+            new TreeSet<>(getProjects()),
+            project -> {
                 generate(project);
-
-                if (shouldCreateReportFile()) {
-                    project.getLogger().lifecycle("See the report at: {}", new ConsoleRenderer().asClickableFileUrl(getOutputFile()));
-                }
+                logClickableOutputFileUrl();
             }
-        };
-
-        ReportGenerator reportGenerator = new ReportGenerator(getRenderer(), getClientMetaData(), getOutputFile(),
-                getTextOutputFactory(), projectReportGenerator);
-        reportGenerator.generateReport(new TreeSet<Project>(getProjects()));
+        );
     }
 
-    private boolean shouldCreateReportFile() {
+    ReportGenerator reportGenerator() {
+        return new ReportGenerator(
+            getRenderer(),
+            getClientMetaData(),
+            getOutputFile(),
+            getTextOutputFactory()
+        );
+    }
+
+    void logClickableOutputFileUrl() {
+        if (shouldCreateReportFile()) {
+            getLogger().lifecycle("See the report at: {}", clickableOutputFileUrl());
+        }
+    }
+
+    String clickableOutputFileUrl() {
+        return new ConsoleRenderer().asClickableFileUrl(getOutputFile());
+    }
+
+    boolean shouldCreateReportFile() {
         return getOutputFile() != null;
     }
 

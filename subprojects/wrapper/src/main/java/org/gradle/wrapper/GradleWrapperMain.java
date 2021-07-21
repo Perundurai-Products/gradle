@@ -23,6 +23,7 @@ import org.gradle.cli.SystemPropertiesCommandLineConverter;
 import java.io.File;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.Properties;
 
@@ -54,20 +55,21 @@ public class GradleWrapperMain {
 
         File gradleUserHome = gradleUserHome(options);
 
-        addSystemProperties(gradleUserHome, rootDir);
+        addSystemProperties(systemProperties, gradleUserHome, rootDir);
 
         Logger logger = logger(options);
 
         WrapperExecutor wrapperExecutor = WrapperExecutor.forWrapperPropertiesFile(propertiesFile);
         wrapperExecutor.execute(
                 args,
-                new Install(logger, new Download(logger, "gradlew", UNKNOWN_VERSION), new PathAssembler(gradleUserHome)),
+                new Install(logger, new Download(logger, "gradlew", UNKNOWN_VERSION), new PathAssembler(gradleUserHome, rootDir)),
                 new BootstrapMainStarter());
     }
 
-    private static void addSystemProperties(File gradleHome, File rootDir) {
-        System.getProperties().putAll(SystemPropertiesHandler.getSystemProperties(new File(gradleHome, "gradle.properties")));
-        System.getProperties().putAll(SystemPropertiesHandler.getSystemProperties(new File(rootDir, "gradle.properties")));
+    private static void addSystemProperties(Properties systemProperties, File gradleUserHome, File rootDir) {
+        // The location with highest priority needs to come last here, as it overwrites any previous entries.
+        systemProperties.putAll(SystemPropertiesHandler.getSystemProperties(new File(rootDir, "gradle.properties")));
+        systemProperties.putAll(SystemPropertiesHandler.getSystemProperties(new File(gradleUserHome, "gradle.properties")));
     }
 
     private static File rootDir(File wrapperJar) {
@@ -88,7 +90,11 @@ public class GradleWrapperMain {
         if (!location.getScheme().equals("file")) {
             throw new RuntimeException(String.format("Cannot determine classpath for wrapper Jar from codebase '%s'.", location));
         }
-        return new File(location.getPath());
+        try {
+            return Paths.get(location).toFile();
+        } catch (NoClassDefFoundError e) {
+            return new File(location.getPath());
+        }
     }
 
     private static File gradleUserHome(ParsedCommandLine options) {

@@ -18,8 +18,8 @@ package org.gradle.api.tasks.diagnostics;
 import org.gradle.api.Project;
 import org.gradle.api.tasks.diagnostics.internal.PropertyReportRenderer;
 import org.gradle.api.tasks.diagnostics.internal.ReportRenderer;
+import org.gradle.work.DisableCachingByDefault;
 
-import java.io.IOException;
 import java.util.Map;
 import java.util.TreeMap;
 
@@ -27,7 +27,8 @@ import java.util.TreeMap;
  * Displays the properties of a project. An instance of this type is used when you execute the {@code properties} task
  * from the command-line.
  */
-public class PropertyReportTask extends AbstractReportTask {
+@DisableCachingByDefault(because = "Not worth caching")
+public class PropertyReportTask extends ProjectBasedReportTask {
     private PropertyReportRenderer renderer = new PropertyReportRenderer();
 
     @Override
@@ -40,7 +41,7 @@ public class PropertyReportTask extends AbstractReportTask {
     }
 
     @Override
-    public void generate(Project project) throws IOException {
+    public void generate(Project project) {
         for (Map.Entry<String, ?> entry : new TreeMap<String, Object>(project.getProperties()).entrySet()) {
             if (entry.getKey().equals("properties")) {
                 renderer.addProperty(entry.getKey(), "{...}");

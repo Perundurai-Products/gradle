@@ -17,13 +17,14 @@
 package org.gradle.integtests.resolve.maven
 
 import org.gradle.integtests.fixtures.AbstractDependencyResolutionTest
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.integtests.fixtures.resolve.ResolveTestFixture
 import spock.lang.Issue
 
 class MavenVersionRangeResolveIntegrationTest extends AbstractDependencyResolutionTest {
 
     def setup() {
-        new ResolveTestFixture(buildFile).addDefaultVariantDerivationStrategy()
+        new ResolveTestFixture(buildFile, "compile").addDefaultVariantDerivationStrategy()
     }
 
     @Issue("GRADLE-3334")
@@ -47,7 +48,7 @@ dependencies {
         mavenRepo.module('org.test', 'projectB', '2.0').publish()
         mavenRepo.module('org.test', 'projectA', '1.1').dependsOn('org.test', 'projectB', '[2.0]').publish()
 
-        def resolve = new ResolveTestFixture(buildFile)
+        def resolve = new ResolveTestFixture(buildFile, "compile")
         resolve.prepare()
         resolve.expectDefaultConfiguration("runtime")
 
@@ -58,7 +59,7 @@ dependencies {
         resolve.expectGraph {
             root(":", ":test:") {
                 edge("org.test:projectA:[1.1]", "org.test:projectA:1.1") {
-                    edge("org.test:projectB:[2.0]", "org.test:projectB:2.0") // Transitive version range is lost when converting to Ivy ModuleDescriptor
+                    edge("org.test:projectB:2.0", "org.test:projectB:2.0") // Transitive version range is lost when converting to Ivy ModuleDescriptor
                 }
             }
         }
@@ -89,7 +90,7 @@ dependencies {
         mavenRepo.module('org.test', 'parent', '3.0').dependsOn('org.test', 'dep', '3.0').publishPom()
         mavenRepo.module('org.test', 'dep', '2.1').publish()
 
-        def resolve = new ResolveTestFixture(buildFile)
+        def resolve = new ResolveTestFixture(buildFile, "compile")
         resolve.prepare()
 
         when:
@@ -131,7 +132,7 @@ dependencies {
         mavenRepo.module('org.test', 'imported', '3.0').dependsOn('org.test', 'dep', '3.0').publishPom()
         mavenRepo.module('org.test', 'dep', '2.1').publish()
 
-        def resolve = new ResolveTestFixture(buildFile)
+        def resolve = new ResolveTestFixture(buildFile, "compile")
         resolve.prepare()
         resolve.expectDefaultConfiguration("runtime")
 
@@ -152,6 +153,7 @@ dependencies {
     }
 
     @Issue("https://github.com/gradle/gradle/issues/1898")
+    @ToBeFixedForConfigurationCache
     def "error when parent pom with specified version range cannot be found"() {
         given:
         settingsFile << "rootProject.name = 'test' "
@@ -173,7 +175,7 @@ dependencies {
         mavenRepo.module('org.test', 'parent', '1.0').dependsOn('org.test', 'dep', '2.0').publishPom()
         mavenRepo.module('org.test', 'parent', '3.0').dependsOn('org.test', 'dep', '3.0').publishPom()
 
-        def resolve = new ResolveTestFixture(buildFile)
+        def resolve = new ResolveTestFixture(buildFile, "compile")
         resolve.prepare()
 
         when:
@@ -181,5 +183,49 @@ dependencies {
 
         then:
         failure.assertHasCause('Could not find any version that matches org.test:parent:[2.0,3.0)')
+    }
+
+    def "updated behaviour on upper bound exclusion"() {
+        given:
+        settingsFile << """
+rootProject.name = "testrange"
+"""
+        buildFile << """
+repositories {
+    maven {
+        url "${mavenRepo.uri}"
+    }
+}
+
+configurations { conf }
+
+dependencies {
+    conf "org.test:dep:[1.0, 2.0["
+}
+"""
+        and:
+        mavenRepo.module("org.test", "dep", "1.0").publish()
+        mavenRepo.module("org.test", "dep", "1.5").publish()
+        mavenRepo.module("org.test", "dep", "2.0-dev1").publish()
+        mavenRepo.module("org.test", "dep", "2.0-final").publish()
+        mavenRepo.module("org.test", "dep", "2.0").publish()
+        mavenRepo.module("org.test", "dep", "2.1").publish()
+        mavenRepo.module("org.test", "dep", "3.0").publish()
+
+        def resolve = new ResolveTestFixture(buildFile, "conf")
+        resolve.prepare()
+        resolve.expectDefaultConfiguration("runtime")
+
+        when:
+        succeeds "checkDeps"
+
+        then:
+        resolve.expectGraph {
+            root(":", ":testrange:") {
+                edge("org.test:dep:[1.0, 2.0[", "org.test:dep:1.5") {
+                    byReason("didn't match versions 3.0, 2.1, 2.0, 2.0-final, 2.0-dev1")
+                }
+            }
+        }
     }
 }

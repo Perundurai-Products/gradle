@@ -15,22 +15,40 @@
  */
 package org.gradle.api.tasks.scala
 
-import org.gradle.api.internal.AbstractTask
-import org.gradle.api.tasks.AbstractSpockTaskTest
-import org.gradle.util.WrapUtil
+import org.gradle.api.internal.file.TestFiles
+import org.gradle.api.internal.project.taskfactory.TaskInstantiator
+import org.gradle.api.tasks.AbstractConventionTaskTest
+
+import org.gradle.util.internal.WrapUtil
 
 import static org.gradle.api.tasks.compile.AbstractCompileTest.*
 
-class ScalaDocSpec extends AbstractSpockTaskTest {
+class ScalaDocSpec extends AbstractConventionTaskTest {
+
     ScalaDoc scalaDoc
 
+    def setup() {
+        scalaDoc = project.services.get(TaskInstantiator).create(TEST_TASK_NAME, ScalaDoc)
+    }
+
     @Override
-    AbstractTask getTask() {
+    ScalaDoc getTask() {
         return scalaDoc
     }
 
-    def setup() {
-        scalaDoc = createTask(ScalaDoc)
+    def "scala classpath must not be empty"() {
+        when:
+        scalaDoc.setScalaClasspath(TestFiles.empty())
+        scalaDoc.generate()
+
+        then:
+        thrown(IllegalStateException)
+    }
+
+    def "test ScalaDoc maxMemory"() {
+        expect:
+        scalaDoc.maxMemory.set('1G')
+        scalaDoc.maxMemory.get() == '1G'
     }
 
     def "test Scala Includes"() {
@@ -50,4 +68,5 @@ class ScalaDocSpec extends AbstractSpockTaskTest {
         scalaDoc.exclude(TEST_PATTERN_3) == scalaDoc
         scalaDoc.getExcludes().equals(WrapUtil.toLinkedSet(TEST_PATTERN_1, TEST_PATTERN_2, TEST_PATTERN_3))
     }
+
 }

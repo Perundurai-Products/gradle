@@ -19,7 +19,8 @@ import org.gradle.authentication.http.BasicAuthentication
 import org.gradle.authentication.http.DigestAuthentication
 import org.gradle.integtests.fixtures.AbstractHttpDependencyResolutionTest
 import org.gradle.test.fixtures.server.http.AuthScheme
-import org.hamcrest.Matchers
+import org.gradle.test.fixtures.server.http.HttpServer
+import org.hamcrest.CoreMatchers
 import spock.lang.Issue
 import spock.lang.Unroll
 
@@ -210,6 +211,58 @@ task listJars {
         server.allHeaders.every { it.get("TestHttpHeaderName") == "TestHttpHeaderValue" }
     }
 
+
+    @Unroll
+    @Issue("gradle/gradle#5571")
+    void "can resolve dependencies from HTTP Maven repository authenticating with HTTP header with redirect"() {
+        given:
+        HttpServer redirectServer = new HttpServer()
+        redirectServer.start()
+
+        def moduleA = mavenHttpRepo.module('group', 'projectA', '1.2').publish()
+        and:
+        buildFile << """
+repositories {
+    maven {
+        url "${redirectServer.uri}/repo"
+        credentials(org.gradle.api.credentials.HttpHeaderCredentials) {
+            name = "TestHttpHeaderName"
+            value = "TestHttpHeaderValue"
+        }
+        authentication { header(HttpHeaderAuthentication) }
+    }
+}
+configurations { compile }
+dependencies {
+    compile 'group:projectA:1.2'
+}
+task listJars {
+    doLast {
+        assert configurations.compile.collect { it.name } == ['projectA-1.2.jar']
+    }
+}
+"""
+
+        when:
+        redirectServer.authenticationScheme = HEADER
+
+        and:
+        redirectServer.expectGetRedirected(moduleA.pom.uri.path, moduleA.pom.uri.toString())
+        redirectServer.expectGetRedirected(moduleA.artifact.uri.path, moduleA.artifact.uri.toString())
+        moduleA.pom.expectGet()
+        moduleA.artifact.expectGet()
+
+        then:
+        succeeds('listJars')
+        and:
+        redirectServer.allHeaders.every { it.get("TestHttpHeaderName") == "TestHttpHeaderValue" }
+        // These headers should not be propagated to other hosts
+        server.allHeaders.every { it.get("TestHttpHeaderName") == null }
+
+        cleanup:
+        redirectServer.stop()
+    }
+
     @Unroll
     def "reports failure resolving with #credsName credentials from #authScheme authenticated HTTP ivy repository"() {
         given:
@@ -245,7 +298,7 @@ task listJars {
         failure
             .assertHasDescription('Execution failed for task \':listJars\'.')
             .assertResolutionFailure(':compile')
-            .assertThatCause(Matchers.containsString('Received status code 401 from server: Unauthorized'))
+            .assertThatCause(CoreMatchers.containsString('Received status code 401 from server: Unauthorized'))
 
         where:
         authScheme | credsName | creds
@@ -293,7 +346,7 @@ task listJars {
         failure
             .assertHasDescription('Execution failed for task \':listJars\'.')
             .assertResolutionFailure(':compile')
-            .assertThatCause(Matchers.containsString('Received status code 401 from server: Unauthorized'))
+            .assertThatCause(CoreMatchers.containsString('Received status code 401 from server: Unauthorized'))
 
         where:
         authScheme | credsName | creds
@@ -347,7 +400,7 @@ task listJars {
         failure
             .assertHasDescription('Execution failed for task \':listJars\'.')
             .assertResolutionFailure(':compile')
-            .assertThatCause(Matchers.containsString('Received status code 401 from server: Unauthorized'))
+            .assertThatCause(CoreMatchers.containsString('Received status code 401 from server: Unauthorized'))
 
         where:
         authScheme | configuredAuthScheme
@@ -398,7 +451,7 @@ task listJars {
         failure
             .assertHasDescription('Execution failed for task \':listJars\'.')
             .assertResolutionFailure(':compile')
-            .assertThatCause(Matchers.containsString('Received status code 401 from server: Unauthorized'))
+            .assertThatCause(CoreMatchers.containsString('Received status code 401 from server: Unauthorized'))
 
         where:
         authScheme | configuredAuthScheme
@@ -444,7 +497,7 @@ task listJars {
         failure
             .assertHasDescription('Execution failed for task \':listJars\'.')
             .assertResolutionFailure(':compile')
-            .assertThatCause(Matchers.containsString('Could not find group:projectA:1.2'))
+            .assertThatCause(CoreMatchers.containsString('Could not find group:projectA:1.2'))
     }
 
     def "fails resolving from preemptive authenticated HTTP maven repository"() {
@@ -486,7 +539,7 @@ task listJars {
         failure
             .assertHasDescription('Execution failed for task \':listJars\'.')
             .assertResolutionFailure(':compile')
-            .assertThatCause(Matchers.containsString('Could not find group:projectA:1.2'))
+            .assertThatCause(CoreMatchers.containsString('Could not find group:projectA:1.2'))
     }
 
     @Issue("https://github.com/gradle/gradle/issues/6014")

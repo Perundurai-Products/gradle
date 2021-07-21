@@ -16,12 +16,15 @@
 
 package org.gradle.test.fixtures.server
 
-abstract class ExpectOne implements ServerExpectation {
-    boolean run
+import groovy.transform.CompileStatic
 
+@CompileStatic
+abstract class ExpectOne extends OneRequestServerExpectation {
+
+    @Override
     void assertMet() {
         if (!run) {
-            throw new AssertionError(notMetMessage)
+            throw new AssertionError(notMetMessage as Object)
         }
     }
 

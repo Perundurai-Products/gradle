@@ -17,7 +17,6 @@
 package org.gradle.test.fixtures.file;
 
 import groovy.lang.Closure;
-import org.apache.commons.io.FileUtils;
 import org.gradle.api.GradleException;
 import org.gradle.test.fixtures.ConcurrentTestUtil;
 import org.junit.rules.TestRule;
@@ -31,25 +30,36 @@ import java.util.regex.Pattern;
 
 /**
  * A JUnit rule which provides a unique temporary folder for the test.
+ *
+ * Note: to avoid 260 char path length limitation on Windows, we should keep the test dir path as short as possible,
+ * ideally < 90 chars (from repo root to test dir root, e.g. "core/build/tmp/test files/{TestClass}/{testMethod}/qqlj8"),
+ * or < 40 chars for "{TestClass}/{testMethod}/qqlj8"
  */
 abstract class AbstractTestDirectoryProvider implements TestRule, TestDirectoryProvider {
-    protected TestFile root;
+    protected final TestFile root;
+    private final String className;
 
     private static final Random RANDOM = new Random();
     private static final int ALL_DIGITS_AND_LETTERS_RADIX = 36;
-    private static final int MAX_RANDOM_PART_VALUE = Integer.valueOf("zzzzz", ALL_DIGITS_AND_LETTERS_RADIX);
+    private static final int MAX_RANDOM_PART_VALUE = Integer.parseInt("zzzzz", ALL_DIGITS_AND_LETTERS_RADIX);
     private static final Pattern WINDOWS_RESERVED_NAMES = Pattern.compile("(con)|(prn)|(aux)|(nul)|(com\\d)|(lpt\\d)", Pattern.CASE_INSENSITIVE);
 
-    private TestFile dir;
     private String prefix;
+    private TestFile dir;
     private boolean cleanup = true;
     private boolean suppressCleanupErrors = false;
+
+    protected AbstractTestDirectoryProvider(TestFile root, Class<?> testClass) {
+        this.root = root;
+        this.className = shortenPath(testClass.getSimpleName(), 16);
+    }
 
     @Override
     public void suppressCleanup() {
         cleanup = false;
     }
 
+    @Override
     public void suppressCleanupErrors() {
         suppressCleanupErrors = true;
     }
@@ -63,14 +73,15 @@ abstract class AbstractTestDirectoryProvider implements TestRule, TestDirectoryP
             ConcurrentTestUtil.poll(new Closure(null, null) {
                 @SuppressWarnings("UnusedDeclaration")
                 void doCall() throws IOException {
-                    FileUtils.forceDelete(dir);
+                    dir.forceDeleteDir();
                 }
             });
         }
     }
 
+    @Override
     public Statement apply(final Statement base, Description description) {
-        init(description.getMethodName(), description.getTestClass().getSimpleName());
+        init(description.getMethodName());
 
         return new TestDirectoryCleaningStatement(base, description);
     }
@@ -113,7 +124,7 @@ abstract class AbstractTestDirectoryProvider implements TestRule, TestDirectoryP
 
         private String cleanupErrorMessage() {
             return "Couldn't delete test dir for `" + displayName() + "` (test is holding files open). "
-                + "In order to find out which files are held open you may find http://file-leak-detector.kohsuke.org/ useful.";
+                + "In order to find out which files are held open, you may find `org.gradle.integtests.fixtures.executer.GradleExecuter.withFileLeakDetection` useful.";
         }
 
         private String displayName() {
@@ -121,23 +132,32 @@ abstract class AbstractTestDirectoryProvider implements TestRule, TestDirectoryP
         }
     }
 
-    protected void init(String methodName, String className) {
+    protected void init(String methodName) {
         if (methodName == null) {
             // must be a @ClassRule; use the rule's class name instead
             methodName = getClass().getSimpleName();
         }
         if (prefix == null) {
-            String safeMethodName = methodName.replaceAll("[^\\w]", "_");
-            if (safeMethodName.length() > 30) {
-                safeMethodName = safeMethodName.substring(0, 19) + "..." + safeMethodName.substring(safeMethodName.length() - 9);
-            }
+            String safeMethodName = shortenPath(methodName.replaceAll("[^\\w]", "_"), 16);
             prefix = String.format("%s/%s", className, safeMethodName);
         }
     }
 
+    /*
+     Shorten a long name to at most {expectedMaxLength}, replace middle characters with ".".
+     */
+    private String shortenPath(String longName, int expectedMaxLength) {
+        if (longName.length() <= expectedMaxLength) {
+            return longName;
+        } else {
+            return longName.substring(0, expectedMaxLength - 5) + "." + longName.substring(longName.length() - 4);
+        }
+    }
+
+    @Override
     public TestFile getTestDirectory() {
         if (dir == null) {
-           dir = createUniqueTestDirectory();
+            dir = createUniqueTestDirectory();
         }
         return dir;
     }
@@ -160,20 +180,24 @@ abstract class AbstractTestDirectoryProvider implements TestRule, TestDirectoryP
         if (prefix == null) {
             // This can happen if this is used in a constructor or a @Before method. It also happens when using
             // @RunWith(SomeRunner) when the runner does not support rules.
-            prefix = "unknown-test-class";
+            prefix = className;
         }
         return prefix;
     }
 
     public TestFile file(Object... path) {
-        return getTestDirectory().file((Object[]) path);
+        return getTestDirectory().file(path);
     }
 
     public TestFile createFile(Object... path) {
-        return file((Object[]) path).createFile();
+        return file(path).createFile();
     }
 
     public TestFile createDir(Object... path) {
-        return file((Object[]) path).createDir();
+        return file(path).createDir();
+    }
+
+    public TestFile getRoot() {
+        return root;
     }
 }

@@ -16,11 +16,13 @@
 
 package org.gradle.api.publish.maven
 
+
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.integtests.fixtures.publish.maven.AbstractMavenPublishIntegTest
 import org.gradle.test.fixtures.maven.MavenLocalRepository
 import org.gradle.util.SetSystemProperties
 import org.junit.Rule
-import spock.lang.Ignore
+import spock.lang.Issue
 
 /**
  * Tests “simple” maven publishing scenarios
@@ -58,6 +60,7 @@ class MavenPublishBasicIntegTest extends AbstractMavenPublishIntegTest {
         mavenRepo.module('group', 'root', '1.0').assertNotPublished()
     }
 
+    @ToBeFixedForConfigurationCache
     def "publishes empty pom when publication has no added component"() {
         given:
         settingsFile << "rootProject.name = 'empty-project'"
@@ -142,6 +145,7 @@ class MavenPublishBasicIntegTest extends AbstractMavenPublishIntegTest {
         repoModule.rootMetaData.artifactId == "root"
         repoModule.rootMetaData.versions == ["1.0"]
         repoModule.rootMetaData.releaseVersion == "1.0"
+        repoModule.rootMetaData.latestVersion == "1.0"
 
         when:
         succeeds 'publishToMavenLocal'
@@ -150,9 +154,68 @@ class MavenPublishBasicIntegTest extends AbstractMavenPublishIntegTest {
         localModule.assertPublished()
 
         and:
+        localModule.rootMetaData.groupId == "group"
+        localModule.rootMetaData.artifactId == "root"
+        localModule.rootMetaData.versions == ["1.0"]
+        localModule.rootMetaData.releaseVersion == "1.0"
+        localModule.rootMetaData.latestVersion == "1.0"
+
+        and:
         resolveArtifacts(repoModule) {
             expectFiles 'root-1.0.jar'
         }
+    }
+
+    def "can republish simple component"() {
+        given:
+        using m2
+
+        and:
+        settingsFile << "rootProject.name = 'root'"
+        buildFile << """
+            apply plugin: 'maven-publish'
+            apply plugin: 'java'
+
+            group = 'group'
+            version = '1.0'
+
+            publishing {
+                repositories {
+                    maven { url "${mavenRepo.uri}" }
+                }
+                publications {
+                    maven(MavenPublication) {
+                        from components.java
+                    }
+                }
+            }
+        """
+        succeeds 'publish', 'publishToMavenLocal'
+        buildFile.text = buildFile.text.replace("1.0", "2.0")
+
+        def repoModule = javaLibrary(mavenRepo.module('group', 'root', '2.0'))
+        def localModule = javaLibrary(localM2Repo.module('group', 'root', '2.0'))
+
+        when:
+        succeeds 'publish', 'publishToMavenLocal'
+
+        then:
+        repoModule.assertPublished()
+        localModule.assertPublished()
+
+        and:
+        repoModule.rootMetaData.groupId == "group"
+        repoModule.rootMetaData.artifactId == "root"
+        repoModule.rootMetaData.versions == ["1.0", "2.0"]
+        repoModule.rootMetaData.releaseVersion == "2.0"
+        repoModule.rootMetaData.latestVersion == "2.0"
+
+        and:
+        localModule.rootMetaData.groupId == "group"
+        localModule.rootMetaData.artifactId == "root"
+        localModule.rootMetaData.versions == ["1.0", "2.0"]
+        localModule.rootMetaData.releaseVersion == "2.0"
+        localModule.rootMetaData.latestVersion == "2.0"
     }
 
     def "can publish to custom maven local repo defined in settings.xml"() {
@@ -216,13 +279,13 @@ class MavenPublishBasicIntegTest extends AbstractMavenPublishIntegTest {
         failure.assertHasCause("Maven publication 'maven' cannot include multiple components")
     }
 
-    @Ignore("Not yet implemented - currently the second publication will overwrite")
-    def "cannot publish multiple maven publications with the same identity"() {
+    def "publishes to all defined repositories"() {
         given:
-        settingsFile << "rootProject.name = 'bad-project'"
+        def mavenRepo2 = maven("maven-repo-2")
+
+        settingsFile << "rootProject.name = 'root'"
         buildFile << """
             apply plugin: 'maven-publish'
-            apply plugin: 'war'
 
             group = 'org.gradle.test'
             version = '1.0'
@@ -230,22 +293,212 @@ class MavenPublishBasicIntegTest extends AbstractMavenPublishIntegTest {
             publishing {
                 repositories {
                     maven { url "${mavenRepo.uri}" }
+                    maven { url "${mavenRepo2.uri}" }
                 }
                 publications {
-                    mavenJava(MavenPublication) {
-                        from components.java
-                    }
-                    mavenWeb(MavenPublication) {
-                        from components.web
-                    }
+                    maven(MavenPublication)
                 }
             }
         """
         when:
-        fails 'publish'
+        succeeds 'publish'
 
         then:
-        failure.assertHasDescription("A problem occurred configuring root project 'bad-project'.")
-        failure.assertHasCause("Publication with name 'mavenJava' already exists")
+        def module = mavenRepo.module('org.gradle.test', 'root', '1.0')
+        module.assertPublished()
+        def module2 = mavenRepo2.module('org.gradle.test', 'root', '1.0')
+        module2.assertPublished()
+    }
+
+    def "can publish custom PublishArtifact"() {
+        given:
+        settingsFile << "rootProject.name = 'root'"
+        buildFile << """
+            apply plugin: 'maven-publish'
+            apply plugin: 'java'
+
+            group = 'org.gradle.test'
+            version = '1.0'
+
+            def writeFileProvider = tasks.register("writeFile") {
+                doLast {
+                    try (FileOutputStream out = new FileOutputStream("customArtifact.jar")) {}
+                }
+            }
+
+            def customArtifact = new PublishArtifact() {
+                @Override
+                String getName() {
+                    return "customArtifact"
+                }
+
+                @Override
+                String getExtension() {
+                    return "jar"
+                }
+
+                @Override
+                String getType() {
+                    return "jar"
+                }
+
+                @Override
+                String getClassifier() {
+                    return null
+                }
+
+                @Override
+                File getFile() {
+                    return new File("customArtifact.jar")
+                }
+
+                @Override
+                Date getDate() {
+                    return new Date()
+                }
+
+                @Override
+                TaskDependency getBuildDependencies() {
+                    return new TaskDependency() {
+                        @Override
+                        Set<? extends Task> getDependencies(Task task) {
+                            return Collections.singleton(writeFileProvider.get())
+                        }
+                    }
+                }
+            }
+            publishing {
+                repositories {
+                    maven { url "${mavenRepo.uri}" }
+                }
+                publications {
+                    maven(MavenPublication) {
+                        artifact customArtifact
+                    }
+                }
+            }
+        """
+
+        when:
+        succeeds 'publish'
+
+        then:
+        def module = mavenRepo.module('org.gradle.test', 'root', '1.0')
+        module.assertPublished()
+    }
+
+    def "warns when trying to publish a transitive = false variant"() {
+        given:
+        settingsFile << "rootProject.name = 'root'"
+        buildFile << """
+            apply plugin: 'maven-publish'
+            apply plugin: 'java'
+
+            group = 'group'
+            version = '1.0'
+
+            configurations {
+                apiElements {
+                    transitive = false
+                }
+            }
+
+            publishing {
+                repositories {
+                    maven { url "${mavenRepo.uri}" }
+                }
+                publications {
+                    maven(MavenPublication) {
+                        from components.java
+                    }
+                }
+            }
+        """
+
+        when:
+        executer.withStackTraceChecksDisabled()
+        succeeds 'publish'
+
+        then: "build warned about transitive = true variant"
+        outputContains("Publication ignores 'transitive = false' at configuration level.")
+    }
+
+    @ToBeFixedForConfigurationCache(because = "configuration cache doesn't support task failures")
+    @Issue("https://github.com/gradle/gradle/issues/15009")
+    def "fails publishing if a variant contains a dependency on an enforced platform"() {
+        settingsFile << """
+            rootProject.name = 'publish'
+        """
+        buildFile << """
+            plugins {
+                id 'java'
+                id 'maven-publish'
+            }
+
+            dependencies {
+                implementation enforcedPlatform('org:platform:1.0')
+            }
+
+            publishing {
+                repositories {
+                    maven { url "${mavenRepo.uri}" }
+                }
+                publications {
+                    maven(MavenPublication) {
+                        from components.java
+                    }
+                }
+            }
+        """
+
+        when:
+        fails ':publish'
+
+        then:
+        failure.assertHasCause """Invalid publication 'maven':
+  - Variant 'runtimeElements' contains a dependency on enforced platform 'org:platform'
+In general publishing dependencies to enforced platforms is a mistake: enforced platforms shouldn't be used for published components because they behave like forced dependencies and leak to consumers. This can result in hard to diagnose dependency resolution errors. If you did this intentionally you can disable this check by adding 'enforced-platform' to the suppressed validations of the :generateMetadataFileForMavenPublication task."""
+    }
+
+    @Issue("https://github.com/gradle/gradle/issues/15009")
+    @ToBeFixedForConfigurationCache(because = "configuration cache doesn't support task failures")
+    def "can disable validation of publication of dependencies on enforced platforms"() {
+        settingsFile << """
+            rootProject.name = 'publish'
+        """
+        buildFile << """
+            plugins {
+                id 'java'
+                id 'maven-publish'
+            }
+
+            group = 'com.acme'
+            version = '0.999'
+
+            dependencies {
+                implementation enforcedPlatform('org:platform:1.0')
+            }
+
+            publishing {
+                repositories {
+                    maven { url "${mavenRepo.uri}" }
+                }
+                publications {
+                    maven(MavenPublication) {
+                        from components.java
+                    }
+                }
+            }
+
+            tasks.named('generateMetadataFileForMavenPublication') {
+                suppressedValidationErrors.add('enforced-platform')
+            }
+        """
+
+        when:
+        succeeds ':publish'
+
+        then:
+        executedAndNotSkipped ':generateMetadataFileForMavenPublication', ':publishMavenPublicationToMavenRepository'
     }
 }

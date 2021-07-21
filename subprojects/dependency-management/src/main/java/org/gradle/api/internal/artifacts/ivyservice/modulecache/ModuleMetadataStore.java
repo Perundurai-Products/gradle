@@ -17,7 +17,7 @@ package org.gradle.api.internal.artifacts.ivyservice.modulecache;
 
 import com.google.common.base.Joiner;
 import com.google.common.collect.Interner;
-import org.gradle.api.Action;
+import com.google.common.collect.Maps;
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier;
 import org.gradle.api.internal.artifacts.ImmutableModuleIdentifierFactory;
 import org.gradle.internal.UncheckedException;
@@ -28,7 +28,6 @@ import org.gradle.internal.resource.local.PathKeyFileStore;
 import org.gradle.internal.serialize.kryo.KryoBackedDecoder;
 import org.gradle.internal.serialize.kryo.KryoBackedEncoder;
 
-import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 
@@ -40,7 +39,10 @@ public class ModuleMetadataStore {
     private final ImmutableModuleIdentifierFactory moduleIdentifierFactory;
     private final Interner<String> stringInterner;
 
-    public ModuleMetadataStore(PathKeyFileStore metaDataStore, ModuleMetadataSerializer moduleMetadataSerializer, ImmutableModuleIdentifierFactory moduleIdentifierFactory, Interner<String> stringInterner) {
+    public ModuleMetadataStore(PathKeyFileStore metaDataStore,
+                               ModuleMetadataSerializer moduleMetadataSerializer,
+                               ImmutableModuleIdentifierFactory moduleIdentifierFactory,
+                               Interner<String> stringInterner) {
         this.metaDataStore = metaDataStore;
         this.moduleMetadataSerializer = moduleMetadataSerializer;
         this.moduleIdentifierFactory = moduleIdentifierFactory;
@@ -49,14 +51,11 @@ public class ModuleMetadataStore {
 
     public MutableModuleComponentResolveMetadata getModuleDescriptor(ModuleComponentAtRepositoryKey component) {
         String[] filePath = getFilePath(component);
-        final LocallyAvailableResource resource = metaDataStore.get(filePath);
+        LocallyAvailableResource resource = metaDataStore.get(filePath);
         if (resource != null) {
             try {
-                StringDeduplicatingDecoder decoder = new StringDeduplicatingDecoder(new KryoBackedDecoder(new FileInputStream(resource.getFile())), stringInterner);
-                try {
-                    return moduleMetadataSerializer.read(decoder, moduleIdentifierFactory);
-                } finally {
-                    decoder.close();
+                try (StringDeduplicatingDecoder decoder = new StringDeduplicatingDecoder(new KryoBackedDecoder(new FileInputStream(resource.getFile())), stringInterner)) {
+                    return moduleMetadataSerializer.read(decoder, moduleIdentifierFactory, Maps.newHashMap());
                 }
             } catch (Exception e) {
                 throw new RuntimeException("Could not load module metadata from " + resource.getDisplayName(), e);
@@ -67,18 +66,13 @@ public class ModuleMetadataStore {
 
     public LocallyAvailableResource putModuleDescriptor(ModuleComponentAtRepositoryKey component, final ModuleComponentResolveMetadata metadata) {
         String[] filePath = getFilePath(component);
-        return metaDataStore.add(PATH_JOINER.join(filePath), new Action<File>() {
-            public void execute(File moduleDescriptorFile) {
-                try {
-                    KryoBackedEncoder encoder = new KryoBackedEncoder(new FileOutputStream(moduleDescriptorFile));
-                    try {
-                        moduleMetadataSerializer.write(encoder, metadata);
-                    } finally {
-                        encoder.close();
-                    }
-                } catch (Exception e) {
-                    throw UncheckedException.throwAsUncheckedException(e);
+        return metaDataStore.add(PATH_JOINER.join(filePath), moduleDescriptorFile -> {
+            try {
+                try (KryoBackedEncoder encoder = new KryoBackedEncoder(new FileOutputStream(moduleDescriptorFile))) {
+                    moduleMetadataSerializer.write(encoder, metadata, Maps.newHashMap());
                 }
+            } catch (Exception e) {
+                throw UncheckedException.throwAsUncheckedException(e);
             }
         });
     }

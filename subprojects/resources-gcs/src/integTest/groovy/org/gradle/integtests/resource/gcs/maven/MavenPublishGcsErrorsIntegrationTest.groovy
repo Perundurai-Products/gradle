@@ -16,6 +16,7 @@
 
 package org.gradle.integtests.resource.gcs.maven
 
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 import org.gradle.integtests.fixtures.publish.maven.AbstractMavenPublishIntegTest
 import org.gradle.integtests.resource.gcs.fixtures.GcsServer
 import org.gradle.integtests.resource.gcs.fixtures.MavenGcsRepository
@@ -36,13 +37,13 @@ class MavenPublishGcsErrorsIntegrationTest extends AbstractMavenPublishIntegTest
     public final GcsServer server = new GcsServer(temporaryFolder)
 
     def setup() {
-        disableModuleMetadataPublishing()
         executer.withArgument('-i')
         executer.withArgument("-D${GCS_ENDPOINT_PROPERTY}=${server.uri}")
         executer.withArgument("-D${GCS_SERVICE_PATH_PROPERTY}=/")
         executer.withArgument("-D${GCS_DISABLE_AUTH_PROPERTY}=true")
     }
 
+    @ToBeFixedForConfigurationCache(skip = ToBeFixedForConfigurationCache.Skip.FAILS_TO_CLEANUP)
     def "should fail with an authentication error"() {
         setup:
         settingsFile << "rootProject.name = '${projectName}'"
@@ -71,7 +72,6 @@ class MavenPublishGcsErrorsIntegrationTest extends AbstractMavenPublishIntegTest
         when:
         def module = mavenGcsRepo.module("org.gradle", "publishGcsTest", "1.45")
         module.artifact.expectPutAuthenticationError()
-        module.pom.expectPutAuthenticationError()
 
         then:
         fails 'publish'

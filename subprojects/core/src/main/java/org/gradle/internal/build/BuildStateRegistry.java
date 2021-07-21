@@ -18,12 +18,17 @@ package org.gradle.internal.build;
 
 import org.gradle.api.artifacts.component.BuildIdentifier;
 import org.gradle.api.internal.BuildDefinition;
+import org.gradle.internal.service.scopes.Scopes;
+import org.gradle.internal.service.scopes.ServiceScope;
 
+import javax.annotation.Nullable;
 import java.util.Collection;
+import java.util.function.Consumer;
 
 /**
  * A registry of all the builds present in a build tree.
  */
+@ServiceScope(Scopes.BuildTree.class)
 public interface BuildStateRegistry {
     /**
      * Creates the root build.
@@ -50,12 +55,12 @@ public interface BuildStateRegistry {
     /**
      * Locates an included build by {@link BuildIdentifier}, if present. Fails if not an included build.
      */
-    IncludedBuildState getIncludedBuild(BuildIdentifier buildIdentifier);
+    IncludedBuildState getIncludedBuild(BuildIdentifier buildIdentifier) throws IllegalArgumentException;
 
     /**
      * Locates a build. Fails if not present.
      */
-    BuildState getBuild(BuildIdentifier buildIdentifier);
+    BuildState getBuild(BuildIdentifier buildIdentifier) throws IllegalArgumentException;
 
     /**
      * Notification that the settings have been loaded for the root build.
@@ -72,9 +77,20 @@ public interface BuildStateRegistry {
     void beforeConfigureRootBuild();
 
     /**
+     * Notification that the root build has just finished configuration.
+     */
+    void afterConfigureRootBuild();
+
+    /**
      * Creates an included build. An included build is-a nested build whose projects and outputs are treated as part of the composite build.
      */
     IncludedBuildState addIncludedBuild(BuildDefinition buildDefinition);
+
+    /**
+     * Same as {@link #addIncludedBuild(BuildDefinition)} except the {@link IncludedBuildState} will be instantiated by
+     * the given factory.
+     */
+    IncludedBuildState addIncludedBuildOf(IncludedBuildFactory includedBuildFactory, BuildDefinition buildDefinition);
 
     /**
      * Creates an implicit included build. An implicit build is-a nested build that is managed by Gradle and whose outputs are used by dependency resolution.
@@ -84,10 +100,25 @@ public interface BuildStateRegistry {
     /**
      * Creates a standalone nested build.
      */
-    StandAloneNestedBuild addNestedBuild(BuildDefinition buildDefinition, BuildState owner);
+    StandAloneNestedBuild addBuildSrcNestedBuild(BuildDefinition buildDefinition, BuildState owner);
 
     /**
      * Creates a new standalone nested build tree.
      */
-    NestedRootBuild addNestedBuildTree(BuildDefinition buildDefinition, BuildState owner);
+    NestedRootBuild addNestedBuildTree(BuildDefinition buildDefinition, BuildState owner, @Nullable String buildName);
+
+    /**
+     * Visits all registered builds, ordered by {@link BuildState#getIdentityPath()}
+     */
+    void visitBuilds(Consumer<? super BuildState> visitor);
+
+    /**
+     * Register dependency substitutions for the root build itself. This way, the projects of the root build can be addressed by coordinates as the projects of all other builds.
+     */
+    void registerSubstitutionsForRootBuild();
+
+    /**
+     * Ensures that this project and any builds it includes are configured and their publications are registered.
+     */
+    void ensureConfigured(IncludedBuildState buildState);
 }

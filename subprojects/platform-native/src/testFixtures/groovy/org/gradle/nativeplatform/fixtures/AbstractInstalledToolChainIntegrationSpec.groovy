@@ -16,24 +16,21 @@
 
 package org.gradle.nativeplatform.fixtures
 
-import org.gradle.api.internal.file.BaseDirFileResolver
 import org.gradle.api.internal.file.TestFiles
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.integtests.fixtures.ContextualMultiVersionTest
 import org.gradle.integtests.fixtures.SourceFile
+import org.gradle.integtests.fixtures.compatibility.MultiVersionTestCategory
 import org.gradle.internal.os.OperatingSystem
 import org.gradle.internal.time.Time
 import org.gradle.nativeplatform.internal.CompilerOutputFileNamingSchemeFactory
 import org.gradle.nativeplatform.platform.internal.DefaultNativePlatform
 import org.gradle.test.fixtures.file.TestFile
-import org.junit.experimental.categories.Category
-import org.junit.runner.RunWith
 
 /**
  * Runs a test separately for each installed tool chain.
  */
-@RunWith(NativeToolChainTestRunner.class)
-@Category(ContextualMultiVersionTest.class)
+@NativeToolchainTest
+@MultiVersionTestCategory
 abstract class AbstractInstalledToolChainIntegrationSpec extends AbstractIntegrationSpec implements HostPlatform {
     static AvailableToolChains.InstalledToolChain toolChain
     File initScript
@@ -44,7 +41,7 @@ abstract class AbstractInstalledToolChainIntegrationSpec extends AbstractIntegra
         initScript = file("init.gradle") << """
             allprojects { p ->
                 apply plugin: ${toolChain.pluginClass}
-            
+
                 model {
                       toolChains {
                         ${toolChain.buildScriptConfig}
@@ -54,6 +51,7 @@ abstract class AbstractInstalledToolChainIntegrationSpec extends AbstractIntegra
         """
         executer.beforeExecute({
             usingInitScript(initScript)
+            toolChain.configureExecuter(it)
         })
     }
 
@@ -135,7 +133,7 @@ abstract class AbstractInstalledToolChainIntegrationSpec extends AbstractIntegra
     }
 
     def intermediateFileFor(File sourceFile, String intermediateFilesDir, String intermediateFileSuffix) {
-        File intermediateFile = new CompilerOutputFileNamingSchemeFactory(new BaseDirFileResolver(TestFiles.fileSystem(), testDirectory, TestFiles.getPatternSetFactory())).create()
+        File intermediateFile = new CompilerOutputFileNamingSchemeFactory(TestFiles.resolver(testDirectory)).create()
             .withObjectFileNameSuffix(intermediateFileSuffix)
             .withOutputBaseFolder(file(intermediateFilesDir))
             .map(file(sourceFile))
@@ -162,10 +160,14 @@ abstract class AbstractInstalledToolChainIntegrationSpec extends AbstractIntegra
     // compiling Objective-C and Objective-Cpp with clang generates
     // random different object files (related to ASLR settings)
     // We saw this behaviour only on linux so far.
+    // 2021-4-15: recent GCC also enable ASLR by default:
+    // https://wiki.ubuntu.com/Security/Features
     boolean isObjectiveCWithAslr() {
         return (sourceType == "Objc" || sourceType == "Objcpp") &&
             OperatingSystem.current().isLinux() &&
-            toolChain.displayName.startsWith("clang")
+            (toolChain.displayName.startsWith("clang") ||
+                // GCC 9 or later
+                toolChain.displayName ==~ /gcc (9|\d\d+).*/)
     }
 
     protected void maybeWait() {

@@ -48,16 +48,32 @@ abstract class AbstractCompositeBuildIntegrationTest extends AbstractIntegration
     def dependency(BuildTestFile sourceBuild = buildA, String notation) {
         sourceBuild.buildFile << """
             dependencies {
-                compile '${notation}'
+                implementation '${notation}'
             }
 """
+    }
+
+    def platformDependency(BuildTestFile sourceBuild = buildA, String notation) {
+        sourceBuild.buildFile << """
+            dependencies {
+                implementation platform('${notation}')
+            }
+"""
+    }
+
+    def includeBuildAs(File build, String name) {
+        buildA.settingsFile << """
+                includeBuild('${build.toURI()}') {
+                    name = '$name'
+                }
+        """
     }
 
     def includeBuild(File build, def mappings = "") {
         if (mappings == "") {
             buildA.settingsFile << """
                 includeBuild('${build.toURI()}')
-"""
+            """
         } else {
             buildA.settingsFile << """
                 includeBuild('${build.toURI()}') {
@@ -65,9 +81,18 @@ abstract class AbstractCompositeBuildIntegrationTest extends AbstractIntegration
                         $mappings
                     }
                 }
-"""
+            """
 
         }
+    }
+
+    def includePluginBuild(File build) {
+            buildA.settingsFile.setText("""
+                pluginManagement {
+                    includeBuild('${build.toURI()}')
+                }
+                ${buildA.settingsFile.text}
+            """)
     }
 
     protected void execute(BuildTestFile build, String[] tasks, Iterable<String> arguments = []) {
@@ -145,21 +170,28 @@ abstract class AbstractCompositeBuildIntegrationTest extends AbstractIntegration
     }
 
     def pluginProjectBuild(String name) {
-        def className = name.capitalize()
         singleProjectBuild(name) {
-            buildFile << """
+            pluginProjectBuild(delegate)
+        }
+    }
+
+    def pluginProjectBuild(BuildTestFile testFile) {
+        def baseName = testFile.name.capitalize()
+        def className = baseName + "Impl"
+        testFile.with {
+            it.buildFile << """
 apply plugin: 'java-gradle-plugin'
 
 gradlePlugin {
     plugins {
-        ${name} {
-            id = "org.test.plugin.$name"
-            implementationClass = "org.test.$className"
+        ${it.name} {
+            id = "org.test.plugin.${it.name}"
+            implementationClass = "org.test.${className}"
         }
     }
 }
 """
-            file("src/main/java/org/test/${className}.java") << """
+            it.file("src/main/java/org/test/${className}.java") << """
 package org.test;
 
 import org.gradle.api.Plugin;
@@ -168,13 +200,12 @@ import org.gradle.api.Task;
 
 public class ${className} implements Plugin<Project> {
     public void apply(Project project) {
-        Task task = project.task("taskFrom${className}");
+        Task task = project.task("taskFrom${baseName}");
         task.setGroup("Plugin");
     }
 }
 """
         }
-
     }
 
     void outputContains(String string) {

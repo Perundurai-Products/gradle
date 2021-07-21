@@ -23,15 +23,16 @@ import org.gradle.api.logging.Logging;
 import org.gradle.initialization.BuildCancellationToken;
 import org.gradle.initialization.BuildEventConsumer;
 import org.gradle.initialization.BuildRequestContext;
+import org.gradle.internal.SystemProperties;
 import org.gradle.internal.UncheckedException;
 import org.gradle.internal.concurrent.CompositeStoppable;
 import org.gradle.internal.concurrent.ExecutorFactory;
 import org.gradle.internal.id.IdGenerator;
 import org.gradle.internal.invocation.BuildAction;
+import org.gradle.internal.logging.ConsoleRenderer;
 import org.gradle.internal.logging.events.OutputEventListener;
 import org.gradle.internal.nativeintegration.ProcessEnvironment;
 import org.gradle.internal.remote.internal.Connection;
-import org.gradle.internal.service.ServiceRegistry;
 import org.gradle.launcher.daemon.context.DaemonContext;
 import org.gradle.launcher.daemon.diagnostics.DaemonDiagnostics;
 import org.gradle.launcher.daemon.protocol.Build;
@@ -51,8 +52,11 @@ import org.gradle.launcher.exec.BuildActionExecuter;
 import org.gradle.launcher.exec.BuildActionParameters;
 import org.gradle.launcher.exec.BuildActionResult;
 
+import java.io.File;
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -91,7 +95,7 @@ import java.util.UUID;
  * <p>
  * If the daemon returns a {@code null} message before returning a {@link Result} object, it has terminated unexpectedly for some reason.
  */
-public class DaemonClient implements BuildActionExecuter<BuildActionParameters> {
+public class DaemonClient implements BuildActionExecuter<BuildActionParameters, BuildRequestContext> {
     private static final Logger LOGGER = Logging.getLogger(DaemonClient.class);
     private final DaemonConnector connector;
     private final OutputEventListener outputEventListener;
@@ -127,11 +131,12 @@ public class DaemonClient implements BuildActionExecuter<BuildActionParameters> 
      *
      * @param action The action
      */
-    public BuildActionResult execute(BuildAction action, BuildRequestContext requestContext, BuildActionParameters parameters, ServiceRegistry contextServices) {
+    @Override
+    public BuildActionResult execute(BuildAction action, BuildActionParameters parameters, BuildRequestContext requestContext) {
         UUID buildId = idGenerator.generateId();
         List<DaemonInitialConnectException> accumulatedExceptions = Lists.newArrayList();
 
-        LOGGER.debug("Executing build " + buildId + " in daemon client {pid=" + processEnvironment.maybeGetPid() + "}");
+        LOGGER.debug("Executing build {} in daemon client {pid={}}", buildId, processEnvironment.maybeGetPid());
 
         int saneNumberOfAttempts = 100; //is it sane enough?
 
@@ -162,13 +167,16 @@ public class DaemonClient implements BuildActionExecuter<BuildActionParameters> 
             result = connection.receive();
         } catch (StaleDaemonAddressException e) {
             LOGGER.debug("Connected to a stale daemon address.", e);
-            //We might fail hard here on the assumption that something weird happened to the daemon.
-            //However, since we haven't yet started running the build, we can recover by just trying again...
+            // We might fail hard here on the assumption that something weird happened to the daemon.
+            // However, since we haven't yet started running the build, we can recover by just trying again.
             throw new DaemonInitialConnectException("Connected to a stale daemon address.", e);
         }
 
         if (result == null) {
-            throw new DaemonInitialConnectException("The first result from the daemon was empty. Most likely the process died immediately after connection.");
+            // If the response from the daemon is unintelligible, mark the daemon as unavailable so other
+            // clients won't try to communicate with it. We'll attempt to recovery by trying again.
+            connector.markDaemonAsUnavailable(connection.getDaemon());
+            throw new DaemonInitialConnectException("The first result from the daemon was empty. The daemon process may have died or a non-daemon process is reusing the same port.");
         }
 
         LOGGER.debug("Received result {} from daemon {} (build should be starting).", result, connection.getDaemon());
@@ -192,7 +200,7 @@ public class DaemonClient implements BuildActionExecuter<BuildActionParameters> 
         } else if (result instanceof DaemonUnavailable) {
             throw new DaemonInitialConnectException("The daemon we connected to was unavailable: " + ((DaemonUnavailable) result).getReason());
         } else if (result instanceof Result) {
-            return (BuildActionResult)((Result) result).getValue();
+            return (BuildActionResult) ((Result) result).getValue();
         } else {
             throw invalidResponse(result, build, diagnostics);
         }
@@ -238,7 +246,34 @@ public class DaemonClient implements BuildActionExecuter<BuildActionParameters> 
             + "\nAttempting to read last messages from the daemon log...", build);
 
         LOGGER.error(diagnostics.describe());
+        findCrashLogFile(build, diagnostics).ifPresent(crashLogFile ->
+            LOGGER.error("JVM crash log found: " + new ConsoleRenderer().asClickableFileUrl(crashLogFile))
+        );
         throw new DaemonDisappearedException();
+    }
+
+    /**
+     * <a href="https://stackoverflow.com/a/5154619/104894">See why this logic exists in this SO post.</a>
+     */
+    private Optional<File> findCrashLogFile(Build build, DaemonDiagnostics diagnostics) {
+        String crashLogFileName = "hs_err_pid" + diagnostics.getPid() + ".log";
+        List<File> candidates = new ArrayList<>();
+        candidates.add(new File(build.getParameters().getCurrentDir(), crashLogFileName));
+        candidates.add(new File(diagnostics.getDaemonLog().getParent(), crashLogFileName));
+        findCrashLogFile(crashLogFileName).ifPresent(candidates::add);
+
+        return candidates.stream()
+            .filter(File::isFile)
+            .findFirst();
+    }
+
+    private static Optional<File> findCrashLogFile(String crashLogFileName) {
+        // This use case for the JavaIOTmpDir is allowed since we are looking for the crash log file.
+        @SuppressWarnings("deprecation") String javaTmpDir = SystemProperties.getInstance().getJavaIoTmpDir();
+        if (javaTmpDir != null && !javaTmpDir.isEmpty()) {
+            return Optional.of(new File(javaTmpDir, crashLogFileName));
+        }
+        return Optional.empty();
     }
 
     private IllegalStateException invalidResponse(Object response, Build command, DaemonDiagnostics diagnostics) {

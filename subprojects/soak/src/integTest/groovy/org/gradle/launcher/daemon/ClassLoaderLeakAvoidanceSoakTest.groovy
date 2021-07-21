@@ -17,10 +17,7 @@
 package org.gradle.launcher.daemon
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.soak.categories.SoakTest
-import org.junit.experimental.categories.Category
 
-@Category(SoakTest)
 class ClassLoaderLeakAvoidanceSoakTest extends AbstractIntegrationSpec {
 
     def setup() {
@@ -32,15 +29,15 @@ class ClassLoaderLeakAvoidanceSoakTest extends AbstractIntegrationSpec {
         def myTask = file("buildSrc/src/main/groovy/MyTask.groovy") << """
             import org.gradle.api.*
             import org.gradle.api.tasks.*
-            
+
             class MyTask extends DefaultTask {
                 static final byte[] MEMORY_HOG = new byte[10 * 1024 * 1024]
-                
-                @Input 
+
+                @Input
                 String someProperty
-                
+
                 @TaskAction
-                public void runAction0() {} 
+                public void runAction0() {}
             }
         """
         buildFile << """
@@ -94,7 +91,7 @@ class ClassLoaderLeakAvoidanceSoakTest extends AbstractIntegrationSpec {
         expect:
         for(int i = 0; i < 35; i++) {
             buildFile.text = buildFile.text.replace("Foo$i", "Foo${i + 1}")
-            executer.withBuildJvmOpts("-Xmx64m", "-XX:+HeapDumpOnOutOfMemoryError", "-XX:MaxMetaspaceSize=64m")
+            executer.withBuildJvmOpts("-Xms64m", "-Xmx128m", "-XX:+HeapDumpOnOutOfMemoryError", "-XX:MaxMetaspaceSize=64m")
             assert succeeds("myTask")
         }
     }

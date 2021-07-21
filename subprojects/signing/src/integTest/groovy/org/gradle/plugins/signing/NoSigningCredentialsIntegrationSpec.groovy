@@ -15,10 +15,7 @@
  */
 package org.gradle.plugins.signing
 
-import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
-import spock.lang.IgnoreIf
-import spock.lang.Issue
-import spock.lang.Unroll
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 
 class NoSigningCredentialsIntegrationSpec extends SigningIntegrationSpec {
 
@@ -27,87 +24,19 @@ class NoSigningCredentialsIntegrationSpec extends SigningIntegrationSpec {
         executer.withArguments("-info")
     }
 
+    @ToBeFixedForConfigurationCache
     def "trying to perform a signing operation without a signatory produces reasonable error"() {
         when:
         buildFile << """
             signing {
                 sign jar
             }
-        """ << uploadArchives()
-
-        then:
-        fails ":uploadArchives"
-
-        and:
-        failureHasCause "Cannot perform signing task ':signJar' because it has no configured signatory"
-    }
-
-    @IgnoreIf({GradleContextualExecuter.parallel})
-    def "trying to perform a signing operation without a signatory when not required does not error, and other artifacts still uploaded"() {
-        when:
-        buildFile << """
-            signing {
-                sign configurations.archives
-                required = { false }
-            }
-        """ << uploadArchives() << signDeploymentPom()
-
-        then:
-        succeeds ":uploadArchives"
-
-        and:
-        ":signArchives" in skippedTasks
-
-        and:
-        jarUploaded()
-        signatureNotUploaded()
-        pom().exists()
-        !pomSignature().exists()
-
-        when:
-        buildFile << keyInfo.addAsPropertiesScript()
-
-        then:
-        succeeds ":uploadArchives"
-
-        and:
-        ":signArchives" in nonSkippedTasks
-
-        and:
-        jarUploaded()
-        signatureUploaded()
-        pom().exists()
-        pomSignature().exists()
-    }
-
-    @Issue("https://github.com/gradle/gradle/issues/2267")
-    @Unroll
-    def "trying to perform a signing operation for null signing properties when not required does not error"() {
-        when:
-        buildFile << """
-            signing {
-                sign configurations.archives
-                required = { false }
-            }
-        """ << uploadArchives() << signDeploymentPom()
-        buildFile << keyInfo.addAsPropertiesScript()
-        buildFile << """
-            project.ext.setProperty('$signingProperty', null)
         """
 
         then:
-        succeeds ":uploadArchives"
+        fails ":signJar"
 
         and:
-        ":signArchives" in skippedTasks
-
-        and:
-        jarUploaded()
-        signatureNotUploaded()
-        pom().exists()
-        !pomSignature().exists()
-
-        where:
-        signingProperty << ['signing.keyId', 'signing.password', 'signing.secretKeyRingFile']
+        failureHasCause "Cannot perform signing task ':signJar' because it has no configured signatory"
     }
 }

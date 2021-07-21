@@ -16,10 +16,11 @@
 
 package org.gradle.execution
 
-import org.gradle.StartParameter
+
 import org.gradle.TaskExecutionRequest
 import org.gradle.api.Task
 import org.gradle.api.internal.GradleInternal
+import org.gradle.api.internal.StartParameterInternal
 import org.gradle.execution.commandline.CommandLineTaskParser
 import org.gradle.execution.taskgraph.TaskExecutionGraphInternal
 import spock.lang.Specification
@@ -28,7 +29,7 @@ class TaskNameResolvingBuildConfigurationActionSpec extends Specification {
     GradleInternal gradle
     BuildExecutionContext context
     CommandLineTaskParser parser
-    def TaskNameResolvingBuildConfigurationAction action
+    TaskNameResolvingBuildConfigurationAction action
 
     def setup() {
         gradle = Mock(GradleInternal)
@@ -39,7 +40,7 @@ class TaskNameResolvingBuildConfigurationActionSpec extends Specification {
 
     def "empty task parameters are no-op action"() {
         given:
-        def startParameters = Mock(StartParameter)
+        def startParameters = Mock(StartParameterInternal)
 
         when:
         _ * context.getGradle() >> gradle
@@ -55,15 +56,15 @@ class TaskNameResolvingBuildConfigurationActionSpec extends Specification {
     }
 
     def "expand task parameters to tasks"() {
-        def startParameters = Mock(StartParameter)
+        def startParameters = Mock(StartParameterInternal)
         def taskGraph = Mock(TaskExecutionGraphInternal)
         TaskExecutionRequest request1 = Stub(TaskExecutionRequest)
         TaskExecutionRequest request2 = Stub(TaskExecutionRequest)
         def task1 = Stub(Task)
         def task2 = Stub(Task)
         def task3 = Stub(Task)
-        def selection1 = Stub(TaskSelector.TaskSelection)
-        def selection2 = Stub(TaskSelector.TaskSelection)
+        def selection1 = Stub(TaskSelection)
+        def selection2 = Stub(TaskSelection)
 
         given:
         _ * gradle.startParameter >> startParameters

@@ -22,13 +22,16 @@ import org.gradle.api.Incubating;
 import org.gradle.api.NamedDomainObjectFactory;
 import org.gradle.api.Namer;
 import org.gradle.api.Plugin;
+import org.gradle.api.Project;
 import org.gradle.api.Task;
 import org.gradle.api.artifacts.repositories.ArtifactRepository;
 import org.gradle.api.file.FileCollection;
 import org.gradle.api.file.SourceDirectorySet;
 import org.gradle.api.internal.CollectionCallbackActionDecorator;
 import org.gradle.api.internal.DefaultPolymorphicDomainObjectContainer;
+import org.gradle.api.internal.collections.DomainObjectCollectionFactory;
 import org.gradle.api.internal.file.FileCollectionFactory;
+import org.gradle.api.internal.project.DefaultProjectRegistry;
 import org.gradle.api.internal.project.ProjectInternal;
 import org.gradle.api.internal.project.ProjectRegistry;
 import org.gradle.api.internal.resolve.ProjectModelResolver;
@@ -116,7 +119,7 @@ import java.io.File;
  * A plugin that sets up the infrastructure for defining native binaries.
  */
 @Incubating
-public class NativeComponentModelPlugin implements Plugin<ProjectInternal> {
+public class NativeComponentModelPlugin implements Plugin<Project> {
     private final Instantiator instantiator;
     private CollectionCallbackActionDecorator collectionCallbackActionDecorator;
 
@@ -127,7 +130,7 @@ public class NativeComponentModelPlugin implements Plugin<ProjectInternal> {
     }
 
     @Override
-    public void apply(final ProjectInternal project) {
+    public void apply(final Project project) {
         project.getPluginManager().apply(ComponentModelBasePlugin.class);
 
         project.getExtensions().create(BuildTypeContainer.class, "buildTypes", DefaultBuildTypeContainer.class, instantiator, collectionCallbackActionDecorator);
@@ -167,7 +170,8 @@ public class NativeComponentModelPlugin implements Plugin<ProjectInternal> {
             NativePlatforms nativePlatforms = serviceRegistry.get(NativePlatforms.class);
             FileCollectionFactory fileCollectionFactory = serviceRegistry.get(FileCollectionFactory.class);
             Action<PrebuiltLibrary> initializer = new PrebuiltLibraryInitializer(instantiator, fileCollectionFactory, nativePlatforms, platforms.withType(NativePlatform.class), buildTypes, flavors);
-            return new DefaultRepositories(instantiator, sourceDirectorySetFactory, initializer, callbackActionDecorator);
+            DomainObjectCollectionFactory domainObjectCollectionFactory = serviceRegistry.get(DomainObjectCollectionFactory.class);
+            return new DefaultRepositories(instantiator, sourceDirectorySetFactory, initializer, callbackActionDecorator, domainObjectCollectionFactory);
         }
 
         @Model
@@ -193,6 +197,7 @@ public class NativeComponentModelPlugin implements Plugin<ProjectInternal> {
         @Defaults
         public void registerFactoryForCustomNativePlatforms(PlatformContainer platforms, final Instantiator instantiator) {
             NamedDomainObjectFactory<NativePlatform> nativePlatformFactory = new NamedDomainObjectFactory<NativePlatform>() {
+                @Override
                 public NativePlatform create(String name) {
                     return instantiator.newInstance(DefaultNativePlatform.class, name);
                 }
@@ -416,21 +421,23 @@ public class NativeComponentModelPlugin implements Plugin<ProjectInternal> {
 
         @Defaults
         void registerNativeDependentBinariesResolutionStrategy(DependentBinariesResolver resolver, ServiceRegistry serviceRegistry) {
-            ProjectRegistry<ProjectInternal> projectRegistry = Cast.uncheckedCast(serviceRegistry.get(ProjectRegistry.class));
+            ProjectRegistry<ProjectInternal> projectRegistry = Cast.uncheckedCast(serviceRegistry.get(DefaultProjectRegistry.class));
             ProjectModelResolver projectModelResolver = serviceRegistry.get(ProjectModelResolver.class);
             resolver.register(new NativeDependentBinariesResolutionStrategy(projectRegistry, projectModelResolver));
         }
     }
 
     private static class DefaultRepositories extends DefaultPolymorphicDomainObjectContainer<ArtifactRepository> implements Repositories {
-        private DefaultRepositories(final Instantiator instantiator,
-                                    final ObjectFactory objectFactory,
-                                    final Action<PrebuiltLibrary> binaryFactory,
-                                    final CollectionCallbackActionDecorator collectionCallbackActionDecorator) {
+        private DefaultRepositories(Instantiator instantiator,
+                                    ObjectFactory objectFactory,
+                                    Action<PrebuiltLibrary> binaryFactory,
+                                    CollectionCallbackActionDecorator collectionCallbackActionDecorator,
+                                    DomainObjectCollectionFactory domainObjectCollectionFactory) {
             super(ArtifactRepository.class, instantiator, new ArtifactRepositoryNamer(), collectionCallbackActionDecorator);
             registerFactory(PrebuiltLibraries.class, new NamedDomainObjectFactory<PrebuiltLibraries>() {
+                @Override
                 public PrebuiltLibraries create(String name) {
-                    return instantiator.newInstance(DefaultPrebuiltLibraries.class, name, instantiator, objectFactory, binaryFactory, collectionCallbackActionDecorator);
+                    return instantiator.newInstance(DefaultPrebuiltLibraries.class, name, instantiator, objectFactory, binaryFactory, collectionCallbackActionDecorator, domainObjectCollectionFactory);
                 }
             });
         }

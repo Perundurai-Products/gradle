@@ -23,18 +23,24 @@ import org.gradle.api.invocation.Gradle;
  * exists as convenience for creating listener objects.
  */
 public class BuildAdapter implements BuildListener {
-    public void buildStarted(Gradle gradle) {
+
+    @Override
+    public void beforeSettings(Settings settings) {
     }
 
+    @Override
     public void settingsEvaluated(Settings settings) {
     }
 
+    @Override
     public void projectsLoaded(Gradle gradle) {
     }
 
+    @Override
     public void projectsEvaluated(Gradle gradle) {
     }
 
+    @Override
     public void buildFinished(BuildResult result) {
     }
 }

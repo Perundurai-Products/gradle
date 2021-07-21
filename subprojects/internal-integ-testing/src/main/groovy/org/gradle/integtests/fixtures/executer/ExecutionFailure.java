@@ -17,7 +17,15 @@ package org.gradle.integtests.fixtures.executer;
 
 import org.hamcrest.Matcher;
 
+import java.util.function.Consumer;
+
 public interface ExecutionFailure extends ExecutionResult {
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    ExecutionFailure getIgnoreBuildSrc();
+
     ExecutionFailure assertHasLineNumber(int lineNumber);
 
     ExecutionFailure assertHasFileName(String filename);
@@ -28,32 +36,41 @@ public interface ExecutionFailure extends ExecutionResult {
     ExecutionFailure assertHasFailures(int count);
 
     /**
-     * Asserts that the reported failure has the given cause (ie the bit after the description).
+     * Assert that there is a failure present with the given description and invokes the given action on the failure.
+     *
+     * <p>Error messages are normalized to use new-line char as line separator.
+     *
+     * @return this
+     */
+    ExecutionFailure assertHasFailure(String description, Consumer<? super Failure> action);
+
+    /**
+     * Asserts that there is a failure present with the given cause (ie the bit after the description).
      *
      * <p>Error messages are normalized to use new-line char as line separator.
      */
     ExecutionFailure assertHasCause(String description);
 
     /**
-     * Asserts that the reported failure has the given cause (ie the bit after the description).
+     * Asserts that there is a failure present with the given cause (ie the bit after the description).
      *
      * <p>Error messages are normalized to use new-line char as line separator.
      */
-    ExecutionFailure assertThatCause(Matcher<String> matcher);
+    ExecutionFailure assertThatCause(Matcher<? super String> matcher);
 
     /**
-     * Asserts that the reported failure has the given description (ie the bit after '* What went wrong').
+     * Asserts that there is a failure present with the given description (ie the bit after '* What went wrong').
      *
      * <p>Error messages are normalized to use new-line char as line separator.
      */
     ExecutionFailure assertHasDescription(String context);
 
     /**
-     * Asserts that the reported failure has the given description (ie the bit after '* What went wrong').
+     * Asserts that there is a failure present with the given description (ie the bit after '* What went wrong').
      *
      * <p>Error messages are normalized to use new-line char as line separator.
      */
-    ExecutionFailure assertThatDescription(Matcher<String> matcher);
+    ExecutionFailure assertThatDescription(Matcher<? super String> matcher);
 
     /**
      * Asserts that the reported failure has the given resolution (ie the bit after '* Try').
@@ -73,4 +90,16 @@ public interface ExecutionFailure extends ExecutionResult {
      * @param configurationPath, for example ':compile'
      */
     DependencyResolutionFailure assertResolutionFailure(String configurationPath);
+
+    interface Failure {
+        /**
+         * Asserts that this failure has the given number of direct causes.
+         */
+        void assertHasCauses(int count);
+
+        /**
+         * Asserts that this failure has the given cause
+         */
+        void assertHasCause(String message);
+    }
 }

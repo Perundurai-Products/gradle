@@ -17,12 +17,14 @@
 package org.gradle.api.events
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.integtests.fixtures.UnsupportedWithConfigurationCache
 
 class BuildExecutionEventsIntegrationTest extends AbstractIntegrationSpec {
 
+    @UnsupportedWithConfigurationCache
     def "events passed to any task execution listener are synchronised"() {
         settingsFile << "include 'a', 'b', 'c'"
-        buildFile << """
+        buildFile """
             def listener = new MyListener()
             gradle.addListener(listener)
 
