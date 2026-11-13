@@ -15,11 +15,8 @@
  */
 package org.gradle.api.tasks
 
-import com.google.common.collect.ImmutableSortedSet
 import org.gradle.api.internal.file.copy.CopyAction
 import org.gradle.api.internal.project.ProjectInternal
-import org.gradle.api.internal.tasks.TaskOutputFilePropertySpec
-import org.gradle.api.internal.tasks.execution.TaskProperties
 import org.gradle.test.fixtures.file.TestFile
 import org.gradle.test.fixtures.file.WorkspaceTest
 import org.gradle.testfixtures.ProjectBuilder
@@ -29,10 +26,6 @@ import org.gradle.util.UsesNativeServices
 @UsesNativeServices
 class AbstractCopyTaskTest extends WorkspaceTest {
 
-    def taskPropertiesWithOutput = Mock(TaskProperties) {
-        getOutputFileProperties() >> ImmutableSortedSet.of(Mock(TaskOutputFilePropertySpec))
-        hasDeclaredOutputs() >> true
-    }
     TestCopyTask task
     TestFile projectDir
 
@@ -58,7 +51,7 @@ class AbstractCopyTaskTest extends WorkspaceTest {
         task.mainSpec.buildRootResolver().source.files == task.project.fileTree(projectDir).files
     }
 
-    static class TestCopyTask extends AbstractCopyTask {
+    static abstract class TestCopyTask extends AbstractCopyTask {
         CopyAction copyAction
 
         protected CopyAction createCopyAction() {

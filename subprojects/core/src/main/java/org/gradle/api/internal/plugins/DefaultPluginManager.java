@@ -13,17 +13,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.gradle.api.internal.plugins;
 
 import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
-import net.jcip.annotations.NotThreadSafe;
 import org.gradle.api.Action;
 import org.gradle.api.DomainObjectSet;
 import org.gradle.api.Plugin;
 import org.gradle.api.internal.CollectionCallbackActionDecorator;
-import org.gradle.api.internal.DefaultDomainObjectSet;
+import org.gradle.api.internal.collections.DomainObjectCollectionFactory;
 import org.gradle.api.plugins.AppliedPlugin;
 import org.gradle.api.plugins.InvalidPluginException;
 import org.gradle.api.plugins.PluginContainer;
@@ -31,21 +28,29 @@ import org.gradle.api.plugins.PluginInstantiationException;
 import org.gradle.api.plugins.UnknownPluginException;
 import org.gradle.api.reflect.ObjectInstantiationException;
 import org.gradle.configuration.ConfigurationTargetIdentifier;
-import org.gradle.configuration.internal.UserCodeApplicationContext;
-import org.gradle.configuration.internal.UserCodeApplicationId;
 import org.gradle.internal.Cast;
+import org.gradle.internal.code.UserCodeApplicationContext;
+import org.gradle.internal.code.UserCodeApplicationId;
+import org.gradle.internal.code.UserCodeSource;
 import org.gradle.internal.operations.BuildOperationContext;
 import org.gradle.internal.operations.BuildOperationDescriptor;
-import org.gradle.internal.operations.BuildOperationExecutor;
+import org.gradle.internal.operations.BuildOperationRunner;
 import org.gradle.internal.operations.RunnableBuildOperation;
 import org.gradle.internal.operations.trace.CustomOperationTraceSerialization;
 import org.gradle.internal.reflect.Instantiator;
 import org.gradle.plugin.use.PluginId;
 import org.gradle.plugin.use.internal.DefaultPluginId;
+import org.jspecify.annotations.Nullable;
 
-import javax.annotation.Nullable;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import javax.annotation.concurrent.NotThreadSafe;
+import org.gradle.api.internal.project.ProjectIdentity;
+import org.gradle.util.Path;
 
 @NotThreadSafe
 public class DefaultPluginManager implements PluginManagerInternal {
@@ -56,23 +61,27 @@ public class DefaultPluginManager implements PluginManagerInternal {
     private final Instantiator instantiator;
     private final PluginTarget target;
     private final PluginRegistry pluginRegistry;
-    private final CollectionCallbackActionDecorator callbackDecorator;
     private final DefaultPluginContainer pluginContainer;
-    private final Map<Class<?>, PluginImplementation<?>> plugins = Maps.newHashMap();
-    private final Map<Class<?>, Plugin> instances = Maps.newLinkedHashMap();
-    private final Map<PluginId, DomainObjectSet<PluginWithId>> idMappings = Maps.newHashMap();
+    // Plugins whose application has started, including those still being applied
+    private final Map<Class<?>, PluginImplementation<?>> plugins = new LinkedHashMap<>();
+    // Plugins whose application has completed; withPlugin() callbacks only see these
+    private final List<PluginImplementation<?>> appliedPlugins = new ArrayList<>();
+    private final Map<Class<?>, Plugin> instances = new LinkedHashMap<>();
+    private final Map<PluginId, DomainObjectSet<PluginWithId>> idMappings = new HashMap<>();
 
-    private final BuildOperationExecutor buildOperationExecutor;
+    private final BuildOperationRunner buildOperationRunner;
     private final UserCodeApplicationContext userCodeApplicationContext;
+    private final DomainObjectCollectionFactory domainObjectCollectionFactory;
 
-    public DefaultPluginManager(final PluginRegistry pluginRegistry, Instantiator instantiator, final PluginTarget target, BuildOperationExecutor buildOperationExecutor, UserCodeApplicationContext userCodeApplicationContext, CollectionCallbackActionDecorator callbackDecorator) {
+    @SuppressWarnings("this-escape")
+    public DefaultPluginManager(final PluginRegistry pluginRegistry, Instantiator instantiator, final PluginTarget target, BuildOperationRunner buildOperationRunner, UserCodeApplicationContext userCodeApplicationContext, CollectionCallbackActionDecorator callbackDecorator, DomainObjectCollectionFactory domainObjectCollectionFactory) {
         this.instantiator = instantiator;
         this.target = target;
         this.pluginRegistry = pluginRegistry;
+        this.domainObjectCollectionFactory = domainObjectCollectionFactory;
         this.pluginContainer = new DefaultPluginContainer(pluginRegistry, this, callbackDecorator);
-        this.buildOperationExecutor = buildOperationExecutor;
+        this.buildOperationRunner = buildOperationRunner;
         this.userCodeApplicationContext = userCodeApplicationContext;
-        this.callbackDecorator = callbackDecorator;
     }
 
     private <T> T instantiatePlugin(Class<T> type) {
@@ -90,6 +99,7 @@ public class DefaultPluginManager implements PluginManagerInternal {
         return pluginClass.cast(instances.get(pluginClass));
     }
 
+    @Override
     public <P extends Plugin> P addImperativePlugin(Class<P> type) {
         return addImperativePlugin(pluginRegistry.inspect(type));
     }
@@ -105,6 +115,7 @@ public class DefaultPluginManager implements PluginManagerInternal {
         return new Runnable() {
             @Override
             public void run() {
+                appliedPlugins.add(plugin);
                 // Take a copy because adding to an idMappings value may result in new mappings being added (i.e. ConcurrentModificationException)
                 Iterable<PluginId> pluginIds = Lists.newArrayList(idMappings.keySet());
                 for (PluginId id : pluginIds) {
@@ -116,8 +127,18 @@ public class DefaultPluginManager implements PluginManagerInternal {
         };
     }
 
+    @Override
     public PluginContainer getPluginContainer() {
         return pluginContainer;
+    }
+
+    @Override
+    public <P extends Plugin<?>> Optional<PluginId> findPluginIdForClass(Class<P> plugin) {
+        PluginImplementation<?> pluginImplementation = plugins.get(plugin);
+        if (pluginImplementation != null) {
+            return Optional.ofNullable(pluginImplementation.getPluginId());
+        }
+        return Optional.empty();
     }
 
     @Override
@@ -125,14 +146,16 @@ public class DefaultPluginManager implements PluginManagerInternal {
         doApply(plugin);
     }
 
+    @Override
     public void apply(String pluginId) {
         PluginImplementation<?> plugin = pluginRegistry.lookup(DefaultPluginId.unvalidated(pluginId));
         if (plugin == null) {
-            throw new UnknownPluginException("Plugin with id '" + pluginId + "' not found.");
+            throw new UnknownPluginException("Plugin with id '" + pluginId + "' not found.", pluginId);
         }
         doApply(plugin);
     }
 
+    @Override
     public void apply(Class<?> type) {
         doApply(pluginRegistry.inspect(type));
     }
@@ -149,12 +172,11 @@ public class DefaultPluginManager implements PluginManagerInternal {
             } else {
                 final Runnable adder = addPluginInternal(plugin);
                 if (adder != null) {
-                    userCodeApplicationContext.apply(new Action<UserCodeApplicationId>() {
-                        @Override
-                        public void execute(UserCodeApplicationId userCodeApplicationId) {
-                            buildOperationExecutor.run(new AddPluginBuildOperation(adder, plugin, pluginIdStr, pluginClass, userCodeApplicationId));
-                        }
-                    });
+                    UserCodeApplicationContext.Target appTarget = getApplicationTargetFor(target);
+                    UserCodeSource source = new UserCodeSource.Binary(plugin.getDisplayName(), pluginClass.getName(), pluginIdStr);
+                    userCodeApplicationContext.apply(source, appTarget, userCodeApplicationId ->
+                        buildOperationRunner.run(new AddPluginBuildOperation(adder, plugin, pluginIdStr, pluginClass, userCodeApplicationId))
+                    );
                 }
             }
         } catch (PluginApplicationException e) {
@@ -166,13 +188,26 @@ public class DefaultPluginManager implements PluginManagerInternal {
         }
     }
 
+    private static UserCodeApplicationContext.Target getApplicationTargetFor(PluginTarget target) {
+        ConfigurationTargetIdentifier id = target.getConfigurationTargetIdentifier();
+        if (id.getTargetType() == ConfigurationTargetIdentifier.Type.PROJECT) {
+            return new UserCodeApplicationContext.Target.Project(
+                ProjectIdentity.computeProjectIdentityPath(
+                    Path.path(id.getBuildPath()),
+                    Path.path(id.getTargetPath())
+                )
+            );
+        }
+        return UserCodeApplicationContext.Target.Other.INSTANCE;
+    }
+
     private void addPlugin(Runnable adder, PluginImplementation<?> plugin, String pluginId, Class<?> pluginClass) {
         boolean imperative = plugin.isImperative();
         if (imperative) {
             Plugin<?> pluginInstance = producePluginInstance(pluginClass);
 
             if (plugin.isHasRules()) {
-                target.applyImperativeRulesHybrid(pluginId, pluginInstance);
+                target.applyImperativeRulesHybrid(pluginId, pluginInstance, pluginClass);
             } else {
                 target.applyImperative(pluginId, pluginInstance);
             }
@@ -209,13 +244,14 @@ public class DefaultPluginManager implements PluginManagerInternal {
         return null;
     }
 
+    @Override
     public DomainObjectSet<PluginWithId> pluginsForId(String id) {
         PluginId pluginId = DefaultPluginId.unvalidated(id);
         DomainObjectSet<PluginWithId> pluginsForId = idMappings.get(pluginId);
         if (pluginsForId == null) {
-            pluginsForId = new DefaultDomainObjectSet<PluginWithId>(PluginWithId.class, callbackDecorator);
+            pluginsForId = domainObjectCollectionFactory.newDomainObjectSet(PluginWithId.class);
             idMappings.put(pluginId, pluginsForId);
-            for (PluginImplementation<?> plugin : plugins.values()) {
+            for (PluginImplementation<?> plugin : appliedPlugins) {
                 if (plugin.isAlsoKnownAs(pluginId)) {
                     pluginsForId.add(new PluginWithId(pluginId, plugin.asClass()));
                 }
@@ -225,20 +261,26 @@ public class DefaultPluginManager implements PluginManagerInternal {
         return pluginsForId;
     }
 
+    @Override
     public AppliedPlugin findPlugin(final String id) {
-        DomainObjectSet<PluginWithId> pluginWithIds = pluginsForId(id);
-        if (!pluginWithIds.isEmpty()) {
-            return pluginWithIds.iterator().next().asAppliedPlugin();
+        PluginId pluginId = DefaultPluginId.unvalidated(id);
+        for (PluginImplementation<?> plugin : plugins.values()) {
+            if (plugin.isAlsoKnownAs(pluginId)) {
+                return new PluginWithId(pluginId, plugin.asClass()).asAppliedPlugin();
+            }
         }
         return null;
     }
 
+    @Override
     public boolean hasPlugin(String id) {
         return findPlugin(id) != null;
     }
 
+    @Override
     public void withPlugin(final String id, final Action<? super AppliedPlugin> action) {
         Action<PluginWithId> wrappedAction = new Action<PluginWithId>() {
+            @Override
             public void execute(PluginWithId pluginWithId) {
                 action.execute(pluginWithId.asAppliedPlugin());
             }
@@ -287,7 +329,7 @@ public class DefaultPluginManager implements PluginManagerInternal {
         }
     }
 
-    private static class OperationDetails implements ApplyPluginBuildOperationType.Details, CustomOperationTraceSerialization {
+    public static class OperationDetails implements ApplyPluginBuildOperationType.Details, CustomOperationTraceSerialization {
 
         private final PluginImplementation<?> pluginImplementation;
         private final ConfigurationTargetIdentifier targetIdentifier;
@@ -299,6 +341,7 @@ public class DefaultPluginManager implements PluginManagerInternal {
             this.applicationId = applicationId;
         }
 
+        @Override
         @Nullable
         public String getPluginId() {
             PluginId pluginId = pluginImplementation.getPluginId();
@@ -347,4 +390,3 @@ public class DefaultPluginManager implements PluginManagerInternal {
     private static final ApplyPluginBuildOperationType.Result OPERATION_RESULT = new ApplyPluginBuildOperationType.Result() {
     };
 }
-

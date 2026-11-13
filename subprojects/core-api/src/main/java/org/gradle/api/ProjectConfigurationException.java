@@ -21,9 +21,15 @@ import org.gradle.internal.exceptions.DefaultMultiCauseException;
 
 /**
  * Indicates a problem that occurs during project configuration.
+ * @since 1.6
  */
 @Contextual
 public class ProjectConfigurationException extends DefaultMultiCauseException {
+    /**
+     * Creates a new {@code ProjectConfigurationException}.
+     *
+     * @since 1.6
+     */
     public ProjectConfigurationException(String message, Throwable cause) {
         super(message, cause);
     }
@@ -34,7 +40,6 @@ public class ProjectConfigurationException extends DefaultMultiCauseException {
      * @param causes The causes
      * @since 5.1
      */
-    @Incubating
     public ProjectConfigurationException(String message, Iterable<? extends Throwable> causes) {
         super(message, causes);
     }

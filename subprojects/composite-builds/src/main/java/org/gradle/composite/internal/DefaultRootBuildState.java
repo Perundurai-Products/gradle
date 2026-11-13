@@ -16,43 +16,67 @@
 
 package org.gradle.composite.internal;
 
-import org.gradle.StartParameter;
-import org.gradle.api.Transformer;
-import org.gradle.api.artifacts.component.BuildIdentifier;
+import org.gradle.BuildResult;
 import org.gradle.api.internal.BuildDefinition;
-import org.gradle.api.internal.SettingsInternal;
-import org.gradle.api.internal.artifacts.DefaultBuildIdentifier;
-import org.gradle.initialization.GradleLauncher;
-import org.gradle.initialization.GradleLauncherFactory;
+import org.gradle.api.internal.GradleInternal;
+import org.gradle.api.internal.StartParameterInternal;
+import org.gradle.api.internal.tasks.TaskDependencyFactory;
+import org.gradle.deployment.internal.DefaultDeploymentRegistry;
 import org.gradle.initialization.IncludedBuildSpec;
-import org.gradle.initialization.NestedBuildFactory;
 import org.gradle.initialization.RootBuildLifecycleListener;
-import org.gradle.internal.build.AbstractBuildState;
+import org.gradle.internal.InternalBuildAdapter;
+import org.gradle.internal.UncheckedException;
+import org.gradle.internal.build.BuildLifecycleController;
+import org.gradle.internal.build.BuildStateRegistry;
 import org.gradle.internal.build.RootBuildState;
-import org.gradle.internal.concurrent.Stoppable;
+import org.gradle.internal.buildtree.BuildOperationFiringBuildTreeWorkExecutor;
+import org.gradle.internal.buildtree.BuildTreeFinishExecutor;
+import org.gradle.internal.buildtree.BuildTreeLifecycleController;
+import org.gradle.internal.buildtree.BuildTreeLifecycleControllerFactory;
+import org.gradle.internal.buildtree.BuildTreeServices;
+import org.gradle.internal.buildtree.BuildTreeWorkExecutor;
+import org.gradle.internal.buildtree.DefaultBuildTreeFinishExecutor;
+import org.gradle.internal.buildtree.DefaultBuildTreeWorkExecutor;
+import org.gradle.internal.composite.IncludedBuildInternal;
+import org.gradle.internal.composite.IncludedRootBuild;
+import org.gradle.internal.concurrent.CompositeStoppable;
+import org.gradle.internal.enterprise.core.GradleEnterprisePluginManager;
 import org.gradle.internal.event.ListenerManager;
-import org.gradle.internal.invocation.BuildController;
-import org.gradle.internal.invocation.GradleBuildController;
-import org.gradle.internal.service.scopes.BuildTreeScopeServices;
+import org.gradle.internal.exception.ExceptionAnalyser;
+import org.gradle.internal.operations.BuildOperationRunner;
+import org.gradle.internal.service.ManagedServiceRegistry;
 import org.gradle.util.Path;
 
-class DefaultRootBuildState extends AbstractBuildState implements RootBuildState, Stoppable {
+import java.util.function.Function;
+
+class DefaultRootBuildState extends AbstractCompositeParticipantBuildState implements RootBuildState {
     private final ListenerManager listenerManager;
-    private final GradleLauncher gradleLauncher;
+    private final BuildTreeLifecycleController buildTreeLifecycleController;
+    private boolean completed;
 
-    DefaultRootBuildState(BuildDefinition buildDefinition, GradleLauncherFactory gradleLauncherFactory, ListenerManager listenerManager, BuildTreeScopeServices parentServices) {
+    DefaultRootBuildState(
+        BuildDefinition buildDefinition,
+        BuildTreeServices buildTreeServices,
+        ListenerManager listenerManager
+    ) {
+        super(buildTreeServices, buildDefinition, Path.ROOT, null);
         this.listenerManager = listenerManager;
-        gradleLauncher = gradleLauncherFactory.newInstance(buildDefinition, this, parentServices);
-    }
 
-    @Override
-    public BuildIdentifier getBuildIdentifier() {
-        return DefaultBuildIdentifier.ROOT;
-    }
-
-    @Override
-    public Path getIdentityPath() {
-        return Path.ROOT;
+        ManagedServiceRegistry buildScopeServices = getBuildServices();
+        try {
+            BuildLifecycleController buildLifecycleController = getBuildController();
+            ExceptionAnalyser exceptionAnalyser = buildScopeServices.get(ExceptionAnalyser.class);
+            BuildOperationRunner buildOperationRunner = buildScopeServices.get(BuildOperationRunner.class);
+            BuildStateRegistry buildStateRegistry = buildScopeServices.get(BuildStateRegistry.class);
+            BuildTreeLifecycleControllerFactory buildTreeLifecycleControllerFactory = buildScopeServices.get(BuildTreeLifecycleControllerFactory.class);
+            BuildTreeWorkExecutor workExecutor = new BuildOperationFiringBuildTreeWorkExecutor(new DefaultBuildTreeWorkExecutor(), buildOperationRunner);
+            BuildTreeFinishExecutor finishExecutor = new OperationFiringBuildTreeFinishExecutor(buildOperationRunner,
+                new DefaultBuildTreeFinishExecutor(buildStateRegistry, exceptionAnalyser, buildLifecycleController));
+            this.buildTreeLifecycleController = buildTreeLifecycleControllerFactory.createRootBuildController(buildLifecycleController, workExecutor, finishExecutor);
+        } catch (Throwable t) {
+            CompositeStoppable.stoppable().addFailure(t).add(buildScopeServices).stop();
+            throw UncheckedException.throwAsUncheckedException(t);
+        }
     }
 
     @Override
@@ -65,44 +89,49 @@ class DefaultRootBuildState extends AbstractBuildState implements RootBuildState
     }
 
     @Override
-    public void stop() {
-        gradleLauncher.stop();
+    public IncludedBuildInternal getModel() {
+        TaskDependencyFactory taskDependencyFactory = getBuildServices().get(TaskDependencyFactory.class);
+        return new IncludedRootBuild(this, taskDependencyFactory);
     }
 
     @Override
-    public <T> T run(Transformer<T, ? super BuildController> buildAction) {
-        final GradleBuildController buildController = new GradleBuildController(gradleLauncher);
-        RootBuildLifecycleListener buildLifecycleListener = listenerManager.getBroadcaster(RootBuildLifecycleListener.class);
-        buildLifecycleListener.afterStart();
+    public <T> T run(Function<? super BuildTreeLifecycleController, T> action) {
+        if (completed) {
+            throw new IllegalStateException("Cannot run more than one action for a build.");
+        }
         try {
-            return buildAction.transform(buildController);
+            RootBuildLifecycleListener buildLifecycleListener = listenerManager.getBroadcaster(RootBuildLifecycleListener.class);
+            buildLifecycleListener.afterStart();
+            Throwable failure = null;
+            try {
+                GradleInternal gradle = getBuildController().getGradle();
+                gradle.getServices().get(GradleEnterprisePluginManager.class).registerMissingPluginWarning(gradle);
+                DefaultDeploymentRegistry deploymentRegistry = gradle.getServices().get(DefaultDeploymentRegistry.class);
+                gradle.addBuildListener(new InternalBuildAdapter() {
+                    @Override
+                    public void buildFinished(BuildResult result) {
+                        deploymentRegistry.buildFinished(result);
+                    }
+                });
+                return action.apply(buildTreeLifecycleController);
+            } catch (RuntimeException | Error e) {
+                failure = e;
+                throw e;
+            } finally {
+                buildLifecycleListener.beforeComplete(failure);
+            }
         } finally {
-            buildLifecycleListener.beforeComplete();
+            completed = true;
         }
     }
 
     @Override
-    public StartParameter getStartParameter() {
-        return gradleLauncher.getGradle().getStartParameter();
+    public StartParameterInternal getStartParameter() {
+        return getBuildController().getGradle().getStartParameter();
     }
 
     @Override
-    public SettingsInternal getLoadedSettings() {
-        return gradleLauncher.getGradle().getSettings();
-    }
-
-    @Override
-    public NestedBuildFactory getNestedBuildFactory() {
-        return gradleLauncher.getGradle().getServices().get(NestedBuildFactory.class);
-    }
-
-    @Override
-    public Path getCurrentPrefixForProjectsInChildBuilds() {
-        return Path.ROOT;
-    }
-
-    @Override
-    public Path getIdentityPathForProject(Path path) {
-        return path;
+    protected void ensureChildBuildConfigured() {
+        // nothing to do for the root build
     }
 }

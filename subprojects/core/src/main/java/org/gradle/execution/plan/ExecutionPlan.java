@@ -18,57 +18,70 @@ package org.gradle.execution.plan;
 
 import org.gradle.api.Describable;
 import org.gradle.api.Task;
-import org.gradle.internal.resources.ResourceLockState;
-import org.gradle.internal.work.WorkerLeaseRegistry;
+import org.gradle.api.internal.tasks.TaskDependencyContainer;
+import org.gradle.api.specs.Spec;
 
-import javax.annotation.Nullable;
+import javax.annotation.concurrent.NotThreadSafe;
+import java.io.Closeable;
 import java.util.Collection;
-import java.util.Set;
+import java.util.function.Consumer;
 
 /**
- * Represents a graph of dependent work items, returned in execution order.
+ * Represents a mutable graph of dependent work items.
+ *
+ * <p>The methods of this interface are not thread safe.
  */
-public interface ExecutionPlan extends Describable {
-    /**
-     * Selects a work item to run, returns null if there is no work remaining _or_ if no queued work is ready to run.
-     */
-    @Nullable
-    Node selectNext(WorkerLeaseRegistry.WorkerLease workerLease, ResourceLockState resourceLockState);
+@NotThreadSafe
+public interface ExecutionPlan extends Describable, Closeable {
+    void addFilter(Spec<? super Task> filter);
 
-    void nodeComplete(Node node);
+    void setContinueOnFailure(boolean continueOnFailure);
 
-    void abortAllAndFail(Throwable t);
-
-    void cancelExecution();
+    void setScheduledWork(ScheduledWork work);
 
     /**
-     * Returns the node for the supplied task that is part of this execution plan.
-     *
-     * @throws IllegalStateException When no node for the supplied task is part of this execution plan.
+     * Adds an entry task to the execution plan. If called multiple times then execution plan follows the method invocation order.
      */
-    TaskNode getNode(Task task);
+    void addEntryTask(Task task);
 
     /**
-     * @return The set of all available tasks. This includes tasks that have not yet been executed, as well as tasks that have been processed.
+     * Adds an entry node to the execution plan. If called multiple times then execution plan follows the method invocation order.
      */
-    Set<Task> getTasks();
+    void addEntryNode(Node node);
 
     /**
-     * @return The set of all filtered tasks that don't get executed.
+     * Adds entry tasks to the execution plan. No ordering can be assumed between the elements of the target collection. If called multiple times then execution plan follows the method invocation order.
      */
-    Set<Task> getFilteredTasks();
+    void addEntryTasks(Collection<? extends Task> tasks);
 
     /**
-     * Collects the current set of task failures into the given collection.
+     * Adds the work specified by the given task dependency container as entry nodes to this execution plan.
      */
-    void collectFailures(Collection<? super Throwable> failures);
-
-    boolean allNodesComplete();
-
-    boolean hasNodesRemaining();
+    void addEntryWork(TaskDependencyContainer dependencies);
 
     /**
-     * Returns the number of work items in the plan.
+     * Returns a snapshot of the current contents of this plan. Note that this plan is mutable, so the contents may later change.
      */
-    int size();
+    QueryableExecutionPlan getContents();
+
+    /**
+     * Calculates the execution plan for the current entry tasks. May be called multiple times.
+     */
+    void determineExecutionPlan();
+
+    /**
+     * Finalizes this plan once all nodes have been added. Must be called after {@link #determineExecutionPlan()}.
+     */
+    FinalizedExecutionPlan finalizePlan();
+
+    /**
+     * Invokes the given action when a task completes (as per {@link Node#isComplete()}). Does nothing for tasks that have already completed.
+     */
+    void onComplete(Consumer<LocalTaskNode> handler);
+
+    /**
+     * Overridden to remove IOException.
+     */
+    @Override
+    void close();
 }

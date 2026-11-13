@@ -16,7 +16,6 @@
 
 package org.gradle.api.artifacts.result;
 
-import org.gradle.api.Incubating;
 import org.gradle.api.artifacts.component.ComponentSelector;
 import org.gradle.internal.scan.UsedByScanPlugin;
 
@@ -24,6 +23,7 @@ import org.gradle.internal.scan.UsedByScanPlugin;
  * An edge in the dependency graph. Provides information about the origin of the dependency and the requested component.
  *
  * @see ResolutionResult
+ * @since 1.3
  */
 @UsedByScanPlugin
 public interface DependencyResult {
@@ -37,6 +37,7 @@ public interface DependencyResult {
      *     <li>{@link org.gradle.api.artifacts.component.ModuleComponentSelector} for those dependencies that request a component to be found in some repository.</li>
      * </ul>
      * @return the requested component
+     * @since 1.3
      */
     ComponentSelector getRequested();
 
@@ -44,6 +45,7 @@ public interface DependencyResult {
      * Returns the origin of the dependency.
      *
      * @return the origin of the dependency
+     * @since 1.3
      */
     ResolvedComponentResult getFrom();
 
@@ -53,7 +55,6 @@ public interface DependencyResult {
      * @return true if the dependency is a constraint.
      * @since 5.1
      */
-    @Incubating
     boolean isConstraint();
 
 }

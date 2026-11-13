@@ -15,7 +15,7 @@
  */
 package org.gradle.api.internal.artifacts.publish
 
-
+import org.gradle.api.internal.file.TestFiles
 import org.gradle.api.internal.file.copy.CopyAction
 import org.gradle.api.tasks.bundling.AbstractArchiveTask
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
@@ -25,52 +25,53 @@ import spock.lang.Specification
 
 class ArchivePublishArtifactTest extends Specification {
     @Rule
-    public TestNameTestDirectoryProvider temporaryFolder = TestNameTestDirectoryProvider.newInstance()
+    public TestNameTestDirectoryProvider temporaryFolder = TestNameTestDirectoryProvider.newInstance(getClass())
 
     def testUtil = TestUtil.create(temporaryFolder)
 
     def "provides sensible default values for quite empty archive tasks"() {
         def quiteEmptyJar = testUtil.task(DummyJar)
-        quiteEmptyJar.destinationDir = temporaryFolder.testDirectory
+        quiteEmptyJar.destinationDirectory.set(temporaryFolder.testDirectory)
 
         when:
-        def a = new ArchivePublishArtifact(quiteEmptyJar)
+        def a = new ArchivePublishArtifact(TestFiles.taskDependencyFactory(), quiteEmptyJar)
 
         then:
         a.archiveTask == quiteEmptyJar
         a.classifier == ""
-        a.date.time == quiteEmptyJar.archivePath.lastModified()
+        a.date.time == quiteEmptyJar.archiveFile.get().asFile.lastModified()
         a.extension == "jar"
-        a.file == quiteEmptyJar.archivePath
+        a.file == quiteEmptyJar.archiveFile.get().asFile
         a.type == "jar"
     }
 
     def "configures name correctly"() {
         def noName = testUtil.task(DummyJar)
         def withArchiveName = testUtil.task(DummyJar)
-        withArchiveName.archiveName = "hey"
+        withArchiveName.archiveFileName.set("hey")
         def withBaseName = testUtil.task(DummyJar)
-        withBaseName.baseName = "foo"
+        withBaseName.archiveBaseName.set("foo")
         def withAppendix = testUtil.task(DummyJar)
-        withAppendix.baseName = "foo"
-        withAppendix.appendix = "javadoc"
+        withAppendix.archiveBaseName.set("foo")
+        withAppendix.archiveAppendix.set("javadoc")
         def withAppendixOnly = testUtil.task(DummyJar)
-        withAppendixOnly.appendix = "javadoc"
+        withAppendixOnly.archiveAppendix.set("javadoc")
+        def taskDependencyFactory = TestFiles.taskDependencyFactory()
 
         expect:
-        new ArchivePublishArtifact(noName).name == null
-        new ArchivePublishArtifact(withArchiveName).name == null
-        def baseNameArtifact = new ArchivePublishArtifact(withBaseName)
+        new ArchivePublishArtifact(taskDependencyFactory, noName).name == null
+        new ArchivePublishArtifact(taskDependencyFactory, withArchiveName).name == null
+        def baseNameArtifact = new ArchivePublishArtifact(taskDependencyFactory, withBaseName)
         baseNameArtifact.name == "foo"
         baseNameArtifact.setName("haha")
         baseNameArtifact.name == "haha"
-        new ArchivePublishArtifact(withAppendix).name == "foo-javadoc"
-        new ArchivePublishArtifact(withAppendixOnly).name == "javadoc"
+        new ArchivePublishArtifact(taskDependencyFactory, withAppendix).name == "foo-javadoc"
+        new ArchivePublishArtifact(taskDependencyFactory, withAppendixOnly).name == "javadoc"
     }
 
-    static class DummyJar extends AbstractArchiveTask {
+    static abstract class DummyJar extends AbstractArchiveTask {
         DummyJar() {
-            extension = "jar"
+            archiveExtension.set("jar")
         }
 
         protected CopyAction createCopyAction() {

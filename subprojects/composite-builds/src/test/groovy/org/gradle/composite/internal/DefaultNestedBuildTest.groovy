@@ -16,54 +16,64 @@
 
 package org.gradle.composite.internal
 
-import org.gradle.api.Transformer
-import org.gradle.api.artifacts.component.BuildIdentifier
 import org.gradle.api.internal.BuildDefinition
+import org.gradle.api.internal.DocumentationRegistry
 import org.gradle.api.internal.GradleInternal
-import org.gradle.initialization.GradleLauncher
-import org.gradle.initialization.NestedBuildFactory
+import org.gradle.internal.build.BuildLifecycleController
+import org.gradle.internal.build.BuildLifecycleControllerFactory
 import org.gradle.internal.build.BuildState
-import org.gradle.internal.invocation.BuildController
+import org.gradle.internal.buildtree.BuildModelParameters
+import org.gradle.internal.buildtree.BuildTreeFinishExecutor
+import org.gradle.internal.buildtree.BuildTreeLifecycleController
+import org.gradle.internal.buildtree.BuildTreeLifecycleControllerFactory
+import org.gradle.internal.buildtree.BuildTreeServices
+import org.gradle.internal.exception.ExceptionAnalyser
 import org.gradle.internal.operations.BuildOperationExecutor
-import org.gradle.internal.service.ServiceRegistry
-import org.gradle.internal.work.WorkerLeaseService
-import org.gradle.test.fixtures.work.TestWorkerLeaseService
+import org.gradle.internal.service.DefaultServiceRegistry
 import org.gradle.util.Path
 import spock.lang.Specification
 
+import java.util.function.Function
+
 class DefaultNestedBuildTest extends Specification {
-    def owner = Mock(BuildState)
-    def factory = Mock(NestedBuildFactory)
-    def launcher = Mock(GradleLauncher)
+    def owningBuild = Mock(BuildState)
+    def tree = Mock(BuildTreeServices)
+    def controllerFactory = Mock(BuildLifecycleControllerFactory)
+    def controller = Mock(BuildLifecycleController)
     def gradle = Mock(GradleInternal)
-    def action = Mock(Transformer)
-    def sessionServices = Mock(ServiceRegistry)
+    def action = Mock(Function)
+    def services = new DefaultServiceRegistry()
     def buildDefinition = Mock(BuildDefinition)
-    def buildIdentifier = Mock(BuildIdentifier)
-    DefaultNestedBuild build
+    def exceptionAnalyzer = Mock(ExceptionAnalyser)
+    def buildTreeController = Mock(BuildTreeLifecycleController)
+    def buildTreeControllerFactory = Mock(BuildTreeLifecycleControllerFactory)
+    BuildTreeFinishExecutor finishExecutor
 
-    def setup() {
-        _ * owner.nestedBuildFactory >> factory
-        _ * owner.currentPrefixForProjectsInChildBuilds >> Path.path(":owner")
-        _ * factory.nestedInstance(buildDefinition, _) >> launcher
+    DefaultNestedBuild build() {
+        _ * controllerFactory.newInstance(_, _) >> controller
         _ * buildDefinition.name >> "nested"
-        _ * sessionServices.get(BuildOperationExecutor) >> Stub(BuildOperationExecutor)
-        _ * sessionServices.get(WorkerLeaseService) >> new TestWorkerLeaseService()
-        _ * launcher.gradle >> gradle
-        _ * gradle.services >> sessionServices
+        services.add(Stub(BuildOperationExecutor))
+        services.add(exceptionAnalyzer)
+        services.add(buildTreeControllerFactory)
+        services.add(gradle)
+        services.add(controllerFactory)
+        services.add(controller)
+        services.add(Stub(DocumentationRegistry))
+        services.add(Stub(BuildTreeWorkGraphController))
+        _ * tree.services >> services
+        _ * controller.gradle >> gradle
+        _ * buildTreeControllerFactory.createController(_, _, _) >> { build, workExecutor, finishExecutor ->
+            this.finishExecutor = finishExecutor
+            buildTreeController
+        }
 
-        build = new DefaultNestedBuild(buildIdentifier, Path.path(":a:b:c"), buildDefinition, owner)
+        return new DefaultNestedBuild(Path.path(":a:b:c"), buildDefinition, owningBuild, tree)
     }
 
-    def "stops launcher on stop"() {
-        when:
-        build.stop()
+    def "runs action and does not finish build"() {
+        given:
+        def build = build()
 
-        then:
-        1 * launcher.stop()
-    }
-
-    def "runs action and returns result"() {
         when:
         def result = build.run(action)
 
@@ -71,12 +81,21 @@ class DefaultNestedBuildTest extends Specification {
         result == '<result>'
 
         then:
-        1 * action.transform(!null) >> { BuildController controller ->
+        1 * action.apply(!null) >> { BuildTreeLifecycleController controller ->
+            controller.scheduleAndRunTasks()
             '<result>'
         }
+        1 * buildTreeController.scheduleAndRunTasks() >> {
+            finishExecutor.finishBuildTree([])
+        }
+        0 * controller.finishBuild(_)
     }
 
     def "can have null result"() {
+        given:
+        services.add(Stub(BuildModelParameters))
+        def build = build()
+
         when:
         def result = build.run(action)
 
@@ -84,7 +103,7 @@ class DefaultNestedBuildTest extends Specification {
         result == null
 
         and:
-        1 * action.transform(!null) >> { BuildController controller ->
+        1 * action.apply(!null) >> { BuildTreeLifecycleController controller ->
             return null
         }
     }

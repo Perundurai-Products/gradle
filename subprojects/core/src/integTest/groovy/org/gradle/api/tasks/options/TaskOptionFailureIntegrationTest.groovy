@@ -16,7 +16,7 @@
 
 package org.gradle.api.tasks.options
 
-
+import org.gradle.integtests.fixtures.modes.ToBeFixedForIsolatedProjects
 import spock.lang.Ignore
 
 import static org.gradle.api.tasks.options.TaskOptionFixture.taskWithMultipleOptions
@@ -27,7 +27,7 @@ class TaskOptionFailureIntegrationTest extends AbstractOptionIntegrationSpec {
         given:
         buildFile << """
             task sample(type: SampleTask)
-            
+
             ${taskWithMultipleOptionsForSingleProperty('String', 'hello', 'Some description')}
         """
 
@@ -38,8 +38,10 @@ class TaskOptionFailureIntegrationTest extends AbstractOptionIntegrationSpec {
         failureCauseContains('Cannot specify duplicate annotation on the same member : org.gradle.api.tasks.options.Option')
     }
 
+    @ToBeFixedForIsolatedProjects(because = "Configuring projects from root")
     def "different tasks match name but only one accepts the option"() {
         given:
+        createDirs("other")
         settingsFile << "include 'other'"
         buildFile << """
             task someTask(type: SomeTask)
@@ -87,7 +89,7 @@ class TaskOptionFailureIntegrationTest extends AbstractOptionIntegrationSpec {
 
         then:
         failure.assertHasDescription("Problem configuring task :someTask from command line.")
-        failure.assertHasCause("No argument was provided for command-line option '--second'.")
+        failure.assertHasCause("No argument was provided for command-line option '--second' with description: 'configures 'second' field'")
 
         when:
         runAndFail 'someTask', '--second', 'hey', '--second', 'buddy'
@@ -99,7 +101,7 @@ class TaskOptionFailureIntegrationTest extends AbstractOptionIntegrationSpec {
 
     def "single dash user error yields decent error message"() {
         when:
-        runAndFail 'help', '-tsk'
+        runAndFail 'help', '-isk'
 
         then:
         failure.assertHasDescription("Problem configuring task :help from command line.")
@@ -173,10 +175,10 @@ class TaskOptionFailureIntegrationTest extends AbstractOptionIntegrationSpec {
         "should complain that there's no '-all' option"
 
         when:
-        run 'tasks', '-refresh-dependenciess'
+        run 'tasks', '-refresh-dependencies'
 
         then:
-        "should fail in a consistent way as with '--refresh-dependenciess'"
+        "should fail in a consistent way as with '--refresh-dependencies'"
     }
 
     def "cannot declare option for task dependency of another task"() {
@@ -200,21 +202,21 @@ class TaskOptionFailureIntegrationTest extends AbstractOptionIntegrationSpec {
             import org.gradle.api.tasks.options.Option;
 
             import java.util.List;
-            
+
             public class SampleTask extends DefaultTask {
                 private $optionType myProp;
-                
+
                 @Option(option = "$optionName", description = "$optionDescription")
                 @Option(option = "myProp", description = "Configures command line option 'myProp'.")
                 public void setMyProp($optionType myProp) {
                     this.myProp = myProp;
                 }
-                
+
                 @TaskAction
                 public void renderOptionValue() {
                     System.out.println("Value of myProp: " + myProp);
                 }
-                
+
                 private static enum TestEnum {
                     OPT_1, OPT_2, OPT_3
                 }

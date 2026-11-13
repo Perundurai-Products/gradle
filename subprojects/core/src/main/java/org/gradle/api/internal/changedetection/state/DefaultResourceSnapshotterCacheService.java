@@ -16,25 +16,44 @@
 
 package org.gradle.api.internal.changedetection.state;
 
-import org.gradle.cache.PersistentIndexedCache;
+import org.gradle.cache.IndexedCache;
+import org.gradle.internal.fingerprint.hashing.FileSystemLocationSnapshotHasher;
+import org.gradle.internal.fingerprint.hashing.RegularFileSnapshotContext;
+import org.gradle.internal.fingerprint.hashing.RegularFileSnapshotContextHasher;
 import org.gradle.internal.hash.HashCode;
 import org.gradle.internal.hash.Hasher;
 import org.gradle.internal.hash.Hashing;
-import org.gradle.internal.snapshot.RegularFileSnapshot;
+import org.gradle.internal.io.IoSupplier;
+import org.gradle.internal.snapshot.FileSystemLocationSnapshot;
+import org.jspecify.annotations.Nullable;
+
+import java.io.IOException;
 
 public class DefaultResourceSnapshotterCacheService implements ResourceSnapshotterCacheService {
     private static final HashCode NO_HASH = Hashing.signature(CachingResourceHasher.class.getName() + " : no hash");
-    private final PersistentIndexedCache<HashCode, HashCode> persistentCache;
+    private final IndexedCache<HashCode, HashCode> indexedCache;
 
-    public DefaultResourceSnapshotterCacheService(PersistentIndexedCache<HashCode, HashCode> persistentCache) {
-        this.persistentCache = persistentCache;
+    public DefaultResourceSnapshotterCacheService(IndexedCache<HashCode, HashCode> indexedCache) {
+        this.indexedCache = indexedCache;
     }
 
+    @Nullable
     @Override
-    public HashCode hashFile(RegularFileSnapshot fileSnapshot, RegularFileHasher hasher, HashCode configurationHash) {
-        HashCode resourceHashCacheKey = resourceHashCacheKey(fileSnapshot.getHash(), configurationHash);
+    public HashCode hashFile(FileSystemLocationSnapshot snapshot, FileSystemLocationSnapshotHasher hasher, HashCode configurationHash) throws IOException {
+        return hashFile(snapshot, () -> hasher.hash(snapshot), configurationHash);
+    }
 
-        HashCode resourceHash = persistentCache.get(resourceHashCacheKey);
+    @Nullable
+    @Override
+    public HashCode hashFile(RegularFileSnapshotContext fileSnapshotContext, RegularFileSnapshotContextHasher hasher, HashCode configurationHash) throws IOException {
+        return hashFile(fileSnapshotContext.getSnapshot(), () -> hasher.hash(fileSnapshotContext), configurationHash);
+    }
+
+    @Nullable
+    private HashCode hashFile(FileSystemLocationSnapshot snapshot, IoSupplier<HashCode> hashCodeSupplier, HashCode configurationHash) throws IOException {
+        HashCode resourceHashCacheKey = resourceHashCacheKey(snapshot.getHash(), configurationHash);
+
+        HashCode resourceHash = indexedCache.getIfPresent(resourceHashCacheKey);
         if (resourceHash != null) {
             if (resourceHash.equals(NO_HASH)) {
                 return null;
@@ -42,12 +61,12 @@ public class DefaultResourceSnapshotterCacheService implements ResourceSnapshott
             return resourceHash;
         }
 
-        resourceHash = hasher.hash(fileSnapshot);
+        resourceHash = hashCodeSupplier.get();
 
         if (resourceHash != null) {
-            persistentCache.put(resourceHashCacheKey, resourceHash);
+            indexedCache.put(resourceHashCacheKey, resourceHash);
         } else {
-            persistentCache.put(resourceHashCacheKey, NO_HASH);
+            indexedCache.put(resourceHashCacheKey, NO_HASH);
         }
         return resourceHash;
     }

@@ -17,8 +17,10 @@
 package org.gradle.api.artifacts;
 
 import org.gradle.api.Action;
+import org.gradle.api.Incubating;
 import org.gradle.api.Named;
 import org.gradle.api.attributes.HasConfigurableAttributes;
+import org.gradle.api.provider.Property;
 import org.gradle.internal.HasInternalProtocol;
 
 /**
@@ -28,9 +30,17 @@ import org.gradle.internal.HasInternalProtocol;
  */
 @HasInternalProtocol
 public interface ConfigurationVariant extends Named, HasConfigurableAttributes<ConfigurationVariant> {
+    /**
+     * Returns an optional note describing this variant.
+     *
+     * @since 9.0.0
+     */
+    @Incubating
+    Property<String> getDescription();
 
     /**
      * Returns the artifacts associated with this variant.
+     * @since 3.3
      */
     PublishArtifactSet getArtifacts();
 
@@ -38,6 +48,7 @@ public interface ConfigurationVariant extends Named, HasConfigurableAttributes<C
      * Adds an artifact to this variant.
      *
      * <p>See {@link org.gradle.api.artifacts.dsl.ArtifactHandler} for details of the supported notations.
+     * @since 3.3
      */
     void artifact(Object notation);
 
@@ -45,6 +56,7 @@ public interface ConfigurationVariant extends Named, HasConfigurableAttributes<C
      * Adds an artifact to this variant, configuring it using the given action.
      *
      * <p>See {@link org.gradle.api.artifacts.dsl.ArtifactHandler} for details of the supported notations.
+     * @since 3.3
      */
     void artifact(Object notation, Action<? super ConfigurablePublishArtifact> configureAction);
 }

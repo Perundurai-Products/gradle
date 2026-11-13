@@ -23,7 +23,7 @@ import org.gradle.api.internal.DefaultActionConfiguration;
 import org.gradle.internal.isolation.Isolatable;
 import org.gradle.internal.isolation.IsolatableFactory;
 import org.gradle.internal.reflect.JavaReflectionUtil;
-import org.gradle.internal.snapshot.impl.ArrayValueSnapshot;
+import org.gradle.internal.snapshot.impl.IsolatedArray;
 
 import java.util.Arrays;
 
@@ -41,11 +41,11 @@ public class DefaultConfigurableRule<DETAILS> implements ConfigurableRule<DETAIL
     }
 
     private static <DETAILS> boolean hasCacheableAnnotation(Class<? extends Action<DETAILS>> rule) {
-        return JavaReflectionUtil.getAnnotation(rule, CacheableRule.class) != null;
+        return JavaReflectionUtil.hasAnnotation(rule, CacheableRule.class);
     }
 
     public static <DETAILS> ConfigurableRule<DETAILS> of(Class<? extends Action<DETAILS>> rule) {
-        return new DefaultConfigurableRule<DETAILS>(rule, ArrayValueSnapshot.EMPTY);
+        return of(rule, IsolatedArray.EMPTY);
     }
 
     public static <DETAILS> ConfigurableRule<DETAILS> of(Class<? extends Action<DETAILS>> rule, Action<? super ActionConfiguration> action, IsolatableFactory isolatableFactory) {
@@ -55,7 +55,11 @@ public class DefaultConfigurableRule<DETAILS> implements ConfigurableRule<DETAIL
             action.execute(configuration);
             params = configuration.getParams();
         }
-        return new DefaultConfigurableRule<DETAILS>(rule, isolatableFactory.isolate(params));
+        return of(rule, isolatableFactory.isolate(params));
+    }
+
+    public static <DETAILS> ConfigurableRule<DETAILS> of(Class<? extends Action<DETAILS>> rule, Isolatable<Object[]> ruleParams) {
+        return new DefaultConfigurableRule<>(rule, ruleParams);
     }
 
     @Override
@@ -82,14 +86,13 @@ public class DefaultConfigurableRule<DETAILS> implements ConfigurableRule<DETAIL
             return false;
         }
         DefaultConfigurableRule<?> that = (DefaultConfigurableRule<?>) o;
-        return cacheable == that.cacheable &&
-            Objects.equal(rule, that.rule) &&
-            Objects.equal(ruleParams, that.ruleParams);
+        return rule.equals(that.rule) &&
+            ruleParams.equals(that.ruleParams);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hashCode(rule, ruleParams, cacheable);
+        return Objects.hashCode(rule, ruleParams);
     }
 
     @Override

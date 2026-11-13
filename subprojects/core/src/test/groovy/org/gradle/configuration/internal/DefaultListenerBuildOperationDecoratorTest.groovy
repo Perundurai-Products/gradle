@@ -29,13 +29,16 @@ import org.gradle.api.initialization.Settings
 import org.gradle.api.internal.InternalAction
 import org.gradle.api.invocation.Gradle
 import org.gradle.api.tasks.testing.TestListener
-import org.gradle.initialization.BuildCompletionListener
 import org.gradle.internal.InternalBuildAdapter
 import org.gradle.internal.InternalListener
+import org.gradle.internal.code.DefaultUserCodeApplicationContext
+import org.gradle.internal.code.UserCodeApplicationContext
+import org.gradle.internal.code.UserCodeApplicationId
+import org.gradle.internal.code.UserCodeSource
 import org.gradle.internal.event.DefaultListenerManager
-import org.gradle.internal.operations.TestBuildOperationExecutor
+import org.gradle.internal.operations.TestBuildOperationRunner
+import org.gradle.internal.service.scopes.Scope
 import spock.lang.Specification
-import spock.lang.Unroll
 
 class DefaultListenerBuildOperationDecoratorTest extends Specification {
 
@@ -43,19 +46,23 @@ class DefaultListenerBuildOperationDecoratorTest extends Specification {
 
     private static interface InternalTaskExecutionGraphListener extends TaskExecutionGraphListener, InternalListener {}
 
-    private static interface ComboListener extends BuildListener, ProjectEvaluationListener, TaskExecutionGraphListener, BuildCompletionListener {}
+    private static interface Other {
+        void completed()
+    }
 
-    def buildOperationExecutor = new TestBuildOperationExecutor()
-    def context = new TestUserCodeApplicationContext()
-    def decorator = new DefaultListenerBuildOperationDecorator(buildOperationExecutor, context)
+    private static interface ComboListener extends BuildListener, ProjectEvaluationListener, TaskExecutionGraphListener, Other {}
 
-    def 'ignores implementors of InternalListener'() {
+    def buildOperationRunner = new TestBuildOperationRunner()
+    def target = UserCodeApplicationContext.Target.Other.INSTANCE
+    def context = new DefaultUserCodeApplicationContext(System::nanoTime).tap { it.startTrackingApplications() }
+    def decorator = new DefaultListenerBuildOperationDecorator(buildOperationRunner, context)
+
+    def 'ignores implementers of InternalListener'() {
         given:
         def action = Mock(InternalAction)
         def buildListener = new InternalBuildAdapter()
         def projectEvaluationListener = Mock(InternalProjectEvaluationListener)
         def graphListener = Mock(InternalTaskExecutionGraphListener)
-        context.push()
 
         expect:
         decorator.decorate('foo', action) is action
@@ -86,10 +93,14 @@ class DefaultListenerBuildOperationDecoratorTest extends Specification {
         given:
         def action = Mock(Action)
         def arg = new Object()
-        def id = context.push()
+        def id
+        def decoratedAction
 
         when:
-        def decoratedAction = decorator.decorate('foo', action)
+        context.apply(Stub(UserCodeSource), target) {
+            id = it
+            decoratedAction = decorator.decorate('foo', action)
+        }
 
         then:
         !decoratedAction.is(action)
@@ -109,9 +120,12 @@ class DefaultListenerBuildOperationDecoratorTest extends Specification {
         def action = Mock(Action)
         def failure = new RuntimeException()
         def arg = new Object()
-        def id = context.push()
-
-        def decoratedAction = decorator.decorate('foo', action)
+        def id
+        def decoratedAction
+        context.apply(Stub(UserCodeSource), target) {
+            id = it
+            decoratedAction = decorator.decorate('foo', action)
+        }
 
         when:
         decoratedAction.execute(arg)
@@ -135,10 +149,14 @@ class DefaultListenerBuildOperationDecoratorTest extends Specification {
             assert passedArg == arg
             called = true
         }
-        def id = context.push()
+        def id
+        def decoratedClosure
 
         when:
-        def decoratedClosure = decorator.decorate('foo', closure)
+        context.apply(Stub(UserCodeSource), target) {
+            id = it
+            decoratedClosure = decorator.decorate('foo', closure)
+        }
 
         then:
         !decoratedClosure.is(closure)
@@ -163,10 +181,14 @@ class DefaultListenerBuildOperationDecoratorTest extends Specification {
             assert passedArg2 == arg2
             called = true
         }
-        def id = context.push()
+        def id
+        def decoratedClosure
 
         when:
-        def decoratedClosure = decorator.decorate('foo', closure)
+        context.apply(Stub(UserCodeSource), target) {
+            id = it
+            decoratedClosure = decorator.decorate('foo', closure)
+        }
 
         then:
         !decoratedClosure.is(closure)
@@ -190,10 +212,14 @@ class DefaultListenerBuildOperationDecoratorTest extends Specification {
             assert passedArg == arg1
             called = true
         }
-        def id = context.push()
+        def id
+        def decoratedClosure
 
         when:
-        def decoratedClosure = decorator.decorate('foo', closure)
+        context.apply(Stub(UserCodeSource), target) {
+            id = it
+            decoratedClosure = decorator.decorate('foo', closure)
+        }
 
         then:
         !decoratedClosure.is(closure)
@@ -215,10 +241,14 @@ class DefaultListenerBuildOperationDecoratorTest extends Specification {
         def closure = { ->
             called = true
         }
-        def id = context.push()
+        def id
+        def decoratedClosure
 
         when:
-        def decoratedClosure = decorator.decorate('foo', closure)
+        context.apply(Stub(UserCodeSource), target) {
+            id = it
+            decoratedClosure = decorator.decorate('foo', closure)
+        }
 
         then:
         !decoratedClosure.is(closure)
@@ -240,9 +270,13 @@ class DefaultListenerBuildOperationDecoratorTest extends Specification {
         def closure = { passedArg ->
             throw failure
         }
-        def id = context.push()
+        def id
+        def decoratedClosure
 
-        def decoratedClosure = decorator.decorate('foo', closure)
+        context.apply(Stub(UserCodeSource), target) {
+            id = it
+            decoratedClosure = decorator.decorate('foo', closure)
+        }
 
         when:
         decoratedClosure.call(arg)
@@ -255,37 +289,39 @@ class DefaultListenerBuildOperationDecoratorTest extends Specification {
         verifyExpectedOp('foo', id, failure)
     }
 
-    @Unroll
     def 'decorates BuildListener listeners'() {
         given:
-        def buildStartedArg = Mock(Gradle)
         def settingsEvaluatedArg = Mock(Settings)
         def projectsLoadedArg = Mock(Gradle)
         def projectsEvaluatedArg = Mock(Gradle)
         def buildFinishedArg = new BuildResult(null, null)
         def listener = Mock(BuildListener)
-        def id = context.push()
+        def id
+        def decoratedListener
 
         when:
-        def decoratedListener = decorateAsObject ? decorator.decorateUnknownListener('foo', listener) as BuildListener : decorator.decorate('foo', BuildListener, listener)
+        context.apply(Stub(UserCodeSource), target) {
+            id = it
+            decoratedListener = decorateAsObject ? decorator.decorateUnknownListener('foo', listener) as BuildListener : decorator.decorate('foo', BuildListener, listener)
+        }
 
         then:
         !decoratedListener.is(listener)
-
-        when:
-        decoratedListener.buildStarted(buildStartedArg)
-
-        then:
-        1 * listener.buildStarted(buildStartedArg)
-
-        and:
-        verifyNoOp()
 
         when:
         decoratedListener.settingsEvaluated(settingsEvaluatedArg)
 
         then:
         1 * listener.settingsEvaluated(settingsEvaluatedArg)
+
+        and:
+        verifyNoOp()
+
+        when:
+        decoratedListener.beforeSettings(settingsEvaluatedArg)
+
+        then:
+        1 * listener.beforeSettings(settingsEvaluatedArg)
 
         and:
         verifyNoOp()
@@ -325,29 +361,19 @@ class DefaultListenerBuildOperationDecoratorTest extends Specification {
 
     def 'decorated BuildListener rethrows failures'() {
         given:
-        def buildStartedArg = Mock(Gradle)
         def settingsEvaluatedArg = Mock(Settings)
         def projectsLoadedArg = Mock(Gradle)
         def projectsEvaluatedArg = Mock(Gradle)
         def buildFinishedArg = new BuildResult(null, null)
         def listener = Mock(BuildListener)
         def failure = new RuntimeException()
-        def id = context.push()
+        def id
+        def decoratedListener
 
-        def decoratedListener = decorator.decorate('foo', BuildListener, listener)
-
-        when:
-        decoratedListener.buildStarted(buildStartedArg)
-
-        then:
-        def e1 = thrown(RuntimeException)
-        e1.is(failure)
-
-        and:
-        1 * listener.buildStarted(buildStartedArg) >> { throw failure }
-
-        and:
-        verifyNoOp()
+        context.apply(Stub(UserCodeSource), target) {
+            id = it
+            decoratedListener = decorator.decorate('foo', BuildListener, listener)
+        }
 
         when:
         decoratedListener.settingsEvaluated(settingsEvaluatedArg)
@@ -404,17 +430,20 @@ class DefaultListenerBuildOperationDecoratorTest extends Specification {
         verifyNoOp()
     }
 
-    @Unroll
     def 'decorates ProjectEvaluationListener listeners'() {
         given:
         def beforeEvaluateArg = Mock(Project)
         def afterEvaluateArg1 = Mock(Project)
         def afterEvaluateArg2 = Mock(ProjectState)
         def listener = Mock(ProjectEvaluationListener)
-        def id = context.push()
+        def id
+        def decoratedListener
 
         when:
-        def decoratedListener = decorateAsObject ? decorator.decorateUnknownListener('foo', listener) as ProjectEvaluationListener : decorator.decorate('foo', ProjectEvaluationListener, listener)
+        context.apply(Stub(UserCodeSource), target) {
+            id = it
+            decoratedListener = decorateAsObject ? decorator.decorateUnknownListener('foo', listener) as ProjectEvaluationListener : decorator.decorate('foo', ProjectEvaluationListener, listener)
+        }
 
         then:
         !decoratedListener.is(listener)
@@ -442,15 +471,18 @@ class DefaultListenerBuildOperationDecoratorTest extends Specification {
         decorateAsObject << [true, false]
     }
 
-    @Unroll
     def 'decorates TaskExecutionGraphListener listeners'() {
         given:
         def arg = Mock(TaskExecutionGraph)
         def listener = Mock(TaskExecutionGraphListener)
-        def id = context.push()
+        def id
+        def decoratedListener
 
         when:
-        def decoratedListener = decorateAsObject ? decorator.decorateUnknownListener('foo', listener) as TaskExecutionGraphListener : decorator.decorate('foo', TaskExecutionGraphListener, listener)
+        context.apply(Stub(UserCodeSource), target) {
+            id = it
+            decoratedListener = decorateAsObject ? decorator.decorateUnknownListener('foo', listener) as TaskExecutionGraphListener : decorator.decorate('foo', TaskExecutionGraphListener, listener)
+        }
 
         then:
         !decoratedListener.is(listener)
@@ -475,10 +507,14 @@ class DefaultListenerBuildOperationDecoratorTest extends Specification {
         def beforeEvaluateArg = Mock(Project)
         def graphPopulatedArg = Mock(TaskExecutionGraph)
         def listener = Mock(ComboListener)
-        def id = context.push()
+        def id
+        def decoratedListener
 
         when:
-        def decoratedListener = decorator.decorateUnknownListener('foo', listener) as ComboListener
+        context.apply(Stub(UserCodeSource), target) {
+            id = it
+            decoratedListener = decorator.decorateUnknownListener('foo', listener) as ComboListener
+        }
 
         then:
         !decoratedListener.is(listener)
@@ -534,7 +570,7 @@ class DefaultListenerBuildOperationDecoratorTest extends Specification {
 
     def 'decorated listeners can be removed from listener manager'() {
         given:
-        def listenerManager = new DefaultListenerManager()
+        def listenerManager = new DefaultListenerManager(Scope.Build)
         def gradle = Mock(Gradle)
         boolean called = false
         def undecorated = new BuildAdapter() {
@@ -544,11 +580,12 @@ class DefaultListenerBuildOperationDecoratorTest extends Specification {
             }
         }
         def broadcast = listenerManager.getBroadcaster(BuildListener)
+        def decorated
 
         when:
-        context.push()
-        def decorated = decorator.decorate('foo', BuildListener, undecorated)
-        context.pop()
+        context.apply(Stub(UserCodeSource), target) {
+            decorated = decorator.decorate('foo', BuildListener, undecorated)
+        }
         listenerManager.addListener(decorated)
         broadcast.projectsLoaded(gradle)
 
@@ -565,16 +602,16 @@ class DefaultListenerBuildOperationDecoratorTest extends Specification {
     }
 
     private void resetOps() {
-        buildOperationExecutor.reset()
+        buildOperationRunner.reset()
     }
 
     private void verifyNoOp() {
-        assert buildOperationExecutor.operations.empty
+        assert buildOperationRunner.operations.empty
     }
 
     private void verifyExpectedOp(String expectedRegistrationPoint, UserCodeApplicationId id, Throwable failure = null) {
-        assert buildOperationExecutor.log.records.size() == 1
-        def record = buildOperationExecutor.log.records.first()
+        assert buildOperationRunner.log.records.size() == 1
+        def record = buildOperationRunner.log.records.first()
         def op = record.descriptor
         assert op.displayName == "Execute $expectedRegistrationPoint listener"
         assert (op.details as ExecuteListenerBuildOperationType.Details).applicationId == id.longValue()

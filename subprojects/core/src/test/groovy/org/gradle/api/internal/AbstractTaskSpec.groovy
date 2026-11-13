@@ -17,6 +17,7 @@
 package org.gradle.api.internal
 
 import org.gradle.api.Action
+import org.gradle.api.DefaultTask
 import org.gradle.test.fixtures.AbstractProjectBuilderSpec
 import org.gradle.util.TestUtil
 
@@ -25,11 +26,10 @@ import static org.junit.Assert.assertTrue
 class AbstractTaskSpec extends AbstractProjectBuilderSpec {
     def instantiator = TestUtil.instantiatorFactory().decorateLenient()
 
-    static class TestTask extends AbstractTask {
+    static abstract class TestTask extends DefaultTask {
     }
 
     TestTask createTask(String name) {
-        project = TestUtil.createRootProject(temporaryFolder.testDirectory)
         def task = TestUtil.create(temporaryFolder).createTask(TestTask, project, name)
         assertTrue(TestTask.isAssignableFrom(task.getClass()))
         return task

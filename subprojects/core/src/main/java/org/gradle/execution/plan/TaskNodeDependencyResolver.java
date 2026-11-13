@@ -18,12 +18,13 @@ package org.gradle.execution.plan;
 
 import org.gradle.api.Action;
 import org.gradle.api.Task;
-
-import javax.annotation.Nonnull;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 
 /**
  * Resolves dependencies to {@link TaskNode} objects. Uses the same logic as {@link #TASK_AS_TASK}.
  */
+@ServiceScope(Scope.Build.class)
 public class TaskNodeDependencyResolver implements DependencyResolver {
     private final TaskNodeFactory taskNodeFactory;
 
@@ -33,21 +34,6 @@ public class TaskNodeDependencyResolver implements DependencyResolver {
 
     @Override
     public boolean resolve(Task task, Object node, final Action<? super Node> resolveAction) {
-        return TASK_AS_TASK.resolve(task, node, new Action<Task>() {
-            @Override
-            public void execute(@Nonnull Task task) {
-                resolveAction.execute(taskNodeFactory.getOrCreateNode(task));
-            }
-        });
-    }
-
-    @Override
-    public boolean attachActionTo(Node value, Action<? super Task> action) {
-        if (value instanceof TaskNode) {
-            TaskNode taskNode = (TaskNode) value;
-            taskNode.appendPostAction(action);
-            return true;
-        }
-        return false;
+        return TASK_AS_TASK.resolve(task, node, resolved -> resolveAction.execute(taskNodeFactory.getOrCreateNode(resolved)));
     }
 }

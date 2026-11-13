@@ -17,49 +17,66 @@
 package org.gradle.execution.plan;
 
 import com.google.common.collect.Iterables;
-import com.google.common.collect.Sets;
-import org.gradle.api.Action;
-import org.gradle.api.Task;
+import org.gradle.api.GradleException;
 import org.gradle.api.internal.TaskInternal;
+import org.jspecify.annotations.Nullable;
 
-import java.util.NavigableSet;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
+import java.util.function.Consumer;
+
+import static org.gradle.execution.plan.NodeSets.newSortedNodeSet;
 
 public abstract class TaskNode extends Node {
+    private final Set<Node> shouldSuccessors = newSortedNodeSet();
+    private final Set<Node> finalizingSuccessors = newSortedNodeSet();
+    private @Nullable List<Runnable> completionListeners;
 
-    private final NavigableSet<Node> mustSuccessors = Sets.newTreeSet();
-    private final NavigableSet<Node> shouldSuccessors = Sets.newTreeSet();
-    private final NavigableSet<Node> finalizers = Sets.newTreeSet();
-    private final NavigableSet<Node> finalizingSuccessors = Sets.newTreeSet();
+    /**
+     * Registers an action to invoke when this node completes (as per {@link Node#isComplete()}).
+     */
+    public void onComplete(Runnable action) {
+        synchronized (this) {
+            if (completionListeners == null) {
+                completionListeners = new ArrayList<>();
+            }
+            completionListeners.add(action);
+        }
+    }
+
+    /**
+     * Invoked by the execution plan that contains this node when this node completes.
+     */
+    public void fireCompleted() {
+        List<Runnable> listeners;
+        synchronized (this) {
+            listeners = completionListeners;
+            completionListeners = null;
+        }
+        if (listeners != null) {
+            for (Runnable listener : listeners) {
+                listener.run();
+            }
+        }
+    }
 
     @Override
-    public boolean allDependenciesComplete() {
-        if (!super.allDependenciesComplete()) {
-            return false;
+    protected void nodeSpecificHealthDiagnostics(StringBuilder builder) {
+        if (!finalizingSuccessors.isEmpty()) {
+            builder.append(", finalizes=").append(formatNodes(finalizingSuccessors));
         }
-        for (Node dependency : mustSuccessors) {
-            if (!dependency.isComplete()) {
-                return false;
-            }
-        }
-
-        for (Node dependency : finalizingSuccessors) {
-            if (!dependency.isComplete()) {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     public Set<Node> getMustSuccessors() {
-        return mustSuccessors;
+        return getDependencyNodes().getMustSuccessors();
     }
 
-    public Set<Node> getFinalizers() {
-        return finalizers;
-    }
+    public abstract Set<Node> getLifecycleSuccessors();
 
+    public abstract void setLifecycleSuccessors(Set<Node> successors);
+
+    @Override
     public Set<Node> getFinalizingSuccessors() {
         return finalizingSuccessors;
     }
@@ -68,20 +85,19 @@ public abstract class TaskNode extends Node {
         return shouldSuccessors;
     }
 
-    protected void addMustSuccessor(Node toNode) {
-        mustSuccessors.add(toNode);
+    public void addMustSuccessor(Node toNode) {
+        deprecateLifecycleHookReferencingNonLocalTask("mustRunAfter", toNode);
+        updateDependencyNodes(getDependencyNodes().addMustSuccessor(toNode));
+        toNode.addMustPredecessor(this);
     }
 
-    protected void addFinalizingSuccessor(TaskNode finalized) {
+    public void addFinalizingSuccessor(Node finalized) {
         finalizingSuccessors.add(finalized);
+        finalized.addFinalizer(this);
     }
 
-    protected void addFinalizer(TaskNode finalizerNode) {
-        finalizers.add(finalizerNode);
-        finalizerNode.addFinalizingSuccessor(this);
-    }
-
-    protected void addShouldSuccessor(Node toNode) {
+    public void addShouldSuccessor(Node toNode) {
+        deprecateLifecycleHookReferencingNonLocalTask("shouldRunAfter", toNode);
         shouldSuccessors.add(toNode);
     }
 
@@ -91,41 +107,46 @@ public abstract class TaskNode extends Node {
 
     @Override
     public Iterable<Node> getAllSuccessors() {
-        return Iterables.concat(getMustSuccessors(), getFinalizingSuccessors(), super.getAllSuccessors());
-    }
-    @Override
-    public Iterable<Node> getAllSuccessorsInReverseOrder() {
         return Iterables.concat(
-            super.getAllSuccessorsInReverseOrder(),
-            mustSuccessors.descendingSet(),
-            finalizingSuccessors.descendingSet(),
-            shouldSuccessors.descendingSet()
+            shouldSuccessors,
+            finalizingSuccessors,
+            getMustSuccessors(),
+            super.getAllSuccessors()
         );
     }
 
     @Override
-    public boolean hasHardSuccessor(Node successor) {
-        if (super.hasHardSuccessor(successor)) {
-            return true;
-        }
-        if (!(successor instanceof TaskNode)) {
-            return false;
-        }
-        return getMustSuccessors().contains(successor)
-            || getFinalizingSuccessors().contains(successor);
+    public Iterable<Node> getHardSuccessors() {
+        return Iterables.concat(
+            finalizingSuccessors,
+            getMustSuccessors(),
+            super.getHardSuccessors()
+        );
     }
 
-    /**
-     * Attach an action to execute immediately after the <em>successful</em> completion of this task.
-     *
-     * <p>This is used to ensure that dependency resolution metadata for a particular artifact is calculated immediately after that artifact is produced and cached, to avoid consuming tasks having to lock the producing project in order to calculate this metadata.</p>
-     *
-     * <p>This action should really be modelled as a real node in the graph. This 'post action' concept is intended to be a step in this direction.</p>
-     */
-    public abstract void appendPostAction(Action<? super Task> action);
-
-    public abstract Action<? super Task> getPostAction();
+    @Override
+    public void visitHardSuccessors(Consumer<? super Node> visitor) {
+        finalizingSuccessors.forEach(visitor);
+        getMustSuccessors().forEach(visitor);
+        super.visitHardSuccessors(visitor);
+    }
 
     public abstract TaskInternal getTask();
 
+    protected void deprecateLifecycleHookReferencingNonLocalTask(String hookName, Node taskNode) {
+        if (taskNode instanceof TaskInAnotherBuild) {
+            throw new GradleException("Cannot use " + hookName + " to reference tasks from another build");
+        }
+    }
+
+    @Override
+    public void maybeInheritFinalizerGroups() {
+        super.maybeInheritFinalizerGroups();
+        if (!getFinalizingSuccessors().isEmpty()) {
+            // This node is a finalizer, decorate the current group to add finalizer behaviour
+            NodeGroup oldGroup = getGroup();
+            FinalizerGroup finalizerGroup = new FinalizerGroup(this, oldGroup);
+            setGroup(finalizerGroup);
+        }
+    }
 }

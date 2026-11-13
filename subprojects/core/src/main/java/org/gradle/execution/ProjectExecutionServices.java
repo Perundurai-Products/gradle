@@ -16,179 +16,170 @@
 
 package org.gradle.execution;
 
-import com.google.common.collect.ImmutableList;
 import org.gradle.StartParameter;
-import org.gradle.api.execution.TaskActionListener;
-import org.gradle.api.execution.TaskExecutionListener;
-import org.gradle.api.execution.internal.TaskInputsListener;
 import org.gradle.api.internal.cache.StringInterner;
 import org.gradle.api.internal.changedetection.TaskExecutionModeResolver;
 import org.gradle.api.internal.changedetection.changes.DefaultTaskExecutionModeResolver;
 import org.gradle.api.internal.changedetection.state.ResourceSnapshotterCacheService;
+import org.gradle.api.internal.file.FileCollectionFactory;
+import org.gradle.api.internal.file.FileResolver;
 import org.gradle.api.internal.project.ProjectInternal;
-import org.gradle.api.internal.tasks.TaskExecuter;
-import org.gradle.api.internal.tasks.execution.CatchExceptionTaskExecuter;
-import org.gradle.api.internal.tasks.execution.CleanupStaleOutputsExecuter;
-import org.gradle.api.internal.tasks.execution.DefaultTaskFingerprinter;
-import org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter;
-import org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter;
-import org.gradle.api.internal.tasks.execution.FinalizePropertiesTaskExecuter;
-import org.gradle.api.internal.tasks.execution.FinishSnapshotTaskInputsBuildOperationTaskExecuter;
-import org.gradle.api.internal.tasks.execution.ResolveAfterPreviousExecutionStateTaskExecuter;
-import org.gradle.api.internal.tasks.execution.ResolveBeforeExecutionOutputsTaskExecuter;
-import org.gradle.api.internal.tasks.execution.ResolveBeforeExecutionStateTaskExecuter;
-import org.gradle.api.internal.tasks.execution.ResolveBuildCacheKeyExecuter;
-import org.gradle.api.internal.tasks.execution.ResolveIncrementalChangesTaskExecuter;
-import org.gradle.api.internal.tasks.execution.ResolveTaskExecutionModeExecuter;
-import org.gradle.api.internal.tasks.execution.ResolveTaskOutputCachingStateExecuter;
-import org.gradle.api.internal.tasks.execution.SkipEmptySourceFilesTaskExecuter;
-import org.gradle.api.internal.tasks.execution.SkipOnlyIfTaskExecuter;
-import org.gradle.api.internal.tasks.execution.SkipTaskWithNoActionsExecuter;
-import org.gradle.api.internal.tasks.execution.StartSnapshotTaskInputsBuildOperationTaskExecuter;
-import org.gradle.api.internal.tasks.execution.TaskFingerprinter;
-import org.gradle.api.internal.tasks.execution.ValidatingTaskExecuter;
-import org.gradle.api.internal.tasks.properties.PropertyWalker;
-import org.gradle.api.internal.tasks.properties.annotations.FileFingerprintingPropertyAnnotationHandler;
-import org.gradle.caching.internal.controller.BuildCacheController;
-import org.gradle.caching.internal.tasks.DefaultTaskCacheKeyCalculator;
-import org.gradle.caching.internal.tasks.TaskCacheKeyCalculator;
+import org.gradle.api.internal.tasks.TaskDependencyFactory;
+import org.gradle.api.internal.tasks.execution.DefaultTaskCacheabilityResolver;
+import org.gradle.api.internal.tasks.execution.DefaultTaskNodeExecutor;
+import org.gradle.api.internal.tasks.execution.TaskCacheabilityResolver;
+import org.gradle.execution.plan.ExecutionNodeAccessHierarchies;
+import org.gradle.execution.plan.MissingTaskDependencyDetector;
+import org.gradle.execution.plan.TaskNodeExecutor;
 import org.gradle.execution.taskgraph.TaskExecutionGraphInternal;
-import org.gradle.internal.classloader.ClassLoaderHierarchyHasher;
-import org.gradle.internal.cleanup.BuildOutputCleanupRegistry;
+import org.gradle.execution.taskgraph.TaskListenerInternal;
 import org.gradle.internal.event.ListenerManager;
-import org.gradle.internal.execution.OutputChangeListener;
-import org.gradle.internal.execution.WorkExecutor;
+import org.gradle.internal.execution.ExecutionEngine;
+import org.gradle.internal.execution.FileCollectionFingerprinterRegistry;
+import org.gradle.internal.execution.FileCollectionSnapshotter;
+import org.gradle.internal.execution.InputFingerprinter;
 import org.gradle.internal.execution.history.ExecutionHistoryStore;
-import org.gradle.internal.execution.history.OutputFilesRepository;
-import org.gradle.internal.execution.impl.steps.UpToDateResult;
-import org.gradle.internal.file.PathToFileResolver;
-import org.gradle.internal.file.RelativeFilePathResolver;
-import org.gradle.internal.fingerprint.FileCollectionFingerprinter;
-import org.gradle.internal.fingerprint.FileCollectionFingerprinterRegistry;
-import org.gradle.internal.fingerprint.classpath.ClasspathFingerprinter;
-import org.gradle.internal.fingerprint.classpath.impl.DefaultClasspathFingerprinter;
-import org.gradle.internal.fingerprint.impl.AbsolutePathFileCollectionFingerprinter;
-import org.gradle.internal.fingerprint.impl.DefaultFileCollectionFingerprinterRegistry;
-import org.gradle.internal.fingerprint.impl.IgnoredPathFileCollectionFingerprinter;
-import org.gradle.internal.fingerprint.impl.NameOnlyFileCollectionFingerprinter;
-import org.gradle.internal.fingerprint.impl.OutputFileCollectionFingerprinter;
-import org.gradle.internal.fingerprint.impl.RelativePathFileCollectionFingerprinter;
-import org.gradle.internal.operations.BuildOperationExecutor;
-import org.gradle.internal.scan.config.BuildScanPluginApplied;
-import org.gradle.internal.service.DefaultServiceRegistry;
+import org.gradle.internal.execution.impl.DefaultFileCollectionFingerprinterRegistry;
+import org.gradle.internal.execution.impl.DefaultInputFingerprinter;
+import org.gradle.internal.file.DefaultReservedFileSystemLocationRegistry;
+import org.gradle.internal.file.ReservedFileSystemLocation;
+import org.gradle.internal.file.ReservedFileSystemLocationRegistry;
+import org.gradle.internal.fingerprint.impl.FileCollectionFingerprinterRegistrations;
+import org.gradle.internal.hash.ClassLoaderHierarchyHasher;
+import org.gradle.internal.operations.BuildOperationRunner;
+import org.gradle.internal.service.ManagedServiceRegistry;
+import org.gradle.internal.service.Provides;
 import org.gradle.internal.service.ServiceRegistry;
-import org.gradle.internal.snapshot.FileSystemSnapshotter;
+import org.gradle.internal.service.ServiceRegistrationProvider;
+import org.gradle.internal.service.ServiceRegistryBuilder;
+import org.gradle.internal.service.scopes.Scope;
 import org.gradle.internal.snapshot.ValueSnapshotter;
 import org.gradle.internal.work.AsyncWorkTracker;
 import org.gradle.normalization.internal.InputNormalizationHandlerInternal;
 
-import java.util.List;
+@SuppressWarnings("deprecation")
+public class ProjectExecutionServices implements ServiceRegistrationProvider {
 
-public class ProjectExecutionServices extends DefaultServiceRegistry {
-    public ProjectExecutionServices(ProjectInternal project) {
-        super("Configured project services for '" + project.getPath() + "'", project.getServices());
+    public static ManagedServiceRegistry create(ProjectInternal project) {
+        return ServiceRegistryBuilder.builder()
+            .scopeStrictly(Scope.ProjectExecution.class)
+            .displayName("project execution services for '" + project.getPath() + "'")
+            .parent(project.getGradle().getServices())
+            .provider(new ProjectExecutionServices(project.getServices()))
+            .build();
     }
 
-    private static final ImmutableList<? extends Class<? extends FileCollectionFingerprinter>> BUILT_IN_FINGERPRINTER_TYPES = ImmutableList.of(
-        AbsolutePathFileCollectionFingerprinter.class, RelativePathFileCollectionFingerprinter.class, NameOnlyFileCollectionFingerprinter.class, IgnoredPathFileCollectionFingerprinter.class, OutputFileCollectionFingerprinter.class);
+    // TODO: Execution services should not depend on project services, which retain a reference to the Project instance
+    private final ServiceRegistry projectServices;
 
-    TaskActionListener createTaskActionListener(ListenerManager listenerManager) {
-        return listenerManager.getBroadcaster(TaskActionListener.class);
+    private ProjectExecutionServices(ServiceRegistry projectServices) {
+        this.projectServices = projectServices;
     }
 
-    TaskExecuter createTaskExecuter(TaskExecutionModeResolver repository,
-                                    BuildCacheController buildCacheController,
-                                    TaskInputsListener inputsListener,
-                                    TaskActionListener actionListener,
-                                    OutputChangeListener outputChangeListener,
-                                    ClassLoaderHierarchyHasher classLoaderHierarchyHasher,
-                                    ValueSnapshotter valueSnapshotter,
-                                    TaskFingerprinter taskFingerprinter,
-                                    BuildOperationExecutor buildOperationExecutor,
-                                    AsyncWorkTracker asyncWorkTracker,
-                                    BuildOutputCleanupRegistry cleanupRegistry,
-                                    ExecutionHistoryStore executionHistoryStore,
-                                    OutputFilesRepository outputFilesRepository,
-                                    BuildScanPluginApplied buildScanPlugin,
-                                    PathToFileResolver resolver,
-                                    PropertyWalker propertyWalker,
-                                    TaskExecutionGraphInternal taskExecutionGraph,
-                                    TaskExecutionListener taskExecutionListener,
-                                    RelativeFilePathResolver relativeFilePathResolver,
-                                    WorkExecutor<UpToDateResult> workExecutor
+    @Provides
+    FileResolver createFileResolver() {
+        return projectServices.get(FileResolver.class);
+    }
+
+    @Provides
+    FileCollectionFactory createFileCollectionFactory() {
+        return projectServices.get(FileCollectionFactory.class);
+    }
+
+    @Provides
+    TaskDependencyFactory createTaskDependencyFactory() {
+        return projectServices.get(TaskDependencyFactory.class);
+    }
+
+    @Provides
+    InputNormalizationHandlerInternal createInputNormalizationHandler() {
+        return projectServices.get(InputNormalizationHandlerInternal.class);
+    }
+
+    @Provides
+    ReservedFileSystemLocationRegistry createReservedFileSystemLocationRegistry() {
+        return new DefaultReservedFileSystemLocationRegistry(projectServices.getAll(ReservedFileSystemLocation.class));
+    }
+
+    @Provides
+    TaskCacheabilityResolver createTaskCacheabilityResolver(FileResolver fileResolver) {
+        return new DefaultTaskCacheabilityResolver(fileResolver);
+    }
+
+    @Provides
+    MissingTaskDependencyDetector createMissingTaskDependencyDetector(ExecutionNodeAccessHierarchies hierarchies) {
+        return new MissingTaskDependencyDetector(hierarchies.getOutputHierarchy(), hierarchies.createInputHierarchy());
+    }
+
+    @Provides
+    TaskNodeExecutor createTaskNodeExecutor(
+        AsyncWorkTracker asyncWorkTracker,
+        BuildOperationRunner buildOperationRunner,
+        TaskExecutionGraphInternal taskGraph, // Build scoped on purpose: Isolated Projects checks in the project one apply to user code only
+        ClassLoaderHierarchyHasher classLoaderHierarchyHasher,
+        ExecutionHistoryStore executionHistoryStore,
+        FileCollectionFactory fileCollectionFactory,
+        TaskDependencyFactory taskDependencyFactory,
+        FileResolver fileResolver,
+        ListenerManager listenerManager,
+        ReservedFileSystemLocationRegistry reservedFileSystemLocationRegistry,
+        TaskCacheabilityResolver taskCacheabilityResolver,
+        TaskExecutionModeResolver repository,
+        ExecutionEngine executionEngine,
+        InputFingerprinter inputFingerprinter,
+        MissingTaskDependencyDetector missingTaskDependencyDetector
     ) {
-
-        boolean buildCacheEnabled = buildCacheController.isEnabled();
-        boolean scanPluginApplied = buildScanPlugin.isBuildScanPluginApplied();
-        TaskCacheKeyCalculator cacheKeyCalculator = new DefaultTaskCacheKeyCalculator();
-
-        TaskExecuter executer = new ExecuteActionsTaskExecuter(
-            buildCacheEnabled,
-            taskFingerprinter,
+        return new DefaultTaskNodeExecutor(
+            buildOperationRunner,
+            taskGraph.getLegacyTaskListenerBroadcast(),
+            listenerManager.getBroadcaster(TaskListenerInternal.class),
+            repository,
             executionHistoryStore,
-            outputFilesRepository,
-            buildOperationExecutor,
             asyncWorkTracker,
-            actionListener,
-            workExecutor
-        );
-        executer = new ResolveIncrementalChangesTaskExecuter(executer);
-        executer = new ResolveTaskOutputCachingStateExecuter(buildCacheEnabled, relativeFilePathResolver, executer);
-        // TODO:lptr this should be added only if the scan plugin is applied, but SnapshotTaskInputsOperationIntegrationTest
-        // TODO:lptr expects it to be added also when the build cache is enabled (but not the scan plugin)
-        if (buildCacheEnabled || scanPluginApplied) {
-            executer = new FinishSnapshotTaskInputsBuildOperationTaskExecuter(executer);
-        }
-        if (buildCacheEnabled || scanPluginApplied) {
-            executer = new ResolveBuildCacheKeyExecuter(cacheKeyCalculator, buildCacheController.isEmitDebugLogging(), executer);
-        }
-        executer = new ResolveBeforeExecutionStateTaskExecuter(classLoaderHierarchyHasher, valueSnapshotter, taskFingerprinter, executer);
-        executer = new ValidatingTaskExecuter(executer);
-        executer = new SkipEmptySourceFilesTaskExecuter(inputsListener, executionHistoryStore, cleanupRegistry, outputChangeListener, executer);
-        executer = new ResolveBeforeExecutionOutputsTaskExecuter(taskFingerprinter, executer);
-        // TODO:lptr this should be added only if the scan plugin is applied, but SnapshotTaskInputsOperationIntegrationTest
-        // TODO:lptr expects it to be added also when the build cache is enabled (but not the scan plugin)
-        if (buildCacheEnabled || scanPluginApplied) {
-            executer = new StartSnapshotTaskInputsBuildOperationTaskExecuter(buildOperationExecutor, executer);
-        }
-        executer = new ResolveAfterPreviousExecutionStateTaskExecuter(executionHistoryStore, executer);
-        executer = new CleanupStaleOutputsExecuter(cleanupRegistry, outputFilesRepository, buildOperationExecutor, outputChangeListener, executer);
-        executer = new FinalizePropertiesTaskExecuter(executer);
-        executer = new ResolveTaskExecutionModeExecuter(repository, resolver, propertyWalker, executer);
-        executer = new SkipTaskWithNoActionsExecuter(taskExecutionGraph, executer);
-        executer = new SkipOnlyIfTaskExecuter(executer);
-        executer = new CatchExceptionTaskExecuter(executer);
-        executer = new EventFiringTaskExecuter(buildOperationExecutor, taskExecutionListener, executer);
-        return executer;
-    }
-
-    ClasspathFingerprinter createClasspathFingerprinter(ResourceSnapshotterCacheService resourceSnapshotterCacheService, FileSystemSnapshotter fileSystemSnapshotter, StringInterner stringInterner, InputNormalizationHandlerInternal inputNormalizationHandler) {
-        return new DefaultClasspathFingerprinter(
-            resourceSnapshotterCacheService,
-            fileSystemSnapshotter,
-            inputNormalizationHandler.getRuntimeClasspath().getResourceFilter(),
-            stringInterner
+            listenerManager.getBroadcaster(org.gradle.api.execution.TaskActionListener.class),
+            taskCacheabilityResolver,
+            classLoaderHierarchyHasher,
+            executionEngine,
+            inputFingerprinter,
+            listenerManager,
+            reservedFileSystemLocationRegistry,
+            fileCollectionFactory,
+            taskDependencyFactory,
+            fileResolver,
+            missingTaskDependencyDetector
         );
     }
 
-    TaskFingerprinter createTaskFingerprinter(FileCollectionFingerprinterRegistry fingerprinterRegistry) {
-        return new DefaultTaskFingerprinter(fingerprinterRegistry);
-    }
-
-    FileCollectionFingerprinterRegistry createFileCollectionFingerprinterRegistry(
-        ServiceRegistry serviceRegistry,
-        List<FileFingerprintingPropertyAnnotationHandler> handlers
+    @Provides
+    FileCollectionFingerprinterRegistrations createFileCollectionFingerprinterRegistrations(
+        StringInterner stringInterner,
+        ResourceSnapshotterCacheService resourceSnapshotterCacheService,
+        InputNormalizationHandlerInternal inputNormalizationHandler
     ) {
-        ImmutableList.Builder<FileCollectionFingerprinter> fingerprinterImplementations = ImmutableList.builder();
-        for (Class<? extends FileCollectionFingerprinter> builtInFingerprinterType : BUILT_IN_FINGERPRINTER_TYPES) {
-            fingerprinterImplementations.add(serviceRegistry.get(builtInFingerprinterType));
-        }
-        for (FileFingerprintingPropertyAnnotationHandler handler : handlers) {
-            fingerprinterImplementations.add(serviceRegistry.get(handler.getFingerprinterImplementationType()));
-        }
-        return new DefaultFileCollectionFingerprinterRegistry(fingerprinterImplementations.build());
+        return new FileCollectionFingerprinterRegistrations(
+            stringInterner,
+            resourceSnapshotterCacheService,
+            inputNormalizationHandler.getRuntimeClasspath().getClasspathResourceFilter(),
+            inputNormalizationHandler.getRuntimeClasspath().getManifestAttributeResourceEntryFilter(),
+            inputNormalizationHandler.getRuntimeClasspath().getPropertiesFileFilters()
+        );
     }
 
+    @Provides
+    FileCollectionFingerprinterRegistry createFileCollectionFingerprinterRegistry(FileCollectionFingerprinterRegistrations fileCollectionFingerprinterRegistrations) {
+        return new DefaultFileCollectionFingerprinterRegistry(fileCollectionFingerprinterRegistrations.getRegistrants());
+    }
+
+    @Provides
+    InputFingerprinter createInputFingerprinter(
+        FileCollectionSnapshotter snapshotter,
+        FileCollectionFingerprinterRegistry fingerprinterRegistry,
+        ValueSnapshotter valueSnapshotter
+    ) {
+        return new DefaultInputFingerprinter(snapshotter, fingerprinterRegistry, valueSnapshotter);
+    }
+
+    @Provides
     TaskExecutionModeResolver createExecutionModeResolver(
         StartParameter startParameter
     ) {

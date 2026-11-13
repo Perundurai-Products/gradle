@@ -16,10 +16,14 @@
 package org.gradle.util.internal;
 
 import com.google.common.collect.Interner;
-import com.google.common.collect.Maps;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 
+import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
+@ServiceScope(Scope.BuildTree.class)
 public class SimpleMapInterner implements Interner<String> {
     private final Map<String, String> internedStrings;
 
@@ -28,11 +32,11 @@ public class SimpleMapInterner implements Interner<String> {
     }
 
     public static SimpleMapInterner notThreadSafe() {
-        return new SimpleMapInterner(Maps.<String, String>newHashMap());
+        return new SimpleMapInterner(new HashMap<>());
     }
 
     public static SimpleMapInterner threadSafe() {
-        return new SimpleMapInterner(Maps.<String, String>newConcurrentMap());
+        return new SimpleMapInterner(new ConcurrentHashMap<>());
     }
 
     @Override

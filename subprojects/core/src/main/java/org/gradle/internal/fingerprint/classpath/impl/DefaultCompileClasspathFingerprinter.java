@@ -16,42 +16,26 @@
 
 package org.gradle.internal.fingerprint.classpath.impl;
 
-import org.gradle.api.file.FileCollection;
 import org.gradle.api.internal.cache.StringInterner;
 import org.gradle.api.internal.changedetection.state.AbiExtractingClasspathResourceHasher;
 import org.gradle.api.internal.changedetection.state.CachingResourceHasher;
 import org.gradle.api.internal.changedetection.state.ResourceSnapshotterCacheService;
-import org.gradle.api.tasks.CompileClasspathNormalizer;
-import org.gradle.api.tasks.FileNormalizer;
-import org.gradle.internal.fingerprint.CurrentFileCollectionFingerprint;
+import org.gradle.internal.execution.model.InputNormalizer;
+import org.gradle.internal.fingerprint.FileNormalizer;
 import org.gradle.internal.fingerprint.classpath.CompileClasspathFingerprinter;
 import org.gradle.internal.fingerprint.impl.AbstractFileCollectionFingerprinter;
-import org.gradle.internal.snapshot.FileSystemSnapshotter;
 
 public class DefaultCompileClasspathFingerprinter extends AbstractFileCollectionFingerprinter implements CompileClasspathFingerprinter {
-    private final ClasspathFingerprintingStrategy fingerprintingStrategy;
-
-    public DefaultCompileClasspathFingerprinter(ResourceSnapshotterCacheService cacheService, FileSystemSnapshotter fileSystemSnapshotter, StringInterner stringInterner) {
-        super(stringInterner, fileSystemSnapshotter);
-        this.fingerprintingStrategy = ClasspathFingerprintingStrategy.compileClasspath(
-            new CachingResourceHasher(new AbiExtractingClasspathResourceHasher(), cacheService),
+    public DefaultCompileClasspathFingerprinter(ResourceSnapshotterCacheService cacheService, StringInterner stringInterner) {
+        super(ClasspathFingerprintingStrategy.compileClasspath(
+            new CachingResourceHasher(AbiExtractingClasspathResourceHasher.DEFAULT, cacheService),
             cacheService,
             stringInterner
-        );
+        ));
     }
 
     @Override
-    public CurrentFileCollectionFingerprint fingerprint(FileCollection files) {
-        return super.fingerprint(files, fingerprintingStrategy);
-    }
-
-    @Override
-    public CurrentFileCollectionFingerprint empty() {
-        return fingerprintingStrategy.getEmptyFingerprint();
-    }
-
-    @Override
-    public Class<? extends FileNormalizer> getRegisteredType() {
-        return CompileClasspathNormalizer.class;
+    public FileNormalizer getNormalizer() {
+        return InputNormalizer.COMPILE_CLASSPATH;
     }
 }

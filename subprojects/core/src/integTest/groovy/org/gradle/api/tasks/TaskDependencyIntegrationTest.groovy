@@ -19,87 +19,131 @@ package org.gradle.api.tasks
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 
 class TaskDependencyIntegrationTest extends AbstractIntegrationSpec {
-    def "can remove a Task instance from task dependencies containing the Task instance"() {
-        given:
-        buildFile << '''
-            tasks.configureEach {
-                doLast {
-                    println "Executing $it"
-                }
-            }
-            task bar
-            task foo {
-                dependsOn bar
-            }
 
-            foo.dependsOn.remove(bar)
-        '''
+    def "removing is not supported by task dependencies set"() {
+        given:
+        buildFile << """
+            task t
+            task foo { dependsOn t }
+            foo.dependsOn.$removalMethod
+        """
 
         when:
-        executer.expectDeprecationWarning()
-        succeeds "foo"
+        fails()
 
         then:
-        result.assertTasksExecuted(":foo")
-        result.assertTaskNotExecuted(":bar")
+        failure.assertHasCause('Removing a task dependency from a task instance is not supported.')
 
-        and:
-        outputContains("Do not remove a task dependency from a Task instance. This behaviour has been deprecated and is scheduled to be removed in Gradle 6.0.")
+        where:
+        removalMethod   | _
+        'remove(t)'     | _
+        'removeAll([])' | _
+        'retainAll([])' | _
     }
 
-    def "can remove a Task instance from task dependencies containing a Provider to the Task instance"() {
-        given:
-        buildFile << '''
-            tasks.configureEach {
-                doLast {
-                    println "Executing $it"
+    def "can use a closure as a task dependency"() {
+        buildFile << """
+            def bar = tasks.register("bar")
+            tasks.register("foo") {
+                dependsOn {
+                    bar
                 }
             }
-            def provider = tasks.register("bar")
-            task foo {
-                dependsOn provider
-            }
-
-            foo.dependsOn.remove(provider.get())
-        '''
+        """
 
         when:
-        executer.expectDeprecationWarning()
-        succeeds "foo"
+        succeeds("foo")
 
         then:
-        result.assertTasksExecuted(":foo")
-        result.assertTaskNotExecuted(":bar")
-
-        and:
-        outputContains("Do not remove a task dependency from a Task instance. This behaviour has been deprecated and is scheduled to be removed in Gradle 6.0.")
+        executed(":bar")
     }
 
-    def "can remove a Provider instance from task dependencies containing the Provider"() {
-        given:
-        buildFile << '''
-            tasks.configureEach {
-                doLast {
-                    println "Executing $it"
+    def "accessing task provided to task dependency closure is deprecated"() {
+        buildFile << """
+            def bar = tasks.register("bar")
+            tasks.register("foo") {
+                dependsOn { task ->
+                    task.getName()
+                    bar
                 }
             }
-            def provider = tasks.register("bar")
-            task foo {
-                dependsOn provider
-            }
+        """
 
-            foo.dependsOn.remove(provider)
-        '''
+        expect:
+        executer.expectDocumentedDeprecationWarning("Accessing tasks provided to task dependency closures has been deprecated. This will fail with an error in Gradle 10. Consult the upgrading guide for further information: https://docs.gradle.org/current/userguide/upgrading_version_9.html#task_in_task_dependency_closure")
+        succeeds("foo")
+    }
+
+    def "accessing task provided to task dependency closure using it is deprecated"() {
+        buildFile << """
+            def bar = tasks.register("bar")
+            tasks.register("foo") {
+                dependsOn {
+                    it.getName()
+                    bar
+                }
+            }
+        """
+
+        expect:
+        executer.expectDocumentedDeprecationWarning("Accessing tasks provided to task dependency closures has been deprecated. This will fail with an error in Gradle 10. Consult the upgrading guide for further information: https://docs.gradle.org/current/userguide/upgrading_version_9.html#task_in_task_dependency_closure")
+        succeeds("foo")
+    }
+
+    def "cannot pass a Java Function to dependsOn"() {
+        buildFile << """
+            def bar = tasks.register("bar")
+            tasks.register("foo") {
+                java.util.function.Function<Task, Object> function = { task ->
+                    task.getName()
+                    bar
+                }
+                dependsOn(function)
+            }
+        """
 
         when:
-        executer.expectDeprecationWarning()
-        succeeds "foo"
+        fails("foo")
 
         then:
-        result.assertTasksExecuted(":foo")
-        result.assertTaskNotExecuted(":bar")
-
-        and:
-        outputContains("Do not remove a task dependency from a Task instance. This behaviour has been deprecated and is scheduled to be removed in Gradle 6.0.")
+        failure.assertHasDescription("Could not determine the dependencies of task ':foo'")
     }
+
+    def "cannot pass a Kotlin Function to dependsOn"() {
+        buildKotlinFile << """
+            val bar = tasks.register("bar")
+            tasks.register("foo") {
+                val function: (Task) -> Any = { task ->
+                    task.getName()
+                    bar
+                }
+                dependsOn(function)
+            }
+        """
+
+        when:
+        fails("foo")
+
+        then:
+        failure.assertHasDescription("Could not determine the dependencies of task ':foo'")
+    }
+
+    def "cannot pass a Kotlin closure to dependsOn"() {
+        buildKotlinFile << """
+            val bar = tasks.register("bar")
+            tasks.register("foo") {
+                dependsOn({ task: Task ->
+                    task.getName()
+                    bar
+                })
+            }
+        """
+
+        when:
+        fails("foo")
+
+        then:
+        failure.assertHasDescription("Could not determine the dependencies of task ':foo'")
+    }
+
 }

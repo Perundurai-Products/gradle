@@ -16,50 +16,92 @@
 
 package org.gradle.api.provider;
 
-import org.gradle.api.Incubating;
-
-import javax.annotation.Nullable;
+import org.gradle.api.SupportsKotlinAssignmentOverloading;
+import org.gradle.api.model.ManagedType;
+import org.gradle.declarative.dsl.model.annotations.VisibleInDefinition;
+import org.gradle.declarative.dsl.model.annotations.internal.DeclarativeWithHiddenMembers;
+import org.jspecify.annotations.Nullable;
 
 /**
- * A container object that represents a configurable value of a specific type. A {@link Property} is also a {@link Provider} and can be used in the same way as a {@link Provider}. A property's value can be accessed using the methods of {@link Provider} such as {@link Provider#get()}. The value can be modified by using the method {@link #set(Object)} or {@link #set(Provider)}.
+ * A container object that represents a configurable value of a specific type. A {@link Property} is also a
+ * {@link Provider} and can be used in the same way as a {@link Provider}. A property's value can be accessed
+ * using the methods of {@link Provider} such as {@link Provider#get() get()}. The value can be modified by
+ * using the methods {@link #set(Object)} and {@link #set(Provider)}, or their fluid API counterparts
+ * {@link #value(Object)} and {@link #value(Provider)}.
  *
  * <p>
- * A property may be used to represent a task output. Such a property carries information about which task produces its value. When attached to a task input, this allows Gradle to automatically add dependencies between tasks based on the values they use as inputs and produce as outputs.
+ * A property may represent a task output. Such a property carries information about the task producing
+ * its value. When this property is attached to an input of another task, Gradle will automatically determine
+ * the task dependencies based on this connection.
  * </p>
  *
- * <p>You can create a {@link Property} instance using {@link org.gradle.api.model.ObjectFactory#property(Class)}. There are also several specialized subtypes of this interface that can be created using various other factory methods.</p>
+ * <p>
+ * There are also several specialized subtypes of this interface that can be created using various other factory methods.
+ * </p>
  *
- * <p><b>Note:</b> This interface is not intended for implementation by build script or plugin authors.</p>
+ * <p>
+ * Instances of this interface are not thread-safe for reading and writing.
+ * It is not safe to share the same Property instance between different projects.
+ * </p>
+ * <p>
+ * <b>Note:</b> This interface is not intended for implementation by build script or plugin authors.
+ * </p>
  *
  * @param <T> Type of value represented by the property
  * @since 4.3
+ *
+ * @see ManagedType Create an instance of this as a managed property (preferred).
+ * @see org.gradle.api.model.ObjectFactory#property(Class) Create an instance of this manually.
  */
-@Incubating
-public interface Property<T> extends Provider<T> {
+@ManagedType
+@SupportsKotlinAssignmentOverloading
+@VisibleInDefinition
+@DeclarativeWithHiddenMembers
+public interface Property<T> extends Provider<T>, HasConfigurableValue, SupportsConvention {
     /**
-     * Sets the value of the property the given value, replacing whatever value the property already had.
+     * Sets the value of the property to the given value, replacing whatever value the property already had.
      *
-     * <p>This method can also be used to clear the value of the property, by passing {@code null} as the value.
+     * <p>
+     * This method can also be used to discard the value of the property, by passing it {@code null}. When the
+     * value is discarded (or has never been set in the first place), the convention (default value) for this
+     * property, if specified, will be used to provide the value instead.
+     * </p>
      *
      * @param value The value, can be null.
+     * @since 4.3
      */
     void set(@Nullable T value);
 
     /**
-     * Sets the property to have the same value of the given provider, replacing whatever value the property already had. This property will track the value of the provider and query its value each time the value of the property is queried. When the provider has no value, this property will also have no value.
+     * Sets the property to have the same value as the given provider, replacing whatever value the property already had.
+     * This property will track the value of the provider and query its value each time the value of the property is queried.
+     * When the provider has no value, this property will also have no value.
      *
      * <p>
-     * When the given provider represents a task output, this property will also carry the task dependency information from the provider.
+     * This method can NOT be used to discard the value of the property. Specifying a {@code null} provider will result
+     * in a {@code NullPointerException} being thrown. When the provider has no value, this property will also have
+     * no value - regardless of whether or not a convention has been set.
      * </p>
      *
-     * @param provider Provider
+     * <p>
+     * When the given provider represents a task output, this property will also carry the task dependency information
+     * from the provider.
+     * </p>
+     *
+     * @param provider The provider of the property's value, can't be null.
+     * @since 4.3
      */
     void set(Provider<? extends T> provider);
 
     /**
-     * Sets the value of the property the given value, replacing whatever value the property already had.
+     * Sets the value of the property to the given value, replacing whatever value the property already had.
+     * This is the same as {@link #set(Object)} but returns this property to allow method chaining.
      *
-     * <p>This is the same as {@link #set(Object)} but returns this property to allow method chaining.</p>
+     * <p>
+     * This method can also be used to discard the value of the property, by passing it {@code null}.
+     * When the value is discarded (or has never been set in the first place), the convention (default value)
+     * for this property, if specified, will be used to provide the value instead.
+     * </p>
      *
      * @param value The value, can be null.
      * @return this
@@ -68,31 +110,103 @@ public interface Property<T> extends Provider<T> {
     Property<T> value(@Nullable T value);
 
     /**
-     * Specifies the value to use as the convention for this property. The convention is used when no value has been set for this property.
+     * Sets the property to have the same value as the given provider, replacing whatever value the property already had.
+     * This property will track the value of the provider and query its value each time the value of the property is queried.
+     * When the provider has no value, this property will also have no value. This is the same as {@link #set(Provider)}
+     * but returns this property to allow method chaining.
      *
-     * @param value The value.
+     * <p>
+     * This method can NOT be used to discard the value of the property. Specifying a {@code null} provider will result
+     * in a {@code NullPointerException} being thrown. When the provider has no value, this property will also have
+     * no value - regardless of whether or not a convention has been set.
+     * </p>
+     *
+     * <p>
+     * When the given provider represents a task output, this property will also carry the task dependency information
+     * from the provider.
+     * </p>
+     *
+     * @param provider The provider whose value to use.
+     * @return this
+     * @since 5.6
+     */
+    Property<T> value(Provider<? extends T> provider);
+
+    /**
+     * {@inheritDoc}
+     * <p>
+     * This is similar to calling {@link #value(Object)} with a <code>null</code> argument.
+     * </p>
+     */
+    @Override
+    Property<T> unset();
+
+    /**
+     * Specifies the value to use as the convention (default value) for this property. If the convention is set and
+     * no explicit value or value provider has been specified, then the convention will be returned as the value of
+     * the property (when queried).
+     *
+     * <p>
+     * This method can be used to specify that the property does not have a default value, by passing it
+     * {@code null}.
+     * </p>
+     *
+     * @param value The convention value, or {@code null} if the property should have no default value.
      * @return this
      * @since 5.1
      */
-    Property<T> convention(T value);
+    Property<T> convention(@Nullable T value);
 
     /**
-     * Specifies the provider of the value to use as the convention for this property. The convention is used when no value has been set for this property.
+     * Specifies the provider to be used to query the convention (default value) for this property. If a convention
+     * provider has been set and no explicit value or value provider has been specified, then the convention
+     * provider's value will be returned as the value of the property (when queried).
      *
-     * @param valueProvider The provider of the value.
+     * <p>
+     * The property's convention tracks the convention provider. Whenever the convention's actual value is
+     * needed, the convention provider will be queried anew.
+     * </p>
+     *
+     * <p>
+     * This method can't be used to specify that a property does not have a default value. Passing in a {@code null}
+     * provider will result in a {@code NullPointerException} being thrown. When the provider doesn't have
+     * a value, then the property will behave as if it wouldn't have a convention specified.
+     * </p>
+     *
+     * @param provider The provider of the property's convention value, can't be null.
      * @return this
      * @since 5.1
      */
-    Property<T> convention(Provider<? extends T> valueProvider);
+    Property<T> convention(Provider<? extends T> provider);
 
     /**
-     * Disallows further changes to the value of this property. Calls to methods that change the value of this property, such as {@link #set(Object)} or {@link #set(Provider)} will fail.
+     * {@inheritDoc}
      *
-     * <p>When this property has a value provided by a {@link Provider}, the value of the provider is queried when this method is called and the value of this property set to the result. The value of the provider will no longer be tracked.</p>
+     * <p>
+     * This is similar to calling {@link #convention(Object)} with a <code>null</code> argument.
+     * </p>
+     */
+    @Override
+    Property<T> unsetConvention();
+
+    /**
+     * Disallows further changes to the value of this property. Calls to methods that change the value of this property,
+     * such as {@link #set(Object)}, {@link #set(Provider)}, {@link #value(Object)} and {@link #value(Provider)} will fail,
+     * by throwing an {@code IllegalStateException}.
      *
-     * <p>Note that although the value of the property will not change, the value may refer to a mutable object. Calling this method does not guarantee that the value will become immutable.</p>
+     * <p>
+     * When this property's value is specified via a {@link Provider}, calling {@code finalizeValue()} will trigger the
+     * querying of the provider and the obtained value will be set as the final value of the property. The value of the
+     * provider will not be tracked further.
+     * </p>
+     *
+     * <p>
+     * Note that although the value of the property will not change, the value itself may be a mutable object. Calling
+     * this method does not guarantee that the value will become immutable.
+     * </p>
      *
      * @since 5.0
      */
+    @Override
     void finalizeValue();
 }

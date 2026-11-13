@@ -17,9 +17,9 @@ package org.gradle.api.artifacts.repositories;
 
 import org.gradle.api.Action;
 import org.gradle.api.ActionConfiguration;
-import org.gradle.api.Incubating;
-import org.gradle.api.artifacts.ComponentMetadataVersionLister;
 import org.gradle.api.artifacts.ComponentMetadataSupplier;
+import org.gradle.api.artifacts.ComponentMetadataVersionLister;
+import org.gradle.declarative.dsl.model.annotations.HiddenInDefinition;
 
 /**
  * Interface for repositories which support custom metadata suppliers and/or version listers.
@@ -30,7 +30,6 @@ import org.gradle.api.artifacts.ComponentMetadataSupplier;
  *
  * @since 4.9
  */
-@Incubating
 public interface MetadataSupplierAware {
     /**
      * Sets a custom metadata rule, which is capable of supplying the metadata of a component (status, status scheme, changing flag)
@@ -41,6 +40,7 @@ public interface MetadataSupplierAware {
      *
      * @since 4.9
      */
+    @HiddenInDefinition
     void setMetadataSupplier(Class<? extends ComponentMetadataSupplier> rule);
 
     /**
@@ -51,6 +51,7 @@ public interface MetadataSupplierAware {
      *
      * @since 4.9
      */
+    @HiddenInDefinition
     void setMetadataSupplier(Class<? extends ComponentMetadataSupplier> rule, Action<? super ActionConfiguration> configureAction);
 
     /**
@@ -60,6 +61,7 @@ public interface MetadataSupplierAware {
      *
      * @since 4.9
      */
+    @HiddenInDefinition
     void setComponentVersionsLister(Class<? extends ComponentMetadataVersionLister> lister);
 
     /**
@@ -70,6 +72,7 @@ public interface MetadataSupplierAware {
      *
      * @since 4.9
      */
+    @HiddenInDefinition
     void setComponentVersionsLister(Class<? extends ComponentMetadataVersionLister> lister, Action<? super ActionConfiguration> configureAction);
 
 }

@@ -16,9 +16,10 @@
 package org.gradle.api.artifacts;
 
 import org.gradle.api.Describable;
-import org.gradle.api.Incubating;
+import org.gradle.internal.HasInternalProtocol;
+import org.gradle.internal.scan.UsedByScanPlugin;
+import org.jspecify.annotations.Nullable;
 
-import javax.annotation.Nullable;
 import java.util.List;
 
 /**
@@ -26,7 +27,7 @@ import java.util.List;
  * Each of {@link #getPreferredVersion()}, {@link #getRequiredVersion()} and {@link #getStrictVersion()} is represented by a version String,
  * that can be compared against a module version to determine if the version matches.
  *
- * <h4>Version syntax</h4>
+ * <h2>Version syntax</h2>
  * <p>
  * Gradle supports different ways of declaring a version String:
  * <ul>
@@ -52,7 +53,7 @@ import java.util.List;
  *     <li>A Maven SNAPSHOT version identifier: e.g. 1.0-SNAPSHOT, 1.4.9-beta1-SNAPSHOT</li>
  * </ul>
  *
- * <h4>Version ordering</h4>
+ * <h2>Version ordering</h2>
  *
  * Versions have an implicit ordering. Version ordering is used to:
  * <ul>
@@ -74,9 +75,9 @@ import java.util.List;
  * <ul>
  *     <li>If both parts are numeric, the highest numeric value is <b>higher</b>: `1.1 {@literal <} 1.2`</li>
  *     <li>If one part is numeric, it is considered <b>higher</b> than the non-numeric part: `1.a {@literal <} 1.1`</li>
- *     <li>If both are not numeric, the parts are compared alphabetically, case-sensitive: `1.a {@literal <} 1.A  {@literal <} 1.b {@literal <} 1.B`</li>
+ *     <li>If both are not numeric, the parts are compared alphabetically, case-sensitive: `1.A {@literal <} 1.B  {@literal <} 1.a {@literal <} 1.b`</li>
  *     <li>An version with an extra numeric part is considered <b>higher</b> than a version without: `1.1 {@literal <} 1.1.0`</li>
- *     <li>An version with an extra non-numeric part is considered <b>lower</b> than a version without: `1.1 {@literal <} 1.1.a`</li>
+ *     <li>An version with an extra non-numeric part is considered <b>lower</b> than a version without: `1.1.a {@literal <} 1.1`</li>
  * </ul>
  * </li>
  * <li>Certain string values have special meaning for the purposes of ordering:
@@ -91,7 +92,8 @@ import java.util.List;
  *
  * @since 4.4
  */
-@Incubating
+@UsedByScanPlugin
+@HasInternalProtocol
 public interface VersionConstraint extends Describable {
     /**
      * The branch to select versions from. When not {@code null} selects only those versions that were built from the specified branch.
@@ -107,6 +109,7 @@ public interface VersionConstraint extends Describable {
      * The required version of a module can typically be upgraded during dependency resolution, but not downgraded.
      *
      * @return the required version, or empty string if no required version specified. Never null.
+     * @since 4.10
      */
     String getRequiredVersion();
 
@@ -117,6 +120,7 @@ public interface VersionConstraint extends Describable {
      * but will not be honored in the presence of conflicting constraints.
      *
      * @return the preferred version, or empty string if no preferred version specified. Never null.
+     * @since 4.4
      */
     String getPreferredVersion();
 
@@ -126,6 +130,7 @@ public interface VersionConstraint extends Describable {
      * The required version of a module is strictly enforced and cannot be upgraded or downgraded during dependency resolution.
      *
      * @return the strict version, or empty string if no required version specified. Never null.
+     * @since 4.10
      */
     String getStrictVersion();
 
@@ -133,6 +138,8 @@ public interface VersionConstraint extends Describable {
      * Returns the list of versions that this module rejects  (which may be exact versions, or ranges, anything that fits into a version string).
      *
      * @return the list of rejected versions
+     * @since 4.4
      */
     List<String> getRejectedVersions();
+
 }

@@ -18,10 +18,10 @@ package org.gradle.model.internal.type;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.reflect.TypeToken;
-import net.jcip.annotations.ThreadSafe;
 import org.gradle.internal.Cast;
+import org.jspecify.annotations.Nullable;
 
-import javax.annotation.Nullable;
+import javax.annotation.concurrent.ThreadSafe;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.GenericArrayType;
 import java.lang.reflect.Method;
@@ -171,6 +171,7 @@ public abstract class ModelType<T> {
         }
     }
 
+    @SuppressWarnings("ReferenceEquality") //TODO: evaluate errorprone suppression (https://github.com/gradle/gradle/issues/35864)
     public boolean isAssignableFrom(ModelType<?> modelType) {
         return modelType == this || wrapper.isAssignableFrom(modelType.wrapper);
     }
@@ -249,6 +250,7 @@ public abstract class ModelType<T> {
         return wrapper.getRepresentation(false);
     }
 
+    @Override
     public String toString() {
         return wrapper.getRepresentation(true);
     }

@@ -16,19 +16,32 @@
 
 package org.gradle.execution.plan;
 
-import org.gradle.api.Action;
-import org.gradle.api.Project;
+import com.google.common.collect.ImmutableList;
+import org.gradle.api.internal.project.ProjectInternal;
+import org.gradle.api.internal.tasks.NodeExecutionContext;
+import org.gradle.api.internal.tasks.TaskDependencyContainer;
 import org.gradle.api.internal.tasks.WorkNodeAction;
+import org.gradle.internal.resources.ResourceLock;
+import org.jspecify.annotations.Nullable;
 
-import javax.annotation.Nullable;
-import java.util.Collections;
-import java.util.Set;
+import java.util.List;
+import java.util.function.Consumer;
 
-class ActionNode extends Node {
-    private final WorkNodeAction action;
+public class ActionNode extends Node {
+    private WorkNodeAction action;
+    private List<Node> postExecutionNodes;
+    private final ProjectInternal owningProject;
+    private final ProjectInternal projectToLock;
+    private boolean hasVisitedPreExecutionNode;
 
     public ActionNode(WorkNodeAction action) {
         this.action = action;
+        this.owningProject = (ProjectInternal) action.getOwningProject();
+        if (owningProject != null && action.usesMutableProjectState()) {
+            this.projectToLock = owningProject;
+        } else {
+            this.projectToLock = null;
+        }
     }
 
     @Nullable
@@ -38,39 +51,81 @@ class ActionNode extends Node {
     }
 
     @Override
-    public void rethrowNodeFailure() {
+    public void resolveDependencies(TaskDependencyResolver dependencyResolver) {
+        TaskDependencyContainer dependencies = action::visitDependencies;
+        for (Node node : dependencyResolver.resolveDependenciesFor(null, dependencies)) {
+            addDependencySuccessor(node);
+        }
+    }
+
+    @Nullable
+    public WorkNodeAction getAction() {
+        return action;
     }
 
     @Override
-    public void prepareForExecution() {
-    }
-
-    @Override
-    public void resolveDependencies(TaskDependencyResolver dependencyResolver, Action<Node> processHardSuccessor) {
-    }
-
-    @Override
-    public Set<Node> getFinalizers() {
-        return Collections.emptySet();
-    }
-
-    @Override
-    public String toString() {
+    public String getDisplayName() {
         return "work action " + action;
     }
 
     @Override
-    public int compareTo(Node o) {
-        return -1;
+    public boolean isPriority() {
+        return getResourceToLock() != null;
     }
 
     @Nullable
     @Override
-    public Project getProject() {
-        return action.getProject();
+    public ResourceLock getResourceToLock() {
+        if (projectToLock != null) {
+            return projectToLock.getOwner().getAccessLock();
+        }
+        return null;
     }
 
-    public void run() {
-        action.run();
+    @Nullable
+    @Override
+    public ProjectInternal getOwningProject() {
+        return owningProject;
+    }
+
+    @Override
+    public void execute(NodeExecutionContext context) {
+        try {
+            action.run(context);
+            if (action instanceof PostExecutionNodeAwareActionNode) {
+                postExecutionNodes = ImmutableList.copyOf(((PostExecutionNodeAwareActionNode) action).getPostExecutionNodes());
+            }
+        } finally {
+            action = null;
+        }
+    }
+
+    @Override
+    public boolean hasPendingPreExecutionNodes() {
+        return !hasVisitedPreExecutionNode && action.getPreExecutionNode() != null;
+    }
+
+    @Override
+    public void visitPreExecutionNodes(Consumer<? super Node> visitor) {
+        if (!hasVisitedPreExecutionNode) {
+            WorkNodeAction preExecutionNode = action.getPreExecutionNode();
+            if (preExecutionNode != null) {
+                visitor.accept(new ActionNode(preExecutionNode));
+            }
+            hasVisitedPreExecutionNode = true;
+        }
+    }
+
+    @Override
+    public void visitPostExecutionNodes(Consumer<? super Node> visitor) {
+        if (postExecutionNodes != null) {
+            try {
+                for (Node node : postExecutionNodes) {
+                    visitor.accept(node);
+                }
+            } finally {
+                postExecutionNodes = null;
+            }
+        }
     }
 }

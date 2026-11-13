@@ -16,17 +16,18 @@
 
 package org.gradle.internal.work
 
-import org.gradle.internal.concurrent.ParallelismConfigurationManagerFixture
+import org.gradle.internal.Factory
 import org.gradle.internal.exceptions.DefaultMultiCauseException
 import org.gradle.internal.operations.BuildOperationRef
-import org.gradle.internal.resources.DefaultResourceLockCoordinationService
-import org.gradle.internal.resources.ProjectLeaseRegistry
-import org.gradle.internal.resources.ResourceLockCoordinationService
 import org.gradle.test.fixtures.concurrent.ConcurrentSpec
+import org.gradle.test.fixtures.work.TestWorkerLeaseService
+
+import static org.gradle.internal.work.AsyncWorkTracker.ProjectLockRetention.RELEASE_AND_REACQUIRE_PROJECT_LOCKS
+import static org.gradle.internal.work.AsyncWorkTracker.ProjectLockRetention.RELEASE_PROJECT_LOCKS
+import static org.gradle.internal.work.AsyncWorkTracker.ProjectLockRetention.RETAIN_PROJECT_LOCKS
 
 class DefaultAsyncWorkTrackerTest extends ConcurrentSpec {
-    ResourceLockCoordinationService coordinationService = new DefaultResourceLockCoordinationService()
-    WorkerLeaseService workerLeaseService = new DefaultWorkerLeaseService(coordinationService, new ParallelismConfigurationManagerFixture(true, 1))
+    WorkerLeaseService workerLeaseService = new TestWorkerLeaseService()
     AsyncWorkTracker asyncWorkTracker = new DefaultAsyncWorkTracker(workerLeaseService)
 
     def "can wait for async work to complete"() {
@@ -35,7 +36,7 @@ class DefaultAsyncWorkTrackerTest extends ConcurrentSpec {
         when:
         async {
             5.times { i ->
-                start {
+                workerThread {
                     asyncWorkTracker.registerWork(operation, blockingWorkCompletion("allStarted"))
                     instant."worker${i}Started"
                 }
@@ -43,9 +44,9 @@ class DefaultAsyncWorkTrackerTest extends ConcurrentSpec {
             5.times { i ->
                 thread.blockUntil."worker${i}Started"
             }
-            start {
+            workerThread {
                 instant.waitStarted
-                asyncWorkTracker.waitForCompletion(operation, true)
+                asyncWorkTracker.waitForCompletion(operation, RELEASE_PROJECT_LOCKS)
                 instant.waitFinished
             }
             thread.blockUntil.waitStarted
@@ -62,11 +63,11 @@ class DefaultAsyncWorkTrackerTest extends ConcurrentSpec {
 
         when:
         async {
-            start {
+            workerThread {
                 asyncWorkTracker.registerWork(operation1, blockingWorkCompletion("completeWorker1"))
                 instant.worker1Started
             }
-            start {
+            workerThread {
                 asyncWorkTracker.registerWork(operation2, new AsyncWorkCompletion() {
                     @Override
                     void waitForCompletion() {
@@ -87,8 +88,8 @@ class DefaultAsyncWorkTrackerTest extends ConcurrentSpec {
             }
             thread.blockUntil.worker1Started
             thread.blockUntil.worker2Started
-            start {
-                asyncWorkTracker.waitForCompletion(operation1, true)
+            workerThread {
+                asyncWorkTracker.waitForCompletion(operation1, RELEASE_PROJECT_LOCKS)
                 instant.waitFinished
             }
             instant.completeWorker1
@@ -104,18 +105,18 @@ class DefaultAsyncWorkTrackerTest extends ConcurrentSpec {
 
         when:
         async {
-            start {
+            workerThread {
                 asyncWorkTracker.registerWork(operation1, blockingWorkCompletion("completeWorker1"))
                 instant.worker1Started
             }
             thread.blockUntil.worker1Started
-            start {
+            workerThread {
                 instant.waitStarted
-                asyncWorkTracker.waitForCompletion(operation1, true)
+                asyncWorkTracker.waitForCompletion(operation1, RELEASE_PROJECT_LOCKS)
                 instant.waitFinished
             }
-            start {
-                thread.blockUntil.waitStarted
+            thread.blockUntil.waitStarted
+            workerThread {
                 asyncWorkTracker.registerWork(operation2, blockingWorkCompletion("completeWorker1"))
                 instant.worker2Started
             }
@@ -132,7 +133,7 @@ class DefaultAsyncWorkTrackerTest extends ConcurrentSpec {
 
         when:
         async {
-            start {
+            workerThread {
                 asyncWorkTracker.registerWork(operation1, new AsyncWorkCompletion() {
                     @Override
                     void waitForCompletion() {
@@ -151,15 +152,15 @@ class DefaultAsyncWorkTrackerTest extends ConcurrentSpec {
                 })
                 instant.worker1Started
             }
-            start {
+            workerThread {
                 asyncWorkTracker.registerWork(operation1, blockingWorkCompletion("completeWorker2"))
                 instant.worker2Started
             }
             thread.blockUntil.worker1Started
             thread.blockUntil.worker2Started
-            start {
+            workerThread {
                 try {
-                    asyncWorkTracker.waitForCompletion(operation1, true)
+                    asyncWorkTracker.waitForCompletion(operation1, RELEASE_PROJECT_LOCKS)
                 } finally {
                     instant.waitFinished
                 }
@@ -202,7 +203,9 @@ class DefaultAsyncWorkTrackerTest extends ConcurrentSpec {
         asyncWorkTracker.registerWork(operation1, completedWorkCompletion())
 
         when:
-        asyncWorkTracker.waitForCompletion(operation1, true)
+        workerLeaseService.runAsWorkerThread {
+            asyncWorkTracker.waitForCompletion(operation1, RELEASE_PROJECT_LOCKS)
+        }
 
         then:
         def e = thrown(DefaultMultiCauseException)
@@ -217,7 +220,7 @@ class DefaultAsyncWorkTrackerTest extends ConcurrentSpec {
 
         when:
         async {
-            start {
+            workerThread {
                 asyncWorkTracker.registerWork(operation1, new AsyncWorkCompletion() {
                     @Override
                     void waitForCompletion() {
@@ -237,12 +240,12 @@ class DefaultAsyncWorkTrackerTest extends ConcurrentSpec {
                 })
                 instant.registered
             }
-            start {
-                thread.blockUntil.registered
-                asyncWorkTracker.waitForCompletion(operation1, true)
+            thread.blockUntil.registered
+            workerThread {
+                asyncWorkTracker.waitForCompletion(operation1, RELEASE_PROJECT_LOCKS)
             }
             thread.blockUntil.waitStarted
-            start {
+            workerThread {
                 try {
                     asyncWorkTracker.registerWork(operation1, new AsyncWorkCompletion() {
                         @Override
@@ -274,9 +277,10 @@ class DefaultAsyncWorkTrackerTest extends ConcurrentSpec {
         e.message == "Another thread is currently waiting on the completion of work for the provided operation"
     }
 
-    def "releases a project lock before waiting on async work"() {
-        def projectLockService = Mock(ProjectLeaseRegistry)
-        def asyncWorkTracker = new DefaultAsyncWorkTracker(projectLockService)
+    def "can temporarily release a project lock while waiting on async work"() {
+        def workerLease = Mock(WorkerLeaseRegistry.WorkerLease)
+        def workerLeaseService = Mock(WorkerLeaseService)
+        def asyncWorkTracker = new DefaultAsyncWorkTracker(workerLeaseService)
         def operation1 = Mock(BuildOperationRef)
 
         when:
@@ -295,15 +299,20 @@ class DefaultAsyncWorkTrackerTest extends ConcurrentSpec {
 
             }
         })
-        asyncWorkTracker.waitForCompletion(operation1, true)
+        asyncWorkTracker.waitForCompletion(operation1, RELEASE_AND_REACQUIRE_PROJECT_LOCKS)
 
         then:
-        1 * projectLockService.withoutProjectLock(_)
+        _ * workerLeaseService.currentWorkerLease >> workerLease
+        1 * workerLeaseService.runAsIsolatedTask(_) >> { Runnable runnable -> runnable.run() }
+        1 * workerLeaseService.whileDisallowingProjectLockChanges(_) >> { Factory<?> factory -> factory.create() }
+        1 * workerLeaseService.blocking(_) >> { Runnable runnable -> runnable.run() }
+        0 * workerLeaseService._
     }
 
-    def "does not release a project lock before waiting on async work when releaseLocks is false"() {
-        def projectLockService = Mock(ProjectLeaseRegistry)
-        def asyncWorkTracker = new DefaultAsyncWorkTracker(projectLockService)
+    def "can release a project lock before waiting on async work"() {
+        def workerLease = Mock(WorkerLeaseRegistry.WorkerLease)
+        def workerLeaseService = Mock(WorkerLeaseService)
+        def asyncWorkTracker = new DefaultAsyncWorkTracker(workerLeaseService)
         def operation1 = Mock(BuildOperationRef)
 
         when:
@@ -322,37 +331,103 @@ class DefaultAsyncWorkTrackerTest extends ConcurrentSpec {
 
             }
         })
-        asyncWorkTracker.waitForCompletion(operation1, false)
+        asyncWorkTracker.waitForCompletion(operation1, RELEASE_PROJECT_LOCKS)
 
         then:
-        0 * projectLockService.withoutProjectLock(_)
+        _ * workerLeaseService.currentWorkerLease >> workerLease
+        1 * workerLeaseService.runAsIsolatedTask()
+        1 * workerLeaseService.whileDisallowingProjectLockChanges(_) >> { Factory<?> factory -> factory.create() }
+        1 * workerLeaseService.blocking(_) >> { Runnable runnable -> runnable.run() }
+        0 * workerLeaseService._
     }
 
-    def "does not release a project lock before waiting on async work when no work is registered"() {
-        def projectLockService = Mock(ProjectLeaseRegistry)
-        def asyncWorkTracker = new DefaultAsyncWorkTracker(projectLockService)
+    def "does not release a project lock before waiting on async work when locks are retained"() {
+        def workerLease = Mock(WorkerLeaseRegistry.WorkerLease)
+        def workerLeaseService = Mock(WorkerLeaseService)
+        def asyncWorkTracker = new DefaultAsyncWorkTracker(workerLeaseService)
         def operation1 = Mock(BuildOperationRef)
 
         when:
-        asyncWorkTracker.waitForCompletion(operation1, true)
+        asyncWorkTracker.registerWork(operation1, new AsyncWorkCompletion() {
+            @Override
+            void waitForCompletion() {
+            }
+
+            @Override
+            boolean isComplete() {
+                return false
+            }
+
+            @Override
+            void cancel() {
+
+            }
+        })
+        asyncWorkTracker.waitForCompletion(operation1, RETAIN_PROJECT_LOCKS)
 
         then:
-        0 * projectLockService.withoutProjectLock(_)
+        _ * workerLeaseService.currentWorkerLease >> workerLease
+        1 * workerLeaseService.whileDisallowingProjectLockChanges(_) >> { Factory<?> factory -> factory.create() }
+        1 * workerLeaseService.blocking(_) >> { Runnable runnable -> runnable.run() }
+        0 * workerLeaseService._
     }
 
-    def "does not release a project lock when all async work is already completed"() {
-        def projectLockService = Mock(ProjectLeaseRegistry)
-        def asyncWorkTracker = new DefaultAsyncWorkTracker(projectLockService)
+    def "does not temporarily release a project lock before waiting on async work when no work is registered"() {
+        def workerLease = Mock(WorkerLeaseRegistry.WorkerLease)
+        def workerLeaseService = Mock(WorkerLeaseService)
+        def asyncWorkTracker = new DefaultAsyncWorkTracker(workerLeaseService)
+        def operation1 = Mock(BuildOperationRef)
+
+        when:
+        asyncWorkTracker.waitForCompletion(operation1, RELEASE_AND_REACQUIRE_PROJECT_LOCKS)
+
+        then:
+        0 * workerLeaseService._
+    }
+
+    def "does not temporarily release a project lock when all async work is already completed"() {
+        def workerLease = Mock(WorkerLeaseRegistry.WorkerLease)
+        def workerLeaseService = Mock(WorkerLeaseService)
+        def asyncWorkTracker = new DefaultAsyncWorkTracker(workerLeaseService)
         def operation1 = Mock(BuildOperationRef)
 
         when:
         asyncWorkTracker.registerWork(operation1, completedWorkCompletion())
         asyncWorkTracker.registerWork(operation1, completedWorkCompletion())
         asyncWorkTracker.registerWork(operation1, completedWorkCompletion())
-        asyncWorkTracker.waitForCompletion(operation1, true)
+        asyncWorkTracker.waitForCompletion(operation1, RELEASE_AND_REACQUIRE_PROJECT_LOCKS)
 
         then:
-        0 * projectLockService.withoutProjectLock(_)
+        _ * workerLeaseService.currentWorkerLease >> workerLease
+        1 * workerLeaseService.whileDisallowingProjectLockChanges(_) >> { Factory<?> factory -> factory.create() }
+        1 * workerLeaseService.blocking(_) >> { Runnable runnable -> runnable.run() }
+        0 * workerLeaseService._
+    }
+
+    def "can release a project lock when all async work is already completed"() {
+        def workerLease = Mock(WorkerLeaseRegistry.WorkerLease)
+        def workerLeaseService = Mock(WorkerLeaseService)
+        def asyncWorkTracker = new DefaultAsyncWorkTracker(workerLeaseService)
+        def operation1 = Mock(BuildOperationRef)
+
+        when:
+        asyncWorkTracker.registerWork(operation1, completedWorkCompletion())
+        asyncWorkTracker.registerWork(operation1, completedWorkCompletion())
+        asyncWorkTracker.registerWork(operation1, completedWorkCompletion())
+        asyncWorkTracker.waitForCompletion(operation1, RELEASE_PROJECT_LOCKS)
+
+        then:
+        _ * workerLeaseService.currentWorkerLease >> workerLease
+        1 * workerLeaseService.runAsIsolatedTask()
+        1 * workerLeaseService.whileDisallowingProjectLockChanges(_) >> { Factory<?> factory -> factory.create() }
+        1 * workerLeaseService.blocking(_) >> { Runnable runnable -> runnable.run() }
+        0 * workerLeaseService._
+    }
+
+    void workerThread(Closure cl) {
+        start {
+            workerLeaseService.runAsWorkerThread(cl)
+        }
     }
 
     AsyncWorkCompletion blockingWorkCompletion(String instant) {

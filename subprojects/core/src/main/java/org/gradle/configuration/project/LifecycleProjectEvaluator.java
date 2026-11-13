@@ -16,18 +16,20 @@
 package org.gradle.configuration.project;
 
 import org.gradle.api.Action;
+import org.gradle.api.BuildCancelledException;
 import org.gradle.api.ProjectConfigurationException;
 import org.gradle.api.ProjectEvaluationListener;
 import org.gradle.api.internal.project.ProjectInternal;
 import org.gradle.api.internal.project.ProjectStateInternal;
+import org.gradle.initialization.BuildCancellationToken;
 import org.gradle.internal.operations.BuildOperationCategory;
 import org.gradle.internal.operations.BuildOperationContext;
 import org.gradle.internal.operations.BuildOperationDescriptor;
-import org.gradle.internal.operations.BuildOperationExecutor;
+import org.gradle.internal.operations.BuildOperationRunner;
 import org.gradle.internal.operations.RunnableBuildOperation;
 import org.gradle.util.Path;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+
+import java.io.File;
 
 /**
  * Notifies listeners before and after delegating to the provided delegate to the actual evaluation,
@@ -45,26 +47,29 @@ import org.slf4j.LoggerFactory;
  * The before/after evaluate operations are fired regardless whether anyone is actually listening.
  * This may change in future versions.
  *
- * The use of term “evaluate” is a legacy constraint.
- * Project evaluation is synonymous with “project configuration” (the latter being the preferred term).
+ * The use of term "evaluate" is a legacy constraint.
+ * Project evaluation is synonymous with "project configuration" (the latter being the preferred term).
  *
  * @see ProjectEvaluationListener
  */
 public class LifecycleProjectEvaluator implements ProjectEvaluator {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(LifecycleProjectEvaluator.class);
-
-    private final BuildOperationExecutor buildOperationExecutor;
+    private final BuildOperationRunner buildOperationRunner;
     private final ProjectEvaluator delegate;
+    private final BuildCancellationToken cancellationToken;
 
-    public LifecycleProjectEvaluator(BuildOperationExecutor buildOperationExecutor, ProjectEvaluator delegate) {
-        this.buildOperationExecutor = buildOperationExecutor;
+    public LifecycleProjectEvaluator(BuildOperationRunner buildOperationRunner, ProjectEvaluator delegate, BuildCancellationToken cancellationToken) {
+        this.buildOperationRunner = buildOperationRunner;
         this.delegate = delegate;
+        this.cancellationToken = cancellationToken;
     }
 
+    @Override
     public void evaluate(final ProjectInternal project, final ProjectStateInternal state) {
         if (state.isUnconfigured()) {
-            buildOperationExecutor.run(new EvaluateProject(project, state));
+            if (cancellationToken.isCancellationRequested()) {
+                throw new BuildCancelledException();
+            }
+            buildOperationRunner.run(new EvaluateProject(project, state));
         }
     }
 
@@ -92,53 +97,83 @@ public class LifecycleProjectEvaluator implements ProjectEvaluator {
 
         @Override
         public void run(final BuildOperationContext context) {
-            project.getMutationState().withMutableState(new Runnable() {
-                @Override
-                public void run() {
-                    // Note: beforeEvaluate and afterEvaluate ops do not throw, instead mark state as failed
-                    try {
-                        state.toBeforeEvaluate();
-                        buildOperationExecutor.run(new NotifyBeforeEvaluate(project, state));
+            project.getOwner().applyToMutableState(p -> {
+                // Note: beforeEvaluate and afterEvaluate ops do not throw, instead mark state as failed
+                try {
+                    state.toBeforeEvaluate();
+                    buildOperationRunner.run(new NotifyBeforeEvaluate(project, state));
 
-                        if (!state.hasFailure()) {
-                            state.toEvaluate();
-                            try {
-                                delegate.evaluate(project, state);
-                            } catch (Exception e) {
-                                addConfigurationFailure(project, state, e, context);
-                            } finally {
-                                state.toAfterEvaluate();
-                                buildOperationExecutor.run(new NotifyAfterEvaluate(project, state));
-                            }
+                    if (!state.hasFailure()) {
+                        state.toEvaluate();
+                        try {
+                            delegate.evaluate(project, state);
+                        } catch (Exception e) {
+                            addConfigurationFailure(project, state, e, context);
+                        } finally {
+                            state.toAfterEvaluate();
+                            buildOperationRunner.run(new NotifyAfterEvaluate(project, state));
                         }
-
-                        if (state.hasFailure()) {
-                            state.rethrowFailure();
-                        } else {
-                            context.setResult(ConfigureProjectBuildOperationType.RESULT);
-                        }
-                    } finally {
-                        state.configured();
                     }
+
+                    if (state.hasFailure()) {
+                        state.rethrowFailure();
+                    } else {
+                        context.setResult(ConfigureProjectBuildOperationType.RESULT);
+                    }
+                } finally {
+                    state.configured();
                 }
             });
         }
 
         @Override
         public BuildOperationDescriptor.Builder description() {
-            Path identityPath = project.getIdentityPath();
-            String displayName = "Configure project " + identityPath.toString();
-
-            String progressDisplayName = identityPath.toString();
-            if (identityPath.equals(Path.ROOT)) {
-                progressDisplayName = "root project";
-            }
-
-            return BuildOperationDescriptor.displayName(displayName)
-                .operationType(BuildOperationCategory.CONFIGURE_PROJECT)
-                .progressDisplayName(progressDisplayName)
-                .details(new ConfigureProjectBuildOperationType.DetailsImpl(project.getProjectPath(), project.getGradle().getIdentityPath(), project.getRootDir()));
+            return configureProjectBuildOperationBuilderFor(this.project);
         }
+    }
+
+    private static BuildOperationDescriptor.Builder configureProjectBuildOperationBuilderFor(ProjectInternal projectInternal) {
+        Path identityPath = projectInternal.getIdentityPath();
+        String displayName = "Configure project " + identityPath;
+
+        String progressDisplayName = identityPath.toString();
+        if (identityPath.equals(Path.ROOT)) {
+            progressDisplayName = "root project";
+        }
+
+        return BuildOperationDescriptor.displayName(displayName)
+            .metadata(BuildOperationCategory.CONFIGURE_PROJECT)
+            .progressDisplayName(progressDisplayName)
+            .details(new ConfigureProjectDetails(projectInternal.getProjectPath(), projectInternal.getGradle().getIdentityPath(), projectInternal.getRootDir()));
+    }
+
+    private static class ConfigureProjectDetails implements ConfigureProjectBuildOperationType.Details {
+
+        private final Path buildPath;
+        private final File rootDir;
+        private final Path projectPath;
+
+        public ConfigureProjectDetails(Path projectPath, Path buildPath, File rootDir) {
+            this.projectPath = projectPath;
+            this.buildPath = buildPath;
+            this.rootDir = rootDir;
+        }
+
+        @Override
+        public String getProjectPath() {
+            return projectPath.asString();
+        }
+
+        @Override
+        public String getBuildPath() {
+            return buildPath.asString();
+        }
+
+        @Override
+        public File getRootDir() {
+            return rootDir;
+        }
+
     }
 
     private static class NotifyBeforeEvaluate implements RunnableBuildOperation {
@@ -164,11 +199,33 @@ public class LifecycleProjectEvaluator implements ProjectEvaluator {
         @Override
         public BuildOperationDescriptor.Builder description() {
             return BuildOperationDescriptor.displayName("Notify beforeEvaluate listeners of " + project.getIdentityPath())
-                .details(new NotifyProjectBeforeEvaluatedBuildOperationType.DetailsImpl(
+                .details(new NotifyProjectBeforeEvaluatedDetails(
                     project.getProjectPath(),
                     project.getGradle().getIdentityPath()
                 ));
         }
+    }
+
+    private static class NotifyProjectBeforeEvaluatedDetails implements NotifyProjectBeforeEvaluatedBuildOperationType.Details {
+
+        private final Path buildPath;
+        private final Path projectPath;
+
+        NotifyProjectBeforeEvaluatedDetails(Path projectPath, Path buildPath) {
+            this.projectPath = projectPath;
+            this.buildPath = buildPath;
+        }
+
+        @Override
+        public String getProjectPath() {
+            return projectPath.asString();
+        }
+
+        @Override
+        public String getBuildPath() {
+            return buildPath.asString();
+        }
+
     }
 
     private static class NotifyAfterEvaluate implements RunnableBuildOperation {
@@ -206,10 +263,32 @@ public class LifecycleProjectEvaluator implements ProjectEvaluator {
         @Override
         public BuildOperationDescriptor.Builder description() {
             return BuildOperationDescriptor.displayName("Notify afterEvaluate listeners of " + project.getIdentityPath())
-                .details(new NotifyProjectAfterEvaluatedBuildOperationType.DetailsImpl(
+                .details(new NotifyProjectAfterEvaluatedDetails(
                     project.getProjectPath(),
                     project.getGradle().getIdentityPath()
                 ));
         }
+    }
+
+    private static class NotifyProjectAfterEvaluatedDetails implements NotifyProjectAfterEvaluatedBuildOperationType.Details {
+
+        private final Path buildPath;
+        private final Path projectPath;
+
+        NotifyProjectAfterEvaluatedDetails(Path projectPath, Path buildPath) {
+            this.projectPath = projectPath;
+            this.buildPath = buildPath;
+        }
+
+        @Override
+        public String getProjectPath() {
+            return projectPath.asString();
+        }
+
+        @Override
+        public String getBuildPath() {
+            return buildPath.asString();
+        }
+
     }
 }

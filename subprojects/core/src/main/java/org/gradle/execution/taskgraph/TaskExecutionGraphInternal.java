@@ -1,5 +1,5 @@
 /*
- * Copyright 2007-2008 the original author or authors.
+ * Copyright 2007 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,59 +17,70 @@ package org.gradle.execution.taskgraph;
 
 import org.gradle.api.Task;
 import org.gradle.api.execution.TaskExecutionGraph;
-import org.gradle.api.internal.project.ProjectInternal;
-import org.gradle.api.specs.Spec;
+import org.gradle.execution.plan.FinalizedExecutionPlan;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
+import org.jspecify.annotations.Nullable;
 
-import java.util.Collection;
-import java.util.Set;
-
+// Public `TaskExecutionGraph` service shadowed at the project scope by the IP reporting wrapper
+@ServiceScope({Scope.Build.class, Scope.Project.class})
 public interface TaskExecutionGraphInternal extends TaskExecutionGraph {
-    /**
-     * Sets the filter to use when adding tasks to this graph. Only those tasks which are accepted by the given filter
-     * will be added to this graph.
-     */
-    void useFilter(Spec<? super Task> filter);
 
     /**
-     * Adds the given tasks and their dependencies to this graph. Tasks are executed in an arbitrary order. The tasks
-     * are executed before any tasks from a subsequent call to this method are executed.
+     * Adds the internal listener for task execution graph events.
+     * These listeners are not persisted through the configuration cache, beware if you want to receive graph execution events with CC enabled.
+     *
+     * @param listener the listener
      */
-    void addEntryTasks(Iterable<? extends Task> tasks);
+    void addExecutionListener(TaskExecutionGraphExecutionListener listener);
 
     /**
-     * Does the work to populate the task graph based on tasks that have been added. Does not fire events.
+     * Removes the previously registered internal listener.
+     *
+     * @param listener the listener
      */
-    void populate();
+    void removeExecutionListener(TaskExecutionGraphExecutionListener listener);
 
     /**
-     * Executes the tasks in this graph. Discards the contents of this graph when completed.
-     * @param taskFailures collection to collect task execution failures into. Does not need to be thread-safe
+     * Get an aggregate view of all listeners registered by {@link #addExecutionListener(TaskExecutionGraphExecutionListener)}.
      */
-    void execute(Collection<? super Throwable> taskFailures);
+    TaskExecutionGraphExecutionListener getGraphExecutionListeners();
 
     /**
-     * Sets whether execution should continue if a task fails.
+     * Find a task with the given path in the task graph.
+     *
+     * @param path the path of the task to find in the task graph
+     * @return the task with the given path if it is present in the task graph, null otherwise
      */
-    void setContinueOnFailure(boolean continueOnFailure);
+    @Nullable
+    Task findTask(String path);
 
     /**
-     * Set of requested tasks.
+     * Attaches the work that this graph will run. Fires events and no further tasks should be added.
      */
-    Set<Task> getRequestedTasks();
+    void populate(FinalizedExecutionPlan plan);
 
     /**
-     * Set of requested tasks.
+     * Detaches the work attached by {@link #populate(FinalizedExecutionPlan)}, so that queries against this
+     * graph no longer see it.
      */
-    Set<Task> getFilteredTasks();
+    void depopulate();
 
     /**
-     * Returns the number of work items in the graph.
+     * Get the execution plan that Configuration Cache should serialize.
+     *
+     * @return null if the graph is not populated
      */
-    int size();
+    // TODO: We should find another way for CC to access this work graph rather
+    // than routing it through an internal interface of a public API.
+    @Nullable FinalizedExecutionPlan getExecutionPlan();
 
     /**
-     * Returns the root project of this graph.
+     * Resets the lifecycle for this graph.
      */
-    ProjectInternal getRootProject();
+    void resetState();
+
+    @SuppressWarnings("deprecation")
+    org.gradle.api.execution.TaskExecutionListener getLegacyTaskListenerBroadcast();
 
 }

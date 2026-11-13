@@ -16,11 +16,11 @@
 
 package org.gradle.api.internal.initialization.loadercache
 
-
 import org.gradle.integtests.fixtures.longlived.PersistentBuildProcessIntegrationTest
+import org.gradle.integtests.fixtures.modes.UnsupportedWithConfigurationCache
 
+@UnsupportedWithConfigurationCache(because = "Tests build script classloader caching during configuration phase, which CC skips on cache hit")
 class ClassLoadersCachingIntegrationTest extends PersistentBuildProcessIntegrationTest {
-
 
     def getIsCachedCheck() {
         """
@@ -331,6 +331,9 @@ class ClassLoadersCachingIntegrationTest extends PersistentBuildProcessIntegrati
     def "changing non root buildsript classpath does affect child projects"() {
         when:
         settingsFile << "include 'a', 'a:a'"
+        createJarWithProperties("thing.jar")
+        createJarWithProperties("a/thing.jar")
+        createJarWithProperties("a/a/thing.jar")
         addIsCachedCheck()
         addIsCachedCheck("a")
         addIsCachedCheck("a/a")
@@ -402,7 +405,31 @@ class ClassLoadersCachingIntegrationTest extends PersistentBuildProcessIntegrati
 
         then:
         isCached("a")
-        isNotCached("a:a") // cached in cross-build cache
-
+        isNotCached("a:a")
     }
+
+    def "reuses classloader when included build settings has no classpath but root build does"() {
+        given:
+        createJarWithProperties("thing.jar", [source: 1])
+        settingsFile << """
+            buildscript {
+                dependencies { classpath files("thing.jar") }
+            }
+            includeBuild "include"
+        """
+
+        and:
+        file("include/settings.gradle") << """
+            // no export path changes
+        """
+        addIsCachedCheck()
+
+        when:
+        run()
+        run()
+
+        then:
+        isCached()
+    }
+
 }

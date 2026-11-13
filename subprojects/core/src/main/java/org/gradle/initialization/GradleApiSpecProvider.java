@@ -44,6 +44,11 @@ public interface GradleApiSpecProvider {
         Set<String> getExportedPackages();
 
         /**
+         * Set of packages which should not be visible from the Gradle API ClassLoader.
+         */
+        Set<String> getUnexportedPackages();
+
+        /**
          * Set of resource prefixes which should be visible from the Gradle API ClassLoader.
          */
         Set<String> getExportedResourcePrefixes();
@@ -55,7 +60,7 @@ public interface GradleApiSpecProvider {
     }
 
     /**
-     * Empty {@link Spec} implementation to be extended by SPI implementors to isolate them
+     * Empty {@link Spec} implementation to be extended by SPI implementers to isolate them
      * from changes to the interface.
      */
     class SpecAdapter implements Spec {
@@ -67,6 +72,11 @@ public interface GradleApiSpecProvider {
 
         @Override
         public Set<String> getExportedPackages() {
+            return ImmutableSet.of();
+        }
+
+        @Override
+        public Set<String> getUnexportedPackages() {
             return ImmutableSet.of();
         }
 

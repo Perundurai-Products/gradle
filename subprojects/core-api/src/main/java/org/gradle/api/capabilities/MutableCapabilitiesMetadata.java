@@ -15,8 +15,6 @@
  */
 package org.gradle.api.capabilities;
 
-import org.gradle.api.Incubating;
-
 /**
  * Describes the capabilities of a component in a mutable way.
  * This interface can be used to adjust the capabilities of a published component via
@@ -24,7 +22,6 @@ import org.gradle.api.Incubating;
  *
  * @since 4.7
  */
-@Incubating
 public interface MutableCapabilitiesMetadata extends CapabilitiesMetadata {
 
     /**
@@ -34,6 +31,7 @@ public interface MutableCapabilitiesMetadata extends CapabilitiesMetadata {
      * @param group the group of the capability
      * @param name the name of the capability
      * @param version the version of the capability
+     * @since 4.7
      */
     void addCapability(String group, String name, String version);
 
@@ -41,12 +39,14 @@ public interface MutableCapabilitiesMetadata extends CapabilitiesMetadata {
      * Removes a capability.
      * @param group the group of the capability
      * @param name the name of the capability
+     * @since 4.7
      */
     void removeCapability(String group, String name);
 
     /**
      * Returns an immutable vew of the capabilities.
      * @return an immutable view of the capabilities
+     * @since 4.7
      */
     CapabilitiesMetadata asImmutable();
 }

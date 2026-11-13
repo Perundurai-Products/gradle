@@ -19,6 +19,7 @@ package org.gradle.api.internal.tasks.execution
 import org.gradle.api.DefaultTask
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 import org.gradle.integtests.fixtures.BuildOperationsFixture
+import org.gradle.integtests.fixtures.modes.UnsupportedWithConfigurationCache
 
 class ExecuteTaskBuildOperationTypeIntegrationTest extends AbstractIntegrationSpec {
 
@@ -26,7 +27,7 @@ class ExecuteTaskBuildOperationTypeIntegrationTest extends AbstractIntegrationSp
 
     def "emits operation for task execution"() {
         when:
-        buildScript """
+        buildFile """
             task t {}
         """
         succeeds "t"
@@ -44,12 +45,12 @@ class ExecuteTaskBuildOperationTypeIntegrationTest extends AbstractIntegrationSp
         op.result.skipMessage == "UP-TO-DATE"
         op.result.actionable == false
         op.result.originBuildInvocationId == null
-        op.result.upToDateMessages == null
+        op.result.upToDateMessages == []
     }
 
     def "emits operation result for failed task execution"() {
         when:
-        buildScript """
+        buildFile """
             task t {
                 doLast {
                     throw new RuntimeException("!")
@@ -64,16 +65,17 @@ class ExecuteTaskBuildOperationTypeIntegrationTest extends AbstractIntegrationSp
         }
 
         op.result.upToDateMessages == ["Task has not declared any outputs despite executing actions."]
-        op.failure == "org.gradle.api.tasks.TaskExecutionException: Execution failed for task ':t'."
+        op.failure == "org.gradle.api.tasks.TaskExecutionException: Execution failed for task ':t' (registered in build file 'build.gradle')."
     }
 
+    @UnsupportedWithConfigurationCache
     def "does not emit result for beforeTask failure"() {
         when:
-        buildScript """
+        buildFile """
             task t {
-                doLast {}   
+                doLast {}
             }
-            
+
             gradle.taskGraph.beforeTask {
                 throw new RuntimeException("!")
             }
@@ -86,16 +88,17 @@ class ExecuteTaskBuildOperationTypeIntegrationTest extends AbstractIntegrationSp
         }
 
         op.result == null
-        op.failure == "org.gradle.api.tasks.TaskExecutionException: Execution failed for task ':t'."
+        op.failure == "org.gradle.api.tasks.TaskExecutionException: Execution failed for task ':t' (registered in build file 'build.gradle')."
     }
 
+    @UnsupportedWithConfigurationCache
     def "does emit result for afterTask failure"() {
         when:
-        buildScript """
+        buildFile """
             task t {
-                doLast {}   
+                doLast {}
             }
-            
+
             gradle.taskGraph.afterTask {
                 throw new RuntimeException("!")
             }
@@ -108,18 +111,19 @@ class ExecuteTaskBuildOperationTypeIntegrationTest extends AbstractIntegrationSp
         }
 
         op.result != null
-        op.failure == "org.gradle.api.tasks.TaskExecutionException: Execution failed for task ':t'."
+        op.failure == "org.gradle.api.tasks.TaskExecutionException: Execution failed for task ':t' (registered in build file 'build.gradle')."
     }
 
+    @UnsupportedWithConfigurationCache
     def "afterTask failure is included with task failure"() {
         when:
-        buildScript """
+        buildFile """
             task t {
                 doLast {
                     throw new RuntimeException("!")
-                }   
+                }
             }
-            
+
             gradle.taskGraph.afterTask {
                 throw new RuntimeException("2")
             }
@@ -132,7 +136,7 @@ class ExecuteTaskBuildOperationTypeIntegrationTest extends AbstractIntegrationSp
         }
 
         op.result != null
-        op.failure == "org.gradle.api.tasks.TaskExecutionException: Execution failed for task ':t'."
+        op.failure == "org.gradle.api.tasks.TaskExecutionException: Execution failed for task ':t' (registered in build file 'build.gradle')."
     }
 
 }

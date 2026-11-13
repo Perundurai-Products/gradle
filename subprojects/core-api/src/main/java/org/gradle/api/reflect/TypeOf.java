@@ -17,17 +17,16 @@
 package org.gradle.api.reflect;
 
 import com.google.common.base.Function;
-import org.gradle.api.Incubating;
+import com.google.common.collect.ImmutableList;
 import org.gradle.internal.Cast;
 import org.gradle.model.internal.type.ModelType;
+import org.jspecify.annotations.Nullable;
 
-import javax.annotation.Nullable;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.util.List;
 
-import static com.google.common.collect.ImmutableList.copyOf;
 import static com.google.common.collect.Iterables.transform;
 import static java.util.Arrays.asList;
 
@@ -48,6 +47,7 @@ public abstract class TypeOf<T> {
      * @param type the {@literal Class}
      * @param <T> the parameterized type of the given {@literal Class}
      * @return the {@literal TypeOf} that captures the generic type of the given {@literal Class}
+     * @since 3.5
      */
     public static <T> TypeOf<T> typeOf(Class<T> type) {
         return new TypeOf<T>(
@@ -61,6 +61,7 @@ public abstract class TypeOf<T> {
      * @param type the {@literal Type}
      * @param <T> the parameterized type of the given {@literal Type}
      * @return the {@literal TypeOf} that captures the generic type of the given {@literal Type}
+     * @since 3.5
      */
     public static <T> TypeOf<T> typeOf(Type type) {
         return new TypeOf<T>(
@@ -78,6 +79,7 @@ public abstract class TypeOf<T> {
      * @param parameterizedType the parameterized type from which to construct the new parameterized type
      * @param typeArguments the arguments with which to construct the new parameterized type
      * @see #isParameterized()
+     * @since 3.5
      */
     public static TypeOf<?> parameterizedTypeOf(TypeOf<?> parameterizedType, TypeOf<?>... typeArguments) {
         ModelType<?> parameterizedModelType = parameterizedType.type;
@@ -93,6 +95,11 @@ public abstract class TypeOf<T> {
         this.type = type;
     }
 
+    /**
+     * Creates a new {@code TypeOf}.
+     *
+     * @since 3.5
+     */
     protected TypeOf() {
         this.type = captureTypeArgument();
     }
@@ -101,6 +108,7 @@ public abstract class TypeOf<T> {
      * Queries whether this object represents a simple (non-composite) type, not an array and not a generic type.
      *
      * @return true if this object represents a simple type.
+     * @since 3.5
      */
     public boolean isSimple() {
         return type.isClass()
@@ -111,6 +119,7 @@ public abstract class TypeOf<T> {
      * Queries whether this object represents a synthetic type as defined by {@link Class#isSynthetic()}.
      *
      * @return true if this object represents a synthetic type.
+     * @since 3.5
      */
     public boolean isSynthetic() {
         return rawClass().isSynthetic();
@@ -121,6 +130,7 @@ public abstract class TypeOf<T> {
      *
      * @see java.lang.reflect.Modifier#isPublic(int)
      * @see Class#getModifiers()
+     * @since 3.5
      */
     public boolean isPublic() {
         return Modifier.isPublic(getModifiers());
@@ -135,6 +145,7 @@ public abstract class TypeOf<T> {
      *
      * @return true if this object represents an array.
      * @see #getComponentType()
+     * @since 3.5
      */
     public boolean isArray() {
         return type.isGenericArray()
@@ -146,6 +157,7 @@ public abstract class TypeOf<T> {
      *
      * @return null if this object does not represent an array type.
      * @see #isArray()
+     * @since 3.5
      */
     @Nullable
     public TypeOf<?> getComponentType() {
@@ -160,6 +172,7 @@ public abstract class TypeOf<T> {
      * @return true if this object represents a parameterized type.
      * @see #getParameterizedTypeDefinition()
      * @see #getActualTypeArguments()
+     * @since 3.5
      */
     public boolean isParameterized() {
         return type.isParameterized();
@@ -169,6 +182,7 @@ public abstract class TypeOf<T> {
      * Returns an object that represents the type from which this parameterized type was constructed.
      *
      * @see #isParameterized()
+     * @since 3.5
      */
     public TypeOf<?> getParameterizedTypeDefinition() {
         return typeOf(type.getRawType());
@@ -178,6 +192,7 @@ public abstract class TypeOf<T> {
      * Returns the list of type arguments used in the construction of this parameterized type.
      *
      * @see #isParameterized()
+     * @since 3.5
      */
     public List<TypeOf<?>> getActualTypeArguments() {
         return typeOfListFrom(type.getTypeVariables());
@@ -189,6 +204,7 @@ public abstract class TypeOf<T> {
      *
      * @return true if this object represents a wildcard type expression.
      * @see #getUpperBound()
+     * @since 3.5
      */
     public boolean isWildcard() {
         return type.isWildcard();
@@ -198,6 +214,7 @@ public abstract class TypeOf<T> {
      * Returns the first declared upper-bound of the wildcard type expression represented by this type.
      *
      * @return null if no upper-bound has been explicitly declared.
+     * @since 3.5
      */
     @Nullable
     public TypeOf<?> getUpperBound() {
@@ -205,10 +222,22 @@ public abstract class TypeOf<T> {
     }
 
     /**
+     * Returns the first declared lower-bound of the wildcard type expression represented by this type.
+     *
+     * @return null if no lower-bound has been explicitly declared.
+     * @since 6.0
+     */
+    @Nullable
+    public TypeOf<?> getLowerBound() {
+        return nullableTypeOf(type.getLowerBound());
+    }
+
+    /**
      * Is this type assignable from the given type?
      *
      * @param type the given type
      * @return {@literal true} if this type is assignable from the given type, {@literal false otherwise}
+     * @since 3.5
      */
     public final boolean isAssignableFrom(TypeOf<?> type) {
         return this.type.isAssignableFrom(type.type);
@@ -219,6 +248,7 @@ public abstract class TypeOf<T> {
      *
      * @param type the given type
      * @return {@literal true} if this type is assignable from the given type, {@literal false otherwise}
+     * @since 3.5
      */
     public final boolean isAssignableFrom(Type type) {
         return this.type.isAssignableFrom(ModelType.of(type));
@@ -228,9 +258,20 @@ public abstract class TypeOf<T> {
      * Simple name.
      *
      * @return this type's simple name
+     * @since 3.5
      */
     public String getSimpleName() {
         return type.getDisplayName();
+    }
+
+    /**
+     * Fully Qualified name.
+     *
+     * @return this type's FQN
+     * @since 7.4
+     */
+    public String getFullyQualifiedName() {
+        return type.getName();
     }
 
     /**
@@ -246,10 +287,9 @@ public abstract class TypeOf<T> {
      * </p>
      *
      * @since 5.0
-     * 
+     *
      * @return Underlying Java Class of this type.
      */
-    @Incubating
     public Class<T> getConcreteClass() {
         return type.getConcreteClass();
     }
@@ -331,6 +371,6 @@ public abstract class TypeOf<T> {
     }
 
     private static <T, U> List<U> map(Iterable<T> iterable, Function<T, U> function) {
-        return copyOf(transform(iterable, function));
+        return ImmutableList.copyOf(transform(iterable, function));
     }
 }

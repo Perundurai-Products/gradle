@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 the original author or authors.
+ * Copyright 2019 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,69 +16,32 @@
 
 package org.gradle.api.internal.project.taskfactory;
 
-import com.google.common.collect.ImmutableCollection;
 import org.gradle.api.Task;
-import org.gradle.api.internal.changedetection.changes.ChangesOnlyIncrementalTaskInputs;
-import org.gradle.api.internal.changedetection.changes.RebuildIncrementalTaskInputs;
-import org.gradle.api.internal.changedetection.changes.StatefulIncrementalTaskInputs;
-import org.gradle.api.internal.tasks.ContextAwareTaskAction;
-import org.gradle.api.internal.tasks.TaskExecutionContext;
-import org.gradle.api.tasks.incremental.IncrementalTaskInputs;
-import org.gradle.internal.change.Change;
-import org.gradle.internal.execution.history.changes.ExecutionStateChanges;
-import org.gradle.internal.fingerprint.CurrentFileCollectionFingerprint;
-import org.gradle.internal.reflect.Instantiator;
-import org.gradle.internal.reflect.JavaReflectionUtil;
+import org.gradle.internal.execution.history.changes.InputChangesInternal;
+import org.gradle.internal.reflect.JavaMethod;
+import org.gradle.work.InputChanges;
 
 import java.lang.reflect.Method;
-import java.util.function.Function;
-import java.util.function.Supplier;
 
-class IncrementalTaskAction extends StandardTaskAction implements ContextAwareTaskAction {
+public class IncrementalTaskAction extends StandardTaskAction {
+    private InputChangesInternal inputChanges;
 
-    private final Instantiator instantiator;
-    private TaskExecutionContext context;
-
-    public IncrementalTaskAction(Instantiator instantiator, Class<? extends Task> type, Method method) {
+    public IncrementalTaskAction(Class<? extends Task> type, Method method) {
         super(type, method);
-        this.instantiator = instantiator;
-    }
-
-    public void contextualise(TaskExecutionContext context) {
-        this.context = context;
     }
 
     @Override
-    public void releaseContext() {
-        this.context = null;
+    public void setInputChanges(InputChangesInternal inputChanges) {
+        this.inputChanges = inputChanges;
     }
 
-    protected void doExecute(final Task task, String methodName) {
-        IncrementalTaskInputs incrementalInputs = context.getExecutionStateChanges()
-            .map(new Function<ExecutionStateChanges, StatefulIncrementalTaskInputs>() {
-                @Override
-                public StatefulIncrementalTaskInputs apply(ExecutionStateChanges changes) {
-                    return changes.isRebuildRequired()
-                        ? createRebuildInputs(task)
-                        : createIncrementalInputs(changes.getInputFilesChanges());
-                }
-            }).orElseGet(new Supplier<StatefulIncrementalTaskInputs>() {
-                @Override
-                public StatefulIncrementalTaskInputs get() {
-                    return createRebuildInputs(task);
-                }
-            });
-
-        context.setTaskExecutedIncrementally(incrementalInputs.isIncremental());
-        JavaReflectionUtil.method(task, Object.class, methodName, IncrementalTaskInputs.class).invoke(task, incrementalInputs);
+    @Override
+    public void clearInputChanges() {
+        this.inputChanges = null;
     }
 
-    private ChangesOnlyIncrementalTaskInputs createIncrementalInputs(Iterable<Change> inputFilesChanges) {
-        return instantiator.newInstance(ChangesOnlyIncrementalTaskInputs.class, inputFilesChanges);
-    }
-
-    private RebuildIncrementalTaskInputs createRebuildInputs(Task task) {
-        ImmutableCollection<CurrentFileCollectionFingerprint> currentInputs = context.getBeforeExecutionState().get().getInputFileProperties().values();
-        return instantiator.newInstance(RebuildIncrementalTaskInputs.class, task, currentInputs);
+    @Override
+    protected void doExecute(Task task, String methodName) {
+        JavaMethod.of(task, Object.class, methodName, InputChanges.class).invoke(task, inputChanges);
     }
 }

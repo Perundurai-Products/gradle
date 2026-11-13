@@ -26,6 +26,8 @@ import java.lang.annotation.Target;
  * <p>Marks a property as specifying one or more output directories for a task.</p>
  *
  * <p>This annotation should be attached to the getter method in Java or the property in Groovy.
+ * In Kotlin, use the {@code get:} use-site target to attach it to the property getter, for example {@code @get:OutputDirectories}.
+ * This also works on abstract properties, where the annotation without a use-site target does not compile.
  * Annotations on setters or just the field in Java are ignored.</p>
  *
  * <p>This will cause the task to be considered out-of-date when the directory paths or task
@@ -39,6 +41,7 @@ import java.lang.annotation.Target;
  * Otherwise the given directories will be evaluated as per {@link org.gradle.api.Project#files(Object...)}.
  * Task output caching will be disabled if the outputs contain file trees.
  * </p>
+ * @since 1.0
  */
 @Documented
 @Retention(RetentionPolicy.RUNTIME)

@@ -19,6 +19,7 @@ package org.gradle.api.internal.initialization
 
 import org.gradle.api.internal.initialization.loadercache.DefaultClassLoaderCache
 import org.gradle.api.internal.initialization.loadercache.FileClasspathHasher
+import org.gradle.initialization.ClassLoaderScopeRegistryListener
 import org.gradle.internal.classloader.CachingClassLoader
 import org.gradle.internal.classloader.DefaultHashingClassLoaderFactory
 import org.gradle.internal.classpath.ClassPath
@@ -27,6 +28,11 @@ import org.gradle.test.fixtures.file.TestFile
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.junit.Rule
 import spock.lang.Specification
+
+import java.util.concurrent.Callable
+import java.util.concurrent.CyclicBarrier
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 class DefaultClassLoaderScopeTest extends Specification {
 
@@ -37,13 +43,13 @@ class DefaultClassLoaderScopeTest extends Specification {
     DefaultClassLoaderCache classLoaderCache = new DefaultClassLoaderCache(new DefaultHashingClassLoaderFactory(classpathHasher), classpathHasher)
 
     @Rule
-    TestNameTestDirectoryProvider testDirectoryProvider = new TestNameTestDirectoryProvider()
+    TestNameTestDirectoryProvider testDirectoryProvider = new TestNameTestDirectoryProvider(getClass())
 
     def setup() {
         file("root/root") << "root"
         def rootClassLoader = new URLClassLoader(classPath("root").asURLArray, getClass().classLoader.parent)
-        root = new RootClassLoaderScope(rootClassLoader, rootClassLoader, classLoaderCache)
-        scope = root.createChild("child")
+        root = new RootClassLoaderScope("root", rootClassLoader, rootClassLoader, classLoaderCache, Stub(ClassLoaderScopeRegistryListener))
+        scope = root.createChild("child", null)
     }
 
     TestFile file(String path) {
@@ -141,7 +147,7 @@ class DefaultClassLoaderScopeTest extends Specification {
         scope.exportClassLoader.is root.exportClassLoader
     }
 
-    def "locked scope with local and exports exports custom ClassLoader to children"() {
+    def "locked scope with local and exports custom ClassLoader to children"() {
         when:
         file("local/local") << "bar"
         file("export/export") << "bar"
@@ -156,7 +162,8 @@ class DefaultClassLoaderScopeTest extends Specification {
         scope.exportClassLoader instanceof URLClassLoader
         scope.exportClassLoader.parent == root.exportClassLoader
 
-        scope.localClassLoader instanceof CachingClassLoader
+        scope.localClassLoader instanceof URLClassLoader
+        scope.localClassLoader.parent == scope.exportClassLoader
         scope.localClassLoader.getResource("export").text == "bar"
         scope.localClassLoader.getResource("local").text == "bar"
     }
@@ -245,7 +252,7 @@ class DefaultClassLoaderScopeTest extends Specification {
         file("export/export") << "bar"
         scope.local(classPath("local"))
         scope.export(classPath("export"))
-        def child = scope.lock().createChild("child").lock()
+        def child = scope.lock().createChild("child", null).lock()
 
         then:
         child.localClassLoader.getResource("root").text == "root"
@@ -262,17 +269,17 @@ class DefaultClassLoaderScopeTest extends Specification {
         def c2 = classPath("c2")
 
         when:
-        def scope1 = root.createChild("child1").export(c1).local(c2).lock()
+        def scope1 = root.createChild("child1", null).export(c1).local(c2).lock()
         scope1.exportClassLoader
 
-        def scope2 = root.createChild("child2").export(c1).local(c2).lock()
+        def scope2 = root.createChild("child2", null).export(c1).local(c2).lock()
         scope2.exportClassLoader
 
         then:
         scope1.exportClassLoader.is scope2.exportClassLoader
 
         when:
-        def child = scope1.createChild("child").export(c1).local(c2).lock()
+        def child = scope1.createChild("child", null).export(c1).local(c2).lock()
         child.exportClassLoader
 
         then:
@@ -299,31 +306,31 @@ class DefaultClassLoaderScopeTest extends Specification {
         def c2 = classPath("c2")
 
         when:
-        root.createChild("c").local(c1).export(c2).lock().exportClassLoader
+        root.createChild("c", null).local(c1).export(c2).lock().exportClassLoader
 
         then:
         classLoaderCache.size() == 2
 
         when:
-        root.createChild("d").local(c1).export(c2).lock().exportClassLoader
+        root.createChild("d", null).local(c1).export(c2).lock().exportClassLoader
 
         then:
         classLoaderCache.size() == 2
 
         when:
-        root.createChild("c").local(c1).lock().exportClassLoader
+        root.createChild("c", null).local(c1).lock().exportClassLoader
 
         then:
-        classLoaderCache.size() == 2
+        classLoaderCache.size() == 3 // c has a local, d has export and local
 
         when:
-        root.createChild("d").lock().exportClassLoader
+        root.createChild("d", null).lock().exportClassLoader
 
         then:
         classLoaderCache.size() == 1
 
         when:
-        root.createChild("c").lock().exportClassLoader
+        root.createChild("c", null).lock().exportClassLoader
 
         then:
         classLoaderCache.size() == 0
@@ -415,6 +422,57 @@ class DefaultClassLoaderScopeTest extends Specification {
         and:
         !scope.defines(exportLoader.loadClass(TestClass1.name))
         !scope.defines(exportLoader.loadClass(TestClass2.name))
+    }
+
+    def "concurrent queries of a #description scope all observe the same fully built loaders"() {
+        given:
+        def threads = 8
+        def barrier = new CyclicBarrier(threads)
+        def executor = Executors.newFixedThreadPool(threads)
+        scope.export(classPath("export"))
+        scope.local(classPath("local"))
+        if (locked) {
+            scope.lock()
+        }
+
+        when: "many threads race to trigger the lazy initialization"
+        def results = executor.invokeAll((1..threads).collect { i ->
+            { ->
+                barrier.await(30, TimeUnit.SECONDS)
+                def export
+                def local
+                // Alternate which accessor triggers initialization
+                if (i % 2 == 0) {
+                    export = scope.exportClassLoader
+                    local = scope.localClassLoader
+                } else {
+                    local = scope.localClassLoader
+                    export = scope.exportClassLoader
+                }
+                [export, local]
+            } as Callable
+        })*.get(30, TimeUnit.SECONDS)
+
+        def exports = results*.first()
+        def locals = results*.last()
+
+        then: "no thread ever observes a partially initialized scope"
+        exports.size == threads
+        locals.size == threads
+        exports.every { it != null }
+        locals.every { it != null }
+
+        and: "every thread observes the very same loader instances"
+        exports.every { it === exports.first() }
+        locals.every { it === locals.first() }
+
+        cleanup:
+        executor.shutdownNow()
+
+        where:
+        description   | locked
+        "locked"      | true
+        "unlocked"    | false
     }
 
     void copyTo(Class<?> clazz, TestFile destDir) {

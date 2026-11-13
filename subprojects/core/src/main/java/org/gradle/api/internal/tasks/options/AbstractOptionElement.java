@@ -18,7 +18,6 @@ package org.gradle.api.internal.tasks.options;
 
 import org.gradle.api.tasks.options.Option;
 import org.gradle.internal.reflect.JavaMethod;
-import org.gradle.internal.reflect.JavaReflectionUtil;
 import org.gradle.internal.typeconversion.NotationParser;
 import org.gradle.model.internal.type.ModelType;
 
@@ -35,12 +34,13 @@ abstract class AbstractOptionElement implements OptionElement {
         this(readDescription(option, optionName, declaringClass), optionName, optionType);
     }
 
-    private AbstractOptionElement(String description, String optionName, Class<?> optionType) {
+    protected AbstractOptionElement(String description, String optionName, Class<?> optionType) {
         this.description = description;
         this.optionName = optionName;
         this.optionType = optionType;
     }
 
+    @Override
     public Class<?> getOptionType() {
         return optionType;
     }
@@ -65,14 +65,16 @@ abstract class AbstractOptionElement implements OptionElement {
     }
 
     protected Object invokeMethod(Object object, Method method, Object... parameterValues) {
-        final JavaMethod<Object, Object> javaMethod = JavaReflectionUtil.method(Object.class, method);
+        final JavaMethod<Object, Object> javaMethod = JavaMethod.of(Object.class, method);
         return javaMethod.invoke(object, parameterValues);
     }
 
+    @Override
     public String getOptionName() {
         return optionName;
     }
 
+    @Override
     public String getDescription() {
         return description;
     }
@@ -83,15 +85,6 @@ abstract class AbstractOptionElement implements OptionElement {
         } catch (OptionValidationException ex) {
             throw new OptionValidationException(String.format("Option '%s' cannot be cast to type '%s' in class '%s'.",
                     optionName, optionType.getName(), declaringClass.getName()));
-        }
-    }
-
-    protected static Class<?> calculateOptionType(Class<?> type) {
-        //we don't want to support "--flag true" syntax
-        if (type == Boolean.class || type == Boolean.TYPE) {
-            return Void.TYPE;
-        } else {
-            return type;
         }
     }
 }

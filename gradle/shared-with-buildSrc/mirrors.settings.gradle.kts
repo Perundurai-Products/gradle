@@ -14,55 +14,73 @@
  * limitations under the License.
  */
 
-val originalUrls: Map<String, String> = mapOf(
-    "jcenter" to "https://jcenter.bintray.com/",
-    "mavencentral" to "https://repo.maven.apache.org/maven2/",
-    "google" to "https://dl.google.com/dl/android/maven2/",
-    "gradle" to "https://repo.gradle.org/gradle/repo",
-    "gradleplugins" to "https://plugins.gradle.org/m2",
-    "gradlejavascript" to "https://repo.gradle.org/gradle/javascript-public",
-    "gradle-libs" to "https://repo.gradle.org/gradle/libs",
-    "gradle-releases" to "https://repo.gradle.org/gradle/libs-releases",
-    "gradle-snapshots" to "https://repo.gradle.org/gradle/libs-snapshots",
-    "kotlinx" to "https://kotlin.bintray.com/kotlinx/",
-    "kotlineap" to "https://dl.bintray.com/kotlin/kotlin-eap/"
-)
 
-val mirrorUrls: Map<String, String> =
-    System.getenv("REPO_MIRROR_URLS")?.split(',')?.associate { nameToUrl ->
-        val (name, url) = nameToUrl.split(':', limit = 2)
-        name to url
-    } ?: emptyMap()
+class Helper(private val providers: ProviderFactory) {
+    val originalUrls: Map<String, String> = mapOf(
+        "mavencentral" to "https://repo.maven.apache.org/maven2/",
+        "google" to "https://dl.google.com/dl/android/maven2/",
+        "gradle" to "https://repo.gradle.org/gradle/repo",
+        "gradle-prod-plugins" to "https://plugins.gradle.org/m2",
+        "gradlejavascript" to "https://repo.gradle.org/gradle/javascript-public",
+        "gradle-public" to "https://repo.gradle.org/gradle/public",
+        "gradle-enterprise-rc" to "https://repo.gradle.org/gradle/enterprise-libs-release-candidates",
+        "android-studio-installers" to "https://redirector.gvt1.com/edgedl/android/studio",
+        "jetbrains-ide-installers" to "https://download.jetbrains.com",
+        "kotlindev" to "https://packages.jetbrains.team/maven/p/kt/dev",
+    )
 
-fun withMirrors(handler: RepositoryHandler) {
-    if ("CI" !in System.getenv()) {
-        return
-    }
-    handler.all {
-        if (this is MavenArtifactRepository) {
-            originalUrls.forEach { name, originalUrl ->
-                if (normalizeUrl(originalUrl) == normalizeUrl(this.url.toString()) && mirrorUrls.containsKey(name)) {
-                    this.setUrl(mirrorUrls.get(name))
+    val mirrorUrls: Map<String, String> =
+        providers.environmentVariable("REPO_MIRROR_URLS").orNull
+            ?.ifBlank { null }
+            ?.split(',')
+            ?.associate { nameToUrl ->
+                val (name, url) = nameToUrl.split(':', limit = 2)
+                name to url
+            }
+            ?: emptyMap()
+
+    fun ignoreMirrors() = providers.environmentVariable("IGNORE_MIRROR").orNull?.toBoolean() == true
+
+    fun isCI() = providers.environmentVariable("CI").isPresent()
+
+    fun withMirrors(handler: RepositoryHandler) {
+        if (!isCI() || ignoreMirrors()) {
+            return
+        }
+        handler.all {
+            if (this is UrlArtifactRepository) {
+                // see https://github.com/gradle/gradle/issues/37612
+                @Suppress("USELESS_ELVIS")
+                val currentUrl = this.url?.toString() ?: return@all
+                originalUrls.forEach { name, originalUrl ->
+                    if (normalizeUrl(originalUrl) == normalizeUrl(currentUrl) && mirrorUrls.containsKey(name)) {
+                        mirrorUrls.get(name)?.let { this.setUrl(it) }
+                    }
                 }
             }
         }
     }
-}
 
-fun normalizeUrl(url: String): String {
-    val result = url.replace("https://", "http://")
-    return if (result.endsWith("/")) result else result + "/"
-}
-
-gradle.allprojects {
-    buildscript.configurations["classpath"].incoming.beforeResolve {
-        withMirrors(buildscript.repositories)
+    fun normalizeUrl(url: String): String {
+        val result = url.replace("https://", "http://")
+        return if (result.endsWith("/")) result else "$result/"
     }
-    afterEvaluate {
+}
+
+with(Helper(providers)) {
+    gradle.lifecycle.beforeProject {
+        buildscript.configurations["classpath"].incoming.beforeResolve {
+            withMirrors(buildscript.repositories)
+        }
+        // Repositories are configured before they are added, so the live callback in
+        // withMirrors sees their final URLs without waiting for the project to evaluate.
         withMirrors(repositories)
     }
-}
 
-gradle.settingsEvaluated {
-    withMirrors(settings.pluginManagement.repositories)
+    gradle.settingsEvaluated {
+        withMirrors(settings.pluginManagement.repositories)
+        // Repositories declared here are never project repositories, so the beforeProject hook
+        // above does not see them. build-logic-settings declares mavenCentral() this way.
+        withMirrors(settings.dependencyResolutionManagement.repositories)
+    }
 }

@@ -21,32 +21,28 @@ import org.gradle.launcher.exec.RunBuildBuildOperationType
 
 class BuildOperationNotificationContinuousBuildIntegrationTest extends AbstractContinuousIntegrationTest {
 
-    def notifications = new BuildOperationNotificationFixture(testDirectory)
+    def notifications = new BuildOperationNotificationFixture(executer, testDirectoryProvider)
 
     def "obtains notifications about init scripts"() {
         when:
-        buildScript """
-           ${notifications.registerListener()}
+        buildFile """
             apply plugin: "java"
-        """
-
-        buildFile << """
         """
         file("src/main/java/Thing.java") << "class Thing {}"
 
         then:
         succeeds("build")
-        def run1 = notifications.op(RunBuildBuildOperationType.Details)
 
         when:
         file("src/main/java/Thing.java").text = "class Thing {\n\n}"
 
         then:
-        succeeds()
-        def run2 = notifications.op(RunBuildBuildOperationType.Details)
+        buildTriggeredAndSucceeded()
+        def runs = notifications.ops(RunBuildBuildOperationType.Details)
 
         and:
-        run1.id != run2.id
+        runs.size() == 2
+        runs[0].id != runs[1].id
     }
 
 }

@@ -15,7 +15,7 @@
  */
 package org.gradle.api.capabilities;
 
-import org.gradle.api.Incubating;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Represents a capability. Capabilities are versioned. Only one component for a specific capability
@@ -23,9 +23,24 @@ import org.gradle.api.Incubating;
  *
  * @since 4.7
  */
-@Incubating
 public interface Capability {
+    /**
+     * Returns the group.
+     *
+     * @since 4.7
+     */
     String getGroup();
+    /**
+     * Returns the name.
+     *
+     * @since 4.7
+     */
     String getName();
+    /**
+     * Returns the version.
+     *
+     * @since 4.7
+     */
+    @Nullable
     String getVersion();
 }

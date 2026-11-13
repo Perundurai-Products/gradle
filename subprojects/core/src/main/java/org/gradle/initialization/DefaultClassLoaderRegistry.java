@@ -18,12 +18,15 @@ package org.gradle.initialization;
 
 import org.gradle.api.internal.ClassPathRegistry;
 import org.gradle.internal.classloader.FilteringClassLoader;
+import org.gradle.internal.classpath.intercept.CallInterceptorRegistry;
 import org.gradle.internal.reflect.Instantiator;
 
 public class DefaultClassLoaderRegistry implements ClassLoaderRegistry {
     private final ClassLoader apiOnlyClassLoader;
     private final ClassLoader apiAndPluginsClassLoader;
     private final ClassLoader pluginsClassLoader;
+    private final FilteringClassLoader.Spec gradleApiSpec;
+    private final MixInLegacyTypesClassLoader.Spec workerExtensionSpec;
     private final Instantiator instantiator;
 
     public DefaultClassLoaderRegistry(ClassPathRegistry classPathRegistry, LegacyTypesSupport legacyTypesSupport, Instantiator instantiator) {
@@ -31,7 +34,12 @@ public class DefaultClassLoaderRegistry implements ClassLoaderRegistry {
         ClassLoader runtimeClassLoader = getClass().getClassLoader();
         this.apiOnlyClassLoader = restrictToGradleApi(runtimeClassLoader);
         this.pluginsClassLoader = new MixInLegacyTypesClassLoader(runtimeClassLoader, classPathRegistry.getClassPath("GRADLE_EXTENSIONS"), legacyTypesSupport);
-        this.apiAndPluginsClassLoader = restrictToGradleApi(pluginsClassLoader);
+        this.gradleApiSpec = apiSpecFor(pluginsClassLoader);
+        this.workerExtensionSpec = new MixInLegacyTypesClassLoader.Spec("legacy-mixin-loader", classPathRegistry.getClassPath("GRADLE_WORKER_EXTENSIONS").getAsURLs());
+        this.apiAndPluginsClassLoader = restrictTo(gradleApiSpec, pluginsClassLoader);
+
+        // Load instrumentation classes from Plugin class loader for instrumentation
+        CallInterceptorRegistry.loadCallInterceptors(pluginsClassLoader);
     }
 
     private ClassLoader restrictToGradleApi(ClassLoader classLoader) {
@@ -57,6 +65,9 @@ public class DefaultClassLoaderRegistry implements ClassLoaderRegistry {
         for (String packageName : apiAggregate.getExportedPackages()) {
             apiSpec.allowPackage(packageName);
         }
+        for (String packageName : apiAggregate.getUnexportedPackages()) {
+            apiSpec.disallowPackage(packageName);
+        }
         return apiSpec;
     }
 
@@ -78,5 +89,15 @@ public class DefaultClassLoaderRegistry implements ClassLoaderRegistry {
     @Override
     public ClassLoader getGradleCoreApiClassLoader() {
         return apiOnlyClassLoader;
+    }
+
+    @Override
+    public FilteringClassLoader.Spec getGradleApiFilterSpec() {
+        return new FilteringClassLoader.Spec(gradleApiSpec);
+    }
+
+    @Override
+    public MixInLegacyTypesClassLoader.Spec getGradleWorkerExtensionSpec() {
+        return workerExtensionSpec;
     }
 }

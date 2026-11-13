@@ -19,7 +19,6 @@ package org.gradle.api.internal.file.copy
 import org.gradle.api.Action
 import org.gradle.api.InvalidUserDataException
 import org.gradle.api.file.FileCopyDetails
-import org.gradle.api.file.FileTree
 import org.gradle.api.file.RelativePath
 import org.gradle.api.internal.file.TestFiles
 import org.gradle.internal.Actions
@@ -28,9 +27,7 @@ import spock.lang.Specification
 
 class CopySpecMatchingTest extends Specification {
 
-    DefaultCopySpec copySpec = new DefaultCopySpec(TestFiles.resolver(), TestUtil.instantiatorFactory().decorateLenient())
-
-    FileTree fileTree = Mock()
+    DefaultCopySpec copySpec = new DefaultCopySpec(TestFiles.fileCollectionFactory(), TestUtil.propertyFactory(), TestUtil.instantiatorFactory().decorateLenient(), TestFiles.patternSetFactory)
 
     def canMatchFiles() {
         given:
@@ -87,8 +84,8 @@ class CopySpecMatchingTest extends Specification {
 
     def canNotMatchFiles() {
         given:
-        FileCopyDetails details1 = details('path/abc.txt');
-        FileCopyDetails details2 = details('path/bcd.txt');
+        FileCopyDetails details1 = details('path/abc.txt')
+        FileCopyDetails details2 = details('path/bcd.txt')
 
         Action matchingAction = Mock()
 
@@ -106,9 +103,9 @@ class CopySpecMatchingTest extends Specification {
 
     def canNotMatchFilesWithMultiplePatterns() {
         given:
-        FileCopyDetails details1 = details('path/abc.txt');
-        FileCopyDetails details2 = details('path/bcd.txt');
-        FileCopyDetails details3 = details('path/cde.txt');
+        FileCopyDetails details1 = details('path/abc.txt')
+        FileCopyDetails details2 = details('path/bcd.txt')
+        FileCopyDetails details3 = details('path/cde.txt')
 
         Action matchingAction = Mock()
 
@@ -140,7 +137,7 @@ class CopySpecMatchingTest extends Specification {
 
     def matchingSpecInherited() {
         given:
-        DefaultCopySpec childSpec = new DefaultCopySpec(TestFiles.resolver(), TestUtil.instantiatorFactory().decorateLenient())
+        DefaultCopySpec childSpec = new DefaultCopySpec(TestFiles.fileCollectionFactory(), TestUtil.propertyFactory(), TestUtil.instantiatorFactory().decorateLenient(), TestFiles.patternSetFactory)
         CopySpecResolver childResolver = childSpec.buildResolverRelativeToParent(copySpec.buildRootResolver())
 
         when:

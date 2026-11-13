@@ -17,16 +17,14 @@
 package org.gradle.api.plugins;
 
 import org.gradle.api.Action;
-import org.gradle.api.Incubating;
 import org.gradle.api.UnknownDomainObjectException;
 import org.gradle.api.reflect.TypeOf;
 import org.gradle.internal.HasInternalProtocol;
-
-import javax.annotation.Nullable;
-import java.util.Map;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Allows adding 'namespaced' DSL extensions to a target object.
+ * @since 1.0
  */
 @HasInternalProtocol
 public interface ExtensionContainer {
@@ -83,6 +81,7 @@ public interface ExtensionContainer {
      * @param name The name for the extension
      * @param extension Any object
      * @throws IllegalArgumentException When an extension with the given name already exists
+     * @since 1.0
      */
     void add(String name, Object extension);
 
@@ -137,24 +136,15 @@ public interface ExtensionContainer {
      * @return The created instance
      * @throws IllegalArgumentException When an extension with the given name already exists.
      * @see #add(String, Object)
+     * @since 1.0
      */
     <T> T create(String name, Class<T> type, Object... constructionArguments);
-
-    /**
-     * Provides access to all known extensions types.
-     *
-     * @return A map of extensions public types, keyed by name
-     * @since 3.5
-     */
-    @Deprecated
-    Map<String, TypeOf<?>> getSchema();
 
     /**
      * Provides access to the schema of all known extensions.
      *
      * @since 4.5
      */
-    @Incubating
     ExtensionsSchema getExtensionsSchema();
 
     /**
@@ -163,6 +153,7 @@ public interface ExtensionContainer {
      * @param type extension type
      * @return extension, never null
      * @throws UnknownDomainObjectException When the given extension is not found.
+     * @since 1.0
      */
     <T> T getByType(Class<T> type) throws UnknownDomainObjectException;
 
@@ -181,6 +172,7 @@ public interface ExtensionContainer {
      *
      * @param type extension type
      * @return extension or null
+     * @since 1.0
      */
     @Nullable
     <T> T findByType(Class<T> type);
@@ -201,6 +193,7 @@ public interface ExtensionContainer {
      * @param name extension name
      * @return extension, never null
      * @throws UnknownDomainObjectException When the given extension is not found.
+     * @since 1.0
      */
     Object getByName(String name) throws UnknownDomainObjectException;
 
@@ -209,6 +202,7 @@ public interface ExtensionContainer {
      *
      * @param name extension name
      * @return extension or null
+     * @since 1.0
      */
     @Nullable
     Object findByName(String name);
@@ -219,6 +213,7 @@ public interface ExtensionContainer {
      * @param type extension type
      * @param action the configure action
      * @throws UnknownDomainObjectException if no extension is found.
+     * @since 1.5
      */
     <T> void configure(Class<T> type, Action<? super T> action);
 
@@ -240,15 +235,20 @@ public interface ExtensionContainer {
      * @throws UnknownDomainObjectException if no extension is found.
      * @since 4.0
      */
-    @Incubating
     <T> void configure(String name, Action<? super T> action);
 
     /**
      * The extra properties extension in this extension container.
      *
-     * This extension is always present in the container, with the name “ext”.
+     * This extension is always present in the container, with the name "ext".
+     * When this container belongs to a {@link org.gradle.api.Project}, the extension also exposes Gradle properties
+     * loaded for that project that are not mapped directly to a {@code Project} property. Values set explicitly on
+     * the extension take precedence over Gradle properties with the same name.
      *
      * @return The extra properties extension in this extension container.
+     * @see ExtraPropertiesExtension
+     * @see org.gradle.api.Project#findProperty(String)
+     * @since 1.0
      */
     ExtraPropertiesExtension getExtraProperties();
 }

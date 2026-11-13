@@ -17,7 +17,7 @@
 package org.gradle.internal.operations.notify;
 
 import org.gradle.BuildListener;
-import org.gradle.api.Project;
+import org.gradle.api.initialization.Settings;
 import org.gradle.api.internal.InternalAction;
 import org.gradle.api.invocation.Gradle;
 import org.gradle.internal.InternalBuildAdapter;
@@ -29,10 +29,16 @@ import org.gradle.internal.operations.OperationFinishEvent;
 import org.gradle.internal.operations.OperationIdentifier;
 import org.gradle.internal.operations.OperationProgressEvent;
 import org.gradle.internal.operations.OperationStartEvent;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import it.unimi.dsi.fastutil.longs.LongSet;
+import it.unimi.dsi.fastutil.longs.LongSets;
+
 import java.util.Map;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentHashMap;
@@ -40,7 +46,8 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
-public class BuildOperationNotificationBridge {
+@ServiceScope(Scope.CrossBuildSession.class)
+public class BuildOperationNotificationBridge implements BuildOperationNotificationListenerRegistrar {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(BuildOperationNotificationBridge.class);
 
@@ -48,8 +55,8 @@ public class BuildOperationNotificationBridge {
     private final ListenerManager listenerManager;
 
     private class State {
-        private ReplayAndAttachListener replayAndAttachListener = new ReplayAndAttachListener();
-        private BuildOperationListener buildOperationListener = new Adapter(replayAndAttachListener);
+        private final ReplayAndAttachListener replayAndAttachListener = new ReplayAndAttachListener();
+        private final BuildOperationListener buildOperationListener = new Adapter(replayAndAttachListener);
         private BuildOperationNotificationListener notificationListener;
 
         private void assignSingleListener(BuildOperationNotificationListener notificationListener) {
@@ -88,46 +95,19 @@ public class BuildOperationNotificationBridge {
         }
     };
 
-    // Listen for the end of configuration of the root project of the root build,
-    // and discard buffered notifications if no listeners have yet appeared.
+    // Notification listeners are expected to register before projectsLoaded.
     // This avoids buffering until the end of the build when no listener comes.
     private final BuildListener buildListener = new InternalBuildAdapter() {
-        public void buildStarted(@SuppressWarnings("NullableProblems") Gradle gradle) {
-            if (gradle.getParent() == null) {
-                gradle.rootProject(new InternalAction<Project>() {
-                    @Override
-                    public void execute(@SuppressWarnings("NullableProblems") Project project) {
-                        project.afterEvaluate(new InternalAction<Project>() {
-                            @Override
-                            public void execute(@SuppressWarnings("NullableProblems") Project project) {
-                                State s = state;
-                                if (s != null && s.notificationListener == null) {
-                                    valve.stop();
-                                }
-                            }
-                        });
+        @Override
+        public void beforeSettings(Settings settings) {
+            if (settings.getGradle().getParent() == null) {
+                settings.getGradle().projectsLoaded((InternalAction<Gradle>) project -> {
+                    State s = state;
+                    if (s != null && s.notificationListener == null) {
+                        valve.stop();
                     }
                 });
             }
-        }
-    };
-
-    private final BuildOperationNotificationListenerRegistrar registrar = new BuildOperationNotificationListenerRegistrar() {
-
-        @Override
-        public void register(BuildOperationNotificationListener listener) {
-            State state = requireState();
-            state.assignSingleListener(listener);
-            state.replayAndAttachListener.attach(listener);
-        }
-
-        private State requireState() {
-            State s = state;
-            if (s == null) {
-                throw new IllegalStateException("state is null");
-            }
-
-            return s;
         }
     };
 
@@ -137,8 +117,20 @@ public class BuildOperationNotificationBridge {
         listenerManager.addListener(buildListener);
     }
 
-    public BuildOperationNotificationListenerRegistrar getRegistrar() {
-        return registrar;
+    @Override
+    public void register(BuildOperationNotificationListener listener) {
+        State state = requireState();
+        state.assignSingleListener(listener);
+        state.replayAndAttachListener.attach(listener);
+    }
+
+    private State requireState() {
+        State s = state;
+        if (s == null) {
+            throw new IllegalStateException("state is null");
+        }
+
+        return s;
     }
 
     public BuildOperationNotificationValve getValve() {
@@ -156,8 +148,8 @@ public class BuildOperationNotificationBridge {
 
         private final BuildOperationNotificationListener notificationListener;
 
-        private final Map<OperationIdentifier, OperationIdentifier> parents = new ConcurrentHashMap<OperationIdentifier, OperationIdentifier>();
-        private final Map<OperationIdentifier, Object> active = new ConcurrentHashMap<OperationIdentifier, Object>();
+        private final Map<OperationIdentifier, OperationIdentifier> parents = new ConcurrentHashMap<>();
+        private final LongSet active = LongSets.synchronize(new LongOpenHashSet());
 
         private Adapter(BuildOperationNotificationListener notificationListener) {
             this.notificationListener = notificationListener;
@@ -169,7 +161,7 @@ public class BuildOperationNotificationBridge {
             OperationIdentifier parentId = buildOperation.getParentId();
 
             if (parentId != null) {
-                if (active.containsKey(parentId)) {
+                if (active.contains(parentId.getId())) {
                     parents.put(id, parentId);
                 } else {
                     parentId = parents.get(parentId);
@@ -183,7 +175,7 @@ public class BuildOperationNotificationBridge {
                 return;
             }
 
-            active.put(id, "");
+            active.add(id.getId());
 
             Started notification = new Started(startEvent.getStartTime(), id, parentId, buildOperation.getDetails());
 
@@ -218,7 +210,7 @@ public class BuildOperationNotificationBridge {
         }
 
         private OperationIdentifier findOwner(OperationIdentifier id) {
-            if (active.containsKey(id)) {
+            if (active.contains(id.getId())) {
                 return id;
             } else {
                 return parents.get(id);
@@ -229,7 +221,7 @@ public class BuildOperationNotificationBridge {
         public void finished(BuildOperationDescriptor buildOperation, OperationFinishEvent finishEvent) {
             OperationIdentifier id = buildOperation.getId();
             OperationIdentifier parentId = parents.remove(id);
-            if (active.remove(id) == null) {
+            if (!active.remove(id.getId())) {
                 return;
             }
 
@@ -246,7 +238,7 @@ public class BuildOperationNotificationBridge {
 
     private static class RecordingListener implements BuildOperationNotificationListener {
 
-        private final Queue<Object> storedEvents = new ConcurrentLinkedQueue<Object>();
+        private final Queue<Object> storedEvents = new ConcurrentLinkedQueue<>();
 
         @Override
         public void started(BuildOperationStartedNotification notification) {
@@ -335,10 +327,6 @@ public class BuildOperationNotificationBridge {
             } else {
                 listener.finished(notification);
             }
-        }
-
-        public void reset() {
-
         }
     }
 

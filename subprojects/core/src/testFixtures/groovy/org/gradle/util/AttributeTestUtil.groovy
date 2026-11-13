@@ -16,24 +16,108 @@
 
 package org.gradle.util
 
+import groovy.transform.stc.ClosureParams
+import groovy.transform.stc.SimpleType
 import org.gradle.api.attributes.Attribute
-import org.gradle.api.internal.attributes.DefaultImmutableAttributesFactory
+import org.gradle.api.attributes.AttributesSchema
+import org.gradle.api.internal.artifacts.repositories.metadata.DefaultMavenVariantAttributesFactory
+import org.gradle.api.internal.attributes.AttributeSchemaServices
+import org.gradle.api.internal.attributes.AttributeValueIsolator
+import org.gradle.api.internal.attributes.AttributesSchemaInternal
+import org.gradle.api.internal.attributes.DefaultAttributesFactory
+import org.gradle.api.internal.attributes.DefaultAttributesSchema
 import org.gradle.api.internal.attributes.ImmutableAttributes
-import org.gradle.api.internal.attributes.ImmutableAttributesFactory
-import org.gradle.api.internal.model.NamedObjectInstantiator
+import org.gradle.api.internal.attributes.immutable.ImmutableAttributesSchema
+import org.gradle.api.internal.attributes.immutable.ImmutableAttributesSchemaFactory
+import org.gradle.api.internal.attributes.immutable.artifact.ImmutableArtifactTypeRegistryFactory
+import org.gradle.internal.component.external.model.JavaEcosystemVariantDerivationStrategy
 
 class AttributeTestUtil {
-    static ImmutableAttributesFactory attributesFactory() {
-        return new DefaultImmutableAttributesFactory(SnapshotTestUtil.valueSnapshotter(), NamedObjectInstantiator.INSTANCE)
+
+    static AttributeValueIsolator attributeValueIsolator() {
+        return new AttributeValueIsolator(SnapshotTestUtil.isolatableFactory(), TestUtil.objectInstantiator())
     }
 
-    static ImmutableAttributes attributes(Map<String, ?> values) {
+    static DefaultAttributesFactory attributesFactory() {
+        return new DefaultAttributesFactory(attributeValueIsolator(), SnapshotTestUtil.isolatableFactory(), TestUtil.objectInstantiator(), TestUtil.propertyFactory())
+    }
+
+    static JavaEcosystemVariantDerivationStrategy javaEcosystemVariantDerivationStrategy() {
+        return new JavaEcosystemVariantDerivationStrategy(
+            new DefaultMavenVariantAttributesFactory(
+                attributesFactory(),
+                TestUtil.objectInstantiator()
+            )
+        )
+    }
+
+    /**
+     * Creates an attribute set that can contain only JDK-typed {@link Attribute} values.
+     *
+     * The type of the attribute is derived by the class of the value.
+     *
+     * Use {@link #attributesTyped(Map)} to create an attribute set with more specific attribute values.
+     */
+    static ImmutableAttributes attributes(Map<String, Object> values) {
         def attrs = ImmutableAttributes.EMPTY
         if (values) {
             values.each { String key, Object value ->
-                attrs = attributesFactory().concat(attrs, Attribute.of(key, value.class), value)
+                assert value.class.package.name.startsWith("java.lang")
+                def attribute = Attribute.of(key, value.class)
+                attrs = attributesFactory().concat(attrs, attribute, value)
             }
         }
         return attrs
+    }
+
+    /**
+     * Creates an attribute set with the provided attributes and values.
+     *
+     * The type of the attribute must be assignable from the value of the attribute.
+     */
+    static ImmutableAttributes attributesTyped(Map<Attribute, ?> values) {
+        def attrs = ImmutableAttributes.EMPTY
+        if (values) {
+            values.each { Attribute key, Object value ->
+                assert key.type.isAssignableFrom(value.class)
+                attrs = attributesFactory().concat(attrs, key, value)
+            }
+        }
+        return attrs
+    }
+
+    static <T> T named(Class<T> clazz, String value) {
+        TestUtil.objectInstantiator().named(clazz, value)
+    }
+
+    /**
+     * Creates a mutable attribute schema, configuring it with the provided action.
+     */
+    static AttributesSchemaInternal mutableSchema(@DelegatesTo(AttributesSchema) @ClosureParams(value = SimpleType, options = ["org.gradle.api.attributes.AttributesSchema"]) Closure<?> action = {}) {
+        def attributesSchema = new DefaultAttributesSchema(TestUtil.instantiatorFactory(), SnapshotTestUtil.isolatableFactory())
+
+        action.delegate = attributesSchema
+        action(attributesSchema)
+
+        return attributesSchema
+    }
+
+    /**
+     * Creates an immutable attribute schema, configuring it with the provided action.
+     */
+    static ImmutableAttributesSchema immutableSchema(@DelegatesTo(AttributesSchema) @ClosureParams(value = SimpleType, options = ["org.gradle.api.attributes.AttributesSchema"]) Closure<?> action = {}) {
+        def mutable = mutableSchema(action)
+        return services().getSchemaFactory().create(mutable)
+    }
+
+    /**
+     * Creates a service factory, used for creating attribute matchers and variant transformers.
+     */
+    static AttributeSchemaServices services() {
+        new AttributeSchemaServices(
+            new ImmutableAttributesSchemaFactory(TestUtil.inMemoryCacheFactory()),
+            new ImmutableArtifactTypeRegistryFactory(TestUtil.inMemoryCacheFactory(), attributesFactory()),
+            TestUtil.inMemoryCacheFactory()
+        )
     }
 }

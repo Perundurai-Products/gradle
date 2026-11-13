@@ -15,15 +15,22 @@
  */
 package org.gradle.api.file
 
-import org.gradle.api.internal.file.collections.MinimalFileTree
+import org.gradle.api.internal.file.TestFiles
 import org.gradle.api.internal.file.collections.FileTreeAdapter
+import org.gradle.api.internal.file.collections.MinimalFileTree
+import org.gradle.internal.deprecation.DeprecationLogger
 
-import static org.junit.Assert.*
-import static org.hamcrest.Matchers.*
+import static org.gradle.api.tasks.AntBuilderAwareUtil.assertSetContainsForAllTypes
+import static org.hamcrest.CoreMatchers.equalTo
+import static org.hamcrest.CoreMatchers.hasItem
+import static org.junit.Assert.assertEquals
+import static org.junit.Assert.assertFalse
+import static org.hamcrest.MatcherAssert.assertThat
+import static org.junit.Assert.assertTrue
 
 class FileVisitorUtil {
     static void assertCanStopVisiting(MinimalFileTree tree) {
-        assertCanStopVisiting(new FileTreeAdapter(tree))
+        assertCanStopVisiting(new FileTreeAdapter(tree, TestFiles.taskDependencyFactory(), TestFiles.patternSetFactory))
     }
 
     static void assertCanStopVisiting(FileTree tree) {
@@ -44,7 +51,7 @@ class FileVisitorUtil {
     }
 
     static void assertVisits(MinimalFileTree tree, Iterable<String> expectedFiles, Iterable<String> expectedDirs) {
-        assertVisits(new FileTreeAdapter(tree), expectedFiles, expectedDirs)
+        assertVisits(new FileTreeAdapter(tree, TestFiles.taskDependencyFactory(), TestFiles.patternSetFactory), expectedFiles, expectedDirs)
     }
 
     static void assertVisits(FileTree tree, Iterable<String> expectedFiles, Iterable<String> expectedDirs) {
@@ -83,6 +90,11 @@ class FileVisitorUtil {
         }
 
         assertThat(files, equalTo(expectedFiles + expectedDirs as Set))
+
+        // TODO: Remove in Gradle 10, together with the Ant integration
+        DeprecationLogger.whileDisabled({
+            assertSetContainsForAllTypes(tree, expectedFiles)
+        } as Runnable)
     }
 
     static void assertVisits(FileTree tree, Map<String, File> files) {
@@ -101,13 +113,13 @@ class FileVisitorUtil {
     }
 
     static void assertVisitsPermissions(MinimalFileTree tree, Map<String, Integer> filesWithPermissions) {
-        assertVisitsPermissions(new FileTreeAdapter(tree), filesWithPermissions)
+        assertVisitsPermissions(new FileTreeAdapter(tree, TestFiles.taskDependencyFactory(), TestFiles.patternSetFactory), filesWithPermissions)
     }
 
     static void assertVisitsPermissions(FileTree tree, Map<String, Integer> filesWithPermissions) {
         def visited = [:]
         tree.visit {
-            visited[it.name] = it.mode
+            visited[it.name] = it.permissions.toUnixNumeric()
         }
         assertThat(visited, equalTo(filesWithPermissions))
     }

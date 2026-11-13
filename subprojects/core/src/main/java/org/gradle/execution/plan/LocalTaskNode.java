@@ -13,35 +13,84 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.gradle.execution.plan;
 
-import org.gradle.api.Action;
-import org.gradle.api.Project;
-import org.gradle.api.Task;
 import org.gradle.api.internal.TaskInternal;
-import org.gradle.api.internal.tasks.TaskContainerInternal;
-import org.gradle.internal.ImmutableActionSet;
+import org.gradle.api.internal.file.FileCollectionFactory;
+import org.gradle.api.internal.project.ProjectInternal;
+import org.gradle.api.internal.tasks.NodeExecutionContext;
+import org.gradle.api.internal.tasks.properties.DefaultTaskProperties;
+import org.gradle.api.internal.tasks.properties.TaskProperties;
+import org.gradle.internal.execution.WorkValidationContext;
+import org.gradle.internal.properties.bean.PropertyWalker;
+import org.gradle.internal.resources.ResourceLock;
+import org.gradle.internal.service.ServiceRegistry;
+import org.jspecify.annotations.Nullable;
 
-import javax.annotation.Nullable;
+import java.util.List;
 import java.util.Set;
+import java.util.function.Consumer;
+import java.util.function.Function;
+import org.gradle.api.internal.TaskInternalUtil;
 
 /**
  * A {@link TaskNode} implementation for a task in the current build.
  */
 public class LocalTaskNode extends TaskNode {
     private final TaskInternal task;
-    private ImmutableActionSet<Task> postAction = ImmutableActionSet.empty();
+    private final WorkValidationContext validationContext;
+    private final ResolveMutationsNode resolveMutationsNode;
+    private boolean hasVisitedMutationsNode;
+    private Set<Node> lifecycleSuccessors;
 
-    public LocalTaskNode(TaskInternal task) {
+    private boolean isolated;
+    private List<? extends ResourceLock> resourceLocks;
+    private TaskProperties taskProperties;
+    private ProjectInternal taskProject;
+
+    @SuppressWarnings("this-escape")
+    public LocalTaskNode(TaskInternal task, WorkValidationContext workValidationContext, Function<LocalTaskNode, ResolveMutationsNode> resolveNodeFactory) {
         this.task = task;
+        this.validationContext = workValidationContext;
+        this.resolveMutationsNode = resolveNodeFactory.apply(this);
+        this.taskProject = (ProjectInternal) task.getProject();
+    }
+
+    /**
+     * Indicates that this task is isolated and so does not require the project lock in order to execute.
+     */
+    public void isolated() {
+        isolated = true;
+    }
+
+    public WorkValidationContext getValidationContext() {
+        return validationContext;
     }
 
     @Nullable
     @Override
-    public Project getProject() {
-        // Running the task requires access to the task's owning project
-        return task.getProject();
+    public ResourceLock getResourceToLock() {
+        if (isolated) {
+            return null;
+        } else {
+            // Running the task requires permission to execute against its containing project
+            return taskProject.getOwner().getTaskExecutionLock();
+        }
+    }
+
+    @Nullable
+    @Override
+    public ProjectInternal getOwningProject() {
+        // Task requires its owning project's execution services
+        return taskProject;
+    }
+
+    @Override
+    public List<? extends ResourceLock> getResourcesToLock() {
+        if (resourceLocks == null) {
+            resourceLocks = task.getSharedResources();
+        }
+        return resourceLocks;
     }
 
     @Override
@@ -50,13 +99,19 @@ public class LocalTaskNode extends TaskNode {
     }
 
     @Override
-    public Action<? super Task> getPostAction() {
-        return postAction;
+    public boolean isPublicNode() {
+        return true;
     }
 
-    @Override
-    public void appendPostAction(Action<? super Task> action) {
-        postAction = postAction.add(action);
+    public TaskProperties getTaskProperties() {
+        if (taskProperties == null) {
+            ServiceRegistry serviceRegistry = taskProject.getServices();
+            final FileCollectionFactory fileCollectionFactory = serviceRegistry.get(FileCollectionFactory.class);
+            PropertyWalker propertyWalker = serviceRegistry.get(PropertyWalker.class);
+            taskProperties = DefaultTaskProperties.resolve(propertyWalker, fileCollectionFactory, task);
+        }
+
+        return taskProperties;
     }
 
     @Override
@@ -65,27 +120,21 @@ public class LocalTaskNode extends TaskNode {
     }
 
     @Override
-    public void rethrowNodeFailure() {
-        task.getState().rethrowFailure();
-    }
+    public void resolveDependencies(TaskDependencyResolver dependencyResolver) {
+        // Make sure it has been configured
+        taskProject.getTasks().prepareForExecution(task);
 
-    @Override
-    public void prepareForExecution() {
-        ((TaskContainerInternal) task.getProject().getTasks()).prepareForExecution(task);
-    }
-
-    @Override
-    public void resolveDependencies(TaskDependencyResolver dependencyResolver, Action<Node> processHardSuccessor) {
         for (Node targetNode : getDependencies(dependencyResolver)) {
             addDependencySuccessor(targetNode);
-            processHardSuccessor.execute(targetNode);
         }
+
+        lifecycleSuccessors = dependencyResolver.resolveDependenciesFor(task, TaskInternalUtil.getLifecycleDependencies(task));
+
         for (Node targetNode : getFinalizedBy(dependencyResolver)) {
             if (!(targetNode instanceof TaskNode)) {
                 throw new IllegalStateException("Only tasks can be finalizers: " + targetNode);
             }
             addFinalizerNode((TaskNode) targetNode);
-            processHardSuccessor.execute(targetNode);
         }
         for (Node targetNode : getMustRunAfter(dependencyResolver)) {
             addMustSuccessor(targetNode);
@@ -96,40 +145,88 @@ public class LocalTaskNode extends TaskNode {
     }
 
     private void addFinalizerNode(TaskNode finalizerNode) {
-        addFinalizer(finalizerNode);
-        if (!finalizerNode.isInKnownState()) {
-            finalizerNode.mustNotRun();
-        }
+        deprecateLifecycleHookReferencingNonLocalTask("finalizedBy", finalizerNode);
+        finalizerNode.addFinalizingSuccessor(this);
     }
 
     private Set<Node> getDependencies(TaskDependencyResolver dependencyResolver) {
-        return dependencyResolver.resolveDependenciesFor(task, task.getTaskDependencies());
+        return dependencyResolver.resolveDependenciesFor(task, TaskInternalUtil.getTaskDependencies(task));
     }
 
     private Set<Node> getFinalizedBy(TaskDependencyResolver dependencyResolver) {
-        return dependencyResolver.resolveDependenciesFor(task, task.getFinalizedBy());
+        return dependencyResolver.resolveDependenciesFor(task, TaskInternalUtil.getFinalizedBy(task));
     }
 
     private Set<Node> getMustRunAfter(TaskDependencyResolver dependencyResolver) {
-        return dependencyResolver.resolveDependenciesFor(task, task.getMustRunAfter());
+        return dependencyResolver.resolveDependenciesFor(task, TaskInternalUtil.getMustRunAfter(task));
     }
 
     private Set<Node> getShouldRunAfter(TaskDependencyResolver dependencyResolver) {
-        return dependencyResolver.resolveDependenciesFor(task, task.getShouldRunAfter());
+        return dependencyResolver.resolveDependenciesFor(task, TaskInternalUtil.getShouldRunAfter(task));
     }
 
     @Override
-    @SuppressWarnings("NullableProblems")
-    public int compareTo(Node other) {
-        if (getClass() != other.getClass()) {
-            return getClass().getName().compareTo(other.getClass().getName());
-        }
-        LocalTaskNode localTask = (LocalTaskNode) other;
-        return task.compareTo(localTask.task);
-    }
-
-    @Override
-    public String toString() {
+    public String getDisplayName() {
         return task.getIdentityPath().toString();
     }
+
+    @Override
+    public boolean hasPendingPreExecutionNodes() {
+        return !hasVisitedMutationsNode;
+    }
+
+    @Override
+    public void visitPreExecutionNodes(Consumer<? super Node> visitor) {
+        if (!hasVisitedMutationsNode) {
+            visitor.accept(resolveMutationsNode);
+            hasVisitedMutationsNode = true;
+        }
+    }
+
+    public Node getPrepareNode() {
+        return resolveMutationsNode;
+    }
+
+    @Override
+    public void markFailedDueToDependencies(Consumer<Node> completionAction) {
+        super.markFailedDueToDependencies(completionAction);
+        if (!resolveMutationsNode.isComplete()) {
+            resolveMutationsNode.markFailedDueToDependencies(completionAction);
+        }
+    }
+
+    @Override
+    public void cancelExecution(Consumer<Node> completionAction) {
+        super.cancelExecution(completionAction);
+        if (resolveMutationsNode.isRequired()) {
+            resolveMutationsNode.cancelExecution(completionAction);
+        }
+    }
+
+    @Override
+    public Set<Node> getLifecycleSuccessors() {
+        return lifecycleSuccessors;
+    }
+
+    @Override
+    public void setLifecycleSuccessors(Set<Node> lifecycleSuccessors) {
+        this.lifecycleSuccessors = lifecycleSuccessors;
+    }
+
+    /**
+     * Used to determine whether a {@link Node} consumes the <b>outcome</b> of a successor task vs. its output(s).
+     *
+     * @param dependency a non-successful successor node in the execution plan
+     * @return true if the successor node dependency was declared with an explicit dependsOn relationship, false otherwise (implying task output to task input relationship)
+     */
+    @Override
+    protected boolean dependsOnOutcome(Node dependency) {
+        return lifecycleSuccessors.contains(dependency);
+    }
+
+    @Override
+    public void execute(NodeExecutionContext context) {
+        context.getService(TaskNodeExecutor.class).execute(this);
+    }
+
 }

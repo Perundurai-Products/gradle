@@ -16,13 +16,12 @@
 
 package org.gradle.initialization;
 
-import org.gradle.StartParameter;
+import org.gradle.api.internal.StartParameterInternal;
 import org.gradle.api.internal.GradleInternal;
-import org.gradle.api.internal.SettingsInternal;
 import org.gradle.api.internal.initialization.ClassLoaderScope;
 import org.gradle.internal.operations.BuildOperationContext;
 import org.gradle.internal.operations.BuildOperationDescriptor;
-import org.gradle.internal.operations.BuildOperationExecutor;
+import org.gradle.internal.operations.BuildOperationRunner;
 import org.gradle.internal.operations.CallableBuildOperation;
 
 import java.io.File;
@@ -35,26 +34,26 @@ public class BuildOperationSettingsProcessor implements SettingsProcessor {
     };
 
     private final SettingsProcessor settingsProcessor;
-    private final BuildOperationExecutor buildOperationExecutor;
+    private final BuildOperationRunner buildOperationRunner;
 
-    public BuildOperationSettingsProcessor(SettingsProcessor settingsProcessor, BuildOperationExecutor buildOperationExecutor) {
+    public BuildOperationSettingsProcessor(SettingsProcessor settingsProcessor, BuildOperationRunner buildOperationRunner) {
         this.settingsProcessor = settingsProcessor;
-        this.buildOperationExecutor = buildOperationExecutor;
+        this.buildOperationRunner = buildOperationRunner;
     }
 
     @Override
-    public SettingsInternal process(final GradleInternal gradle, final SettingsLocation settingsLocation, final ClassLoaderScope buildRootClassLoaderScope, final StartParameter startParameter) {
-        return buildOperationExecutor.call(new CallableBuildOperation<SettingsInternal>() {
+    public SettingsState process(final GradleInternal gradle, final SettingsLocation settingsLocation, final ClassLoaderScope buildRootClassLoaderScope, final StartParameterInternal startParameter) {
+        return buildOperationRunner.call(new CallableBuildOperation<SettingsState>() {
             @Override
-            public SettingsInternal call(BuildOperationContext context) {
-                SettingsInternal settingsInternal = settingsProcessor.process(gradle, settingsLocation, buildRootClassLoaderScope, startParameter);
+            public SettingsState call(BuildOperationContext context) {
+                SettingsState state = settingsProcessor.process(gradle, settingsLocation, buildRootClassLoaderScope, startParameter);
                 context.setResult(RESULT);
-                return settingsInternal;
+                return state;
             }
 
             @Override
             public BuildOperationDescriptor.Builder description() {
-                return BuildOperationDescriptor.displayName("Evaluate settings").
+                return BuildOperationDescriptor.displayName("Evaluate settings").owner(gradle.getOwner()).
                     progressDisplayName("Evaluating settings").
                     details(new Details() {
 

@@ -16,29 +16,29 @@
 
 package org.gradle.api.internal.artifacts;
 
-import com.google.common.base.Objects;
 import org.gradle.api.artifacts.component.BuildIdentifier;
+import org.gradle.util.Path;
 
 public class DefaultBuildIdentifier implements BuildIdentifier {
-    public static final BuildIdentifier ROOT = new DefaultBuildIdentifier(":");
-    private final String name;
 
-    public DefaultBuildIdentifier(String name) {
-        this.name = name;
-    }
+    public static final BuildIdentifier ROOT = new DefaultBuildIdentifier(Path.ROOT);
+    private final Path buildPath;
 
-    public String getIdName() {
-        return name;
-    }
+    public DefaultBuildIdentifier(Path buildPath) {
+        if (!buildPath.isAbsolute()) {
+            throw new IllegalArgumentException("Build path must be absolute: " + buildPath);
+        }
 
-    @Override
-    public String getName() {
-        return name;
+        this.buildPath = buildPath;
     }
 
     @Override
-    public boolean isCurrentBuild() {
-        return true;
+    public String getBuildPath() {
+        return buildPath.toString();
+    }
+
+    public Path getIdentityPath() {
+        return buildPath;
     }
 
     @Override
@@ -50,16 +50,17 @@ public class DefaultBuildIdentifier implements BuildIdentifier {
             return false;
         }
         DefaultBuildIdentifier that = (DefaultBuildIdentifier) o;
-        return name.equals(that.name);
+        return buildPath.equals(that.buildPath);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hashCode(name);
+        return buildPath.hashCode();
     }
 
     @Override
     public String toString() {
-        return "build '" + name + "'";
+        return "build '" + buildPath + "'";
     }
+
 }

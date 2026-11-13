@@ -17,10 +17,8 @@
 package org.gradle.api.artifacts;
 
 import org.gradle.api.Action;
-import org.gradle.api.Incubating;
 import org.gradle.api.attributes.AttributeContainer;
-
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Describes a metadata about a dependency - direct dependency or dependency constraint - declared in a resolved component's metadata.
@@ -33,11 +31,13 @@ public interface DependencyMetadata<SELF extends DependencyMetadata> {
     /**
      * Returns the group of the module that is targeted by this dependency or dependency constraint.
      * The group allows the definition of modules of the same name in different organizations or contexts.
+     * @since 4.4
      */
     String getGroup();
 
     /**
      * Returns the name of the module that is targeted by this dependency or dependency constraint.
+     * @since 4.4
      */
     String getName();
 
@@ -64,7 +64,6 @@ public interface DependencyMetadata<SELF extends DependencyMetadata> {
      *
      * @since 4.6
      */
-    @Incubating
     @Nullable
     String getReason();
 
@@ -75,7 +74,6 @@ public interface DependencyMetadata<SELF extends DependencyMetadata> {
      *
      * @since 4.6
      */
-    @Incubating
     SELF because(String reason);
 
     /**
@@ -85,7 +83,6 @@ public interface DependencyMetadata<SELF extends DependencyMetadata> {
      *
      * @since 4.8
      */
-    @Incubating
     AttributeContainer getAttributes();
 
     /**
@@ -93,7 +90,6 @@ public interface DependencyMetadata<SELF extends DependencyMetadata> {
      *
      * @since 4.8
      */
-    @Incubating
     SELF attributes(Action<? super AttributeContainer> configureAction);
 
     /**
@@ -104,6 +100,6 @@ public interface DependencyMetadata<SELF extends DependencyMetadata> {
      *
      * @since 4.9
      */
-    @Incubating
     ModuleIdentifier getModule();
+
 }

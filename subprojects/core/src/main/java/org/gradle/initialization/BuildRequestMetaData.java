@@ -15,9 +15,13 @@
  */
 package org.gradle.initialization;
 
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
+
 /**
- * A bunch of information about the request which launched a build.
+ * A bunch of information about the request that launched the current build.
  */
+@ServiceScope(Scope.BuildSession.class)
 public interface BuildRequestMetaData {
 
     /**
@@ -30,5 +34,5 @@ public interface BuildRequestMetaData {
      */
     long getStartTime();
 
-    boolean isInteractive();
+    boolean isInteractiveConsole();
 }

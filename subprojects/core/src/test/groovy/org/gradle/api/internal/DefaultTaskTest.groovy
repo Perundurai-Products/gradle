@@ -22,14 +22,15 @@ import org.gradle.api.DefaultTask
 import org.gradle.api.InvalidUserDataException
 import org.gradle.api.Project
 import org.gradle.api.Task
-import org.gradle.api.internal.project.taskfactory.TaskIdentity
-import org.gradle.api.internal.tasks.ContextAwareTaskAction
-import org.gradle.api.logging.Logger
+import org.gradle.api.internal.project.taskfactory.TestTaskIdentities
+import org.gradle.api.internal.tasks.InputChangesAwareTaskAction
+import org.gradle.api.logging.LogLevel
 import org.gradle.api.tasks.AbstractTaskTest
 import org.gradle.api.tasks.TaskExecutionException
-import org.gradle.api.tasks.TaskInstantiationException
 import org.gradle.internal.Actions
 import org.gradle.internal.event.ListenerManager
+import org.gradle.internal.logging.slf4j.ContextAwareTaskLogger
+import org.gradle.util.TestUtil
 import spock.lang.Issue
 
 import java.util.concurrent.Callable
@@ -52,14 +53,14 @@ class DefaultTaskTest extends AbstractTaskTest {
         Thread.currentThread().contextClassLoader = cl
     }
 
-    AbstractTask getTask() {
+    DefaultTask getTask() {
         defaultTask
     }
 
     def "default task"() {
         given:
-        def identity = TaskIdentity.create(TEST_TASK_NAME, Task, project)
-        Task task = AbstractTask.injectIntoNewInstance(project, identity, { new DefaultTask() } as Callable)
+        def identity = TestTaskIdentities.create(TEST_TASK_NAME, Task, project)
+        Task task = AbstractTask.injectIntoNewInstance(project, identity, { TestUtil.newInstance(DefaultTask) } as Callable)
 
         expect:
         task.dependsOn.isEmpty()
@@ -74,8 +75,8 @@ class DefaultTaskTest extends AbstractTaskTest {
 
     def "can inject values into task when using no-args constructor"() {
         given:
-        def identity = TaskIdentity.create(TEST_TASK_NAME, Task, project)
-        def task = AbstractTask.injectIntoNewInstance(project, identity, { new DefaultTask() } as Callable)
+        def identity = TestTaskIdentities.create(TEST_TASK_NAME, Task, project)
+        def task = AbstractTask.injectIntoNewInstance(project, identity, { TestUtil.newInstance(DefaultTask) } as Callable)
 
         expect:
         task.project.is(project)
@@ -400,30 +401,6 @@ class DefaultTaskTest extends AbstractTaskTest {
         defaultTask.state.failure.cause.is(failure)
     }
 
-    def "get and set convention properties"() {
-        given:
-        def convention = new TestConvention()
-        defaultTask.convention.plugins.test = convention
-
-        expect:
-        defaultTask.hasProperty('conventionProperty')
-
-        when:
-        defaultTask.conventionProperty = 'value'
-
-        then:
-        defaultTask.conventionProperty == 'value'
-        convention.conventionProperty == 'value'
-    }
-
-    def "can call convention methods"() {
-        given:
-        defaultTask.convention.plugins.test = new TestConvention()
-
-        expect:
-        defaultTask.conventionMethod('a', 'b').toString() == "a.b"
-    }
-
     def "accessing missing property throws"() {
         when:
         defaultTask."unknownProp"
@@ -445,16 +422,6 @@ class DefaultTaskTest extends AbstractTaskTest {
     def "can access services"() {
         expect:
         defaultTask.services.get(ListenerManager) != null
-    }
-
-    @Issue("https://issues.gradle.org/browse/GRADLE-2022")
-    def "good error message when task instantiated directly"() {
-        when:
-        new DefaultTask()
-
-        then:
-        TaskInstantiationException e = thrown()
-        e.message.contains("has been instantiated directly which is not supported")
     }
 
     def "unnamed task action are named similar by all action definition methods"() {
@@ -495,7 +462,7 @@ class DefaultTaskTest extends AbstractTaskTest {
 
     def "describable actions are not renamed"() {
         setup:
-        def namedAction = Mock(ContextAwareTaskAction)
+        def namedAction = Mock(InputChangesAwareTaskAction)
         namedAction.displayName >> "I have a name"
 
         when:
@@ -524,16 +491,33 @@ class DefaultTaskTest extends AbstractTaskTest {
         task.actions[0].displayName == "Execute unnamed action"
     }
 
-    def "can replace task logger"() {
+    def "can detect tasks with custom actions added"() {
         expect:
-        task.logger == AbstractTask.BUILD_LOGGER
+        !task.hasCustomActions
 
         when:
-        def logger = Mock(Logger)
-        task.replaceLogger(logger)
+        task.prependParallelSafeAction {}
 
         then:
-        task.logger == logger
+        !task.hasCustomActions
+
+        when:
+        task.doFirst {}
+
+        then:
+        task.hasCustomActions
+    }
+
+    def "can rewrite task logger warnings"() {
+        given:
+        def rewriter = Mock(ContextAwareTaskLogger.MessageRewriter)
+
+        when:
+        task.logger.setMessageRewriter(rewriter)
+        task.logger.warn("test")
+
+        then:
+        1 * rewriter.rewrite(LogLevel.WARN, "test")
     }
 }
 

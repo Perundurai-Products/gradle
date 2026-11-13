@@ -15,7 +15,6 @@
  */
 package org.gradle.api.plugins;
 
-import org.gradle.api.Incubating;
 import org.gradle.api.NamedDomainObjectCollectionSchema;
 import org.gradle.api.reflect.TypeOf;
 
@@ -25,7 +24,6 @@ import org.gradle.api.reflect.TypeOf;
  * @see ExtensionContainer
  * @since 4.5
  */
-@Incubating
 public interface ExtensionsSchema extends NamedDomainObjectCollectionSchema, Iterable<ExtensionsSchema.ExtensionSchema> {
 
     /**
@@ -39,7 +37,6 @@ public interface ExtensionsSchema extends NamedDomainObjectCollectionSchema, Ite
      *
      * @since 4.5
      */
-    @Incubating
     interface ExtensionSchema extends NamedDomainObjectCollectionSchema.NamedDomainObjectSchema {
 
         /**
@@ -47,6 +44,7 @@ public interface ExtensionsSchema extends NamedDomainObjectCollectionSchema, Ite
          *
          * @return the name of the extension
          */
+        @Override
         String getName();
 
         /**
@@ -54,6 +52,7 @@ public interface ExtensionsSchema extends NamedDomainObjectCollectionSchema, Ite
          *
          * @return the public type of the extension
          */
+        @Override
         TypeOf<?> getPublicType();
     }
 }

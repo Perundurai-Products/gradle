@@ -16,10 +16,9 @@
 package org.gradle.api.artifacts;
 
 import org.gradle.api.Action;
-import org.gradle.api.Incubating;
 
 /**
- * Interface for custom version listers. A version lister is reponsible for
+ * Interface for custom version listers. A version lister is responsible for
  * returning the list of versions of a module which are available in a specific
  * repository. For this, Gradle is going to call the lister once for each module
  * it needs the list of versions. This will typically happen in case a dynamic
@@ -29,7 +28,6 @@ import org.gradle.api.Incubating;
  *
  * @since 4.9
  */
-@Incubating
 public interface ComponentMetadataVersionLister extends Action<ComponentMetadataListerDetails> {
     /**
      * Perform a version listing query
@@ -37,5 +35,6 @@ public interface ComponentMetadataVersionLister extends Action<ComponentMetadata
      *
      * @since 4.9
      */
+    @Override
     void execute(ComponentMetadataListerDetails details);
 }

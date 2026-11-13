@@ -12,15 +12,16 @@ class MyTask extends DefaultTask {
 }
 
 def generateConfigFile = tasks.register("generateConfigFile") {
-    outputs.file "config.txt"
+    def outputFile = file("config.txt")
+    outputs.file outputFile
     doLast {
-        file("config.txt").text = "my config"
+        outputFile.text = "my config"
     }
 }
 
 task generateConfigZip(type: Zip) {
-    destinationDir = projectDir
-    archiveName = "config.zip"
+    destinationDirectory = projectDir
+    archiveFileName = "config.zip"
     from generateConfigFile.get()
 }
 

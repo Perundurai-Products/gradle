@@ -21,35 +21,50 @@ import org.gradle.api.Task;
 import org.gradle.api.file.FileCollection;
 import org.gradle.api.specs.Spec;
 import org.gradle.internal.HasInternalProtocol;
+import org.jspecify.annotations.Nullable;
 
 /**
  * <p>A {@code TaskOutputs} represents the outputs of a task.</p>
  *
  * <p>You can obtain a {@code TaskOutputs} instance using {@link org.gradle.api.Task#getOutputs()}.</p>
+ * @since 0.9
  */
 @HasInternalProtocol
 public interface TaskOutputs {
     /**
-     * <p>Adds a predicate to determine whether the outputs of this task are up-to-date. The given closure is executed
-     * at task execution time. The closure is passed the task as a parameter. If the closure returns false, the task
-     * outputs are considered out-of-date and the task will be executed.</p>
+     * <p>
+     *     Adds a predicate to determine whether previous outputs of this task can be reused.
+     *     The given closure is executed at task execution time.
+     *     The closure is passed the task as a parameter.
+     *     If the closure returns false, previous outputs of this task cannot be reused and the task will be executed.
+     *     That means the task is out-of-date and no outputs will be loaded from the build cache.
+     * </p>
      *
-     * <p>You can add multiple such predicates. The task outputs are considered out-of-date when any predicate returns
-     * false.<p>
+     * <p>
+     *     You can add multiple such predicates.
+     *     The task outputs cannot be reused when any predicate returns false.
+     * </p>
      *
      * @param upToDateClosure The closure to use to determine whether the task outputs are up-to-date.
+     * @since 0.9
      */
     void upToDateWhen(Closure upToDateClosure);
 
     /**
-     * <p>Adds a predicate to determine whether the outputs of this task are up-to-date. The given spec is evaluated at
-     * task execution time. If the spec returns false, the task outputs are considered out-of-date and the task will be
-     * executed.</p>
+     * <p>
+     *     Adds a predicate to determine whether previous outputs of this task can be reused.
+     *     The given spec is evaluated at task execution time.
+     *     If the spec returns false, previous outputs of this task cannot be reused and the task will be executed.
+     *     That means the task is out-of-date and no outputs will be loaded from the build cache.
+     * </p>
      *
-     * <p>You can add multiple such predicates. The task outputs are considered out-of-date when any predicate returns
-     * false.<p>
+     * <p>
+     *     You can add multiple such predicates.
+     *     The task outputs cannot be reused when any predicate returns false.
+     * </p>
      *
      * @param upToDateSpec The spec to use to determine whether the task outputs are up-to-date.
+     * @since 0.9
      */
     void upToDateWhen(Spec<? super Task> upToDateSpec);
 
@@ -105,6 +120,7 @@ public interface TaskOutputs {
      * still have an empty set of output files.
      *
      * @return true if this task has declared any outputs, otherwise false.
+     * @since 0.9
      */
     boolean getHasOutput();
 
@@ -112,6 +128,7 @@ public interface TaskOutputs {
      * Returns the output files of this task.
      *
      * @return The output files. Returns an empty collection if this task has no output files.
+     * @since 0.9
      */
     FileCollection getFiles();
 
@@ -119,31 +136,32 @@ public interface TaskOutputs {
      * Registers some output files for this task.
      *
      * <p>When the given {@code paths} is a {@link java.util.Map}, then each output file
-     * will be associated with an identity. For cacheable tasks this is a requirement.
+     * will be associated with an identity.
      * The keys of the map must be non-empty strings.
      * The values of the map will be evaluated to individual files as per
      * {@link org.gradle.api.Project#file(Object)}.</p>
      *
-     * <p>Otherwise the given files will be evaluated as per {@link org.gradle.api.Project#files(Object...)},
-     * and task output caching will be disabled for the task.</p>
+     * <p>Otherwise the given files will be evaluated as per
+     * {@link org.gradle.api.Project#files(Object...)}.</p>
      *
      * @param paths The output files.
      *
      * @see CacheableTask
+     * @since 0.9
      */
-    TaskOutputFilePropertyBuilder files(Object... paths);
+    TaskOutputFilePropertyBuilder files(@Nullable Object... paths);
 
     /**
      * Registers some output directories for this task.
      *
      * <p>When the given {@code paths} is a {@link java.util.Map}, then each output directory
-     * will be associated with an identity. For cacheable tasks this is a requirement.
+     * will be associated with an identity.
      * The keys of the map must be non-empty strings.
      * The values of the map will be evaluated to individual directories as per
      * {@link org.gradle.api.Project#file(Object)}.</p>
      *
-     * <p>Otherwise the given directories will be evaluated as per {@link org.gradle.api.Project#files(Object...)},
-     * and task output caching will be disabled for the task.</p>
+     * <p>Otherwise the given directories will be evaluated as per
+     * {@link org.gradle.api.Project#files(Object...)}.</p>
      *
      * @param paths The output files.
      *
@@ -151,13 +169,14 @@ public interface TaskOutputs {
      *
      * @since 3.3
      */
-    TaskOutputFilePropertyBuilder dirs(Object... paths);
+    TaskOutputFilePropertyBuilder dirs(@Nullable Object... paths);
 
     /**
      * Registers some output file for this task.
      *
      * @param path The output file. The given path is evaluated as per {@link org.gradle.api.Project#file(Object)}.
      * @return a property builder to further configure this property.
+     * @since 0.9
      */
     TaskOutputFilePropertyBuilder file(Object path);
 
@@ -166,6 +185,7 @@ public interface TaskOutputs {
      *
      * @param path The output directory. The given path is evaluated as per {@link org.gradle.api.Project#file(Object)}.
      * @return a property builder to further configure this property.
+     * @since 0.9
      */
     TaskOutputFilePropertyBuilder dir(Object path);
 }

@@ -120,7 +120,7 @@ class ProjectConfigureEventsErrorIntegrationTest extends AbstractIntegrationSpec
                 .assertHasLineNumber(4)
     }
 
-    def "produces reasonable error message when ProjectEvaluationListener.afterEvalutate fails"() {
+    def "produces reasonable error message when ProjectEvaluationListener.afterEvaluate fails"() {
         when:
         settingsFile << """
     class ListenerImpl implements ProjectEvaluationListener {
@@ -144,7 +144,7 @@ class ProjectConfigureEventsErrorIntegrationTest extends AbstractIntegrationSpec
 
     def "produces reasonable error message when Project.afterEvaluate closure fails"() {
         when:
-        buildFile << """
+        buildFile """
     project.afterEvaluate {
         throw new RuntimeException("afterEvaluate failure")
     }
@@ -160,7 +160,7 @@ class ProjectConfigureEventsErrorIntegrationTest extends AbstractIntegrationSpec
 
     def "produces reasonable error message when Project.afterEvaluate action fails"() {
         when:
-        buildFile << """
+        buildFile """
     def action = {
         throw new RuntimeException("afterEvaluate failure")
     } as Action
@@ -177,7 +177,7 @@ class ProjectConfigureEventsErrorIntegrationTest extends AbstractIntegrationSpec
 
     def "produces reasonable error message when both project configuration and Project.afterEvaluate action fails"() {
         when:
-        buildFile << """
+        buildFile """
     task test
     project.afterEvaluate {
         throw new RuntimeException("afterEvaluate failure")

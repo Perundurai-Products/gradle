@@ -16,24 +16,31 @@
 
 package org.gradle.api.internal.initialization.loadercache;
 
-import org.gradle.api.internal.file.collections.ImmutableFileCollection;
+import org.gradle.api.internal.file.FileCollectionFactory;
 import org.gradle.internal.classloader.ClasspathHasher;
 import org.gradle.internal.classpath.ClassPath;
+import org.gradle.internal.execution.FileCollectionFingerprinter;
+import org.gradle.internal.execution.FileCollectionSnapshotter;
 import org.gradle.internal.fingerprint.CurrentFileCollectionFingerprint;
-import org.gradle.internal.fingerprint.classpath.ClasspathFingerprinter;
 import org.gradle.internal.hash.HashCode;
+import org.gradle.internal.snapshot.FileSystemSnapshot;
 
 public class DefaultClasspathHasher implements ClasspathHasher {
 
-    private final ClasspathFingerprinter fingerprinter;
+    private final FileCollectionSnapshotter snapshotter;
+    private final FileCollectionFingerprinter fingerprinter;
+    private final FileCollectionFactory fileCollectionFactory;
 
-    public DefaultClasspathHasher(ClasspathFingerprinter fingerprinter) {
+    public DefaultClasspathHasher(FileCollectionSnapshotter snapshotter, FileCollectionFingerprinter fingerprinter, FileCollectionFactory fileCollectionFactory) {
+        this.snapshotter = snapshotter;
         this.fingerprinter = fingerprinter;
+        this.fileCollectionFactory = fileCollectionFactory;
     }
 
     @Override
     public HashCode hash(ClassPath classpath) {
-        CurrentFileCollectionFingerprint fingerprint = fingerprinter.fingerprint(ImmutableFileCollection.of(classpath.getAsFiles()));
+        FileSystemSnapshot snapshot = snapshotter.snapshot(fileCollectionFactory.fixed(classpath.getAsFiles()));
+        CurrentFileCollectionFingerprint fingerprint = fingerprinter.fingerprint(snapshot, null);
         return fingerprint.getHash();
     }
 }

@@ -15,11 +15,11 @@
  */
 package org.gradle.api.artifacts.repositories;
 
-import groovy.lang.Closure;
 import org.gradle.api.Action;
 import org.gradle.api.ActionConfiguration;
-import org.gradle.api.Incubating;
 import org.gradle.api.artifacts.ComponentMetadataSupplier;
+import org.gradle.internal.instrumentation.api.annotations.NotToBeReplacedByLazyProperty;
+import org.gradle.internal.instrumentation.api.annotations.ToBeReplacedByLazyProperty;
 
 import java.net.URI;
 
@@ -35,15 +35,41 @@ import java.net.URI;
  * </ol>
  * <p>
  * Repositories of this type are created by the {@link org.gradle.api.artifacts.dsl.RepositoryHandler#ivy(org.gradle.api.Action)} group of methods.
+ * @since 1.0
  */
-public interface IvyArtifactRepository extends ArtifactRepository, AuthenticationSupported, MetadataSupplierAware {
+public interface IvyArtifactRepository extends ArtifactRepository, UrlArtifactRepository, AuthenticationSupported, MetadataSupplierAware {
 
+    /**
+     * The ivy artifact pattern.
+     *
+     * @since 2.0
+     */
     String IVY_ARTIFACT_PATTERN = "[organisation]/[module]/[revision]/[type]s/[artifact](.[ext])";
 
+    /**
+     * The gradle artifact pattern.
+     *
+     * @since 1.0
+     */
     String GRADLE_ARTIFACT_PATTERN = "[organisation]/[module]/[revision]/[artifact]-[revision](-[classifier])(.[ext])";
+    /**
+     * The gradle ivy pattern.
+     *
+     * @since 1.0
+     */
     String GRADLE_IVY_PATTERN = "[organisation]/[module]/[revision]/ivy-[revision].xml";
 
+    /**
+     * The maven artifact pattern.
+     *
+     * @since 1.0
+     */
     String MAVEN_ARTIFACT_PATTERN = "[organisation]/[module]/[revision]/[artifact]-[revision](-[classifier])(.[ext])";
+    /**
+     * The maven ivy pattern.
+     *
+     * @since 1.0
+     */
     String MAVEN_IVY_PATTERN = "[organisation]/[module]/[revision]/ivy-[revision].xml";
 
     /**
@@ -51,6 +77,8 @@ public interface IvyArtifactRepository extends ArtifactRepository, Authenticatio
      *
      * @return The URL.
      */
+    @Override
+    @ToBeReplacedByLazyProperty
     URI getUrl();
 
     /**
@@ -59,16 +87,18 @@ public interface IvyArtifactRepository extends ArtifactRepository, Authenticatio
      * @param url The base URL.
      * @since 4.0
      */
+    @Override
     void setUrl(URI url);
 
     /**
      * Sets the base URL of this repository. The provided value is evaluated as per {@link org.gradle.api.Project#uri(Object)}. This means,
      * for example, you can pass in a File object or a relative path which is evaluated relative to the project directory.
      *
-     * File are resolved based on the supplied URL and the configured {@link #layout(String, Closure)} for this repository.
+     * File are resolved based on the supplied URL and the configured {@link #layout(String)} for this repository.
      *
      * @param url The base URL.
      */
+    @Override
     void setUrl(Object url);
 
     /**
@@ -81,6 +111,7 @@ public interface IvyArtifactRepository extends ArtifactRepository, Authenticatio
      * Patterns added in this way will be in addition to any layout-based patterns added via {@link #setUrl(Object)}.
      *
      * @param pattern The artifact pattern.
+     * @since 1.0
      */
     void artifactPattern(String pattern);
 
@@ -93,6 +124,7 @@ public interface IvyArtifactRepository extends ArtifactRepository, Authenticatio
      * Patterns added in this way will be in addition to any layout-based patterns added via {@link #setUrl(Object)}.
      *
      * @param pattern The ivy pattern.
+     * @since 1.0
      */
     void ivyPattern(String pattern);
 
@@ -131,67 +163,9 @@ public interface IvyArtifactRepository extends ArtifactRepository, Authenticatio
      *
      * @param layoutName The name of the layout to use.
      * @see #patternLayout(Action)
+     * @since 1.0
      */
     void layout(String layoutName);
-
-    /**
-     * Specifies how the items of the repository are organized.
-     * <p>
-     * The layout is configured with the supplied closure.
-     * <p>
-     * Recognised values are as follows:
-     * </p>
-     * <h4>'gradle'</h4>
-     * <p>
-     * A Repository Layout that applies the following patterns:
-     * </p>
-     * <ul>
-     *     <li>Artifacts: <code>$baseUri/{@value #GRADLE_ARTIFACT_PATTERN}</code></li>
-     *     <li>Ivy: <code>$baseUri/{@value #GRADLE_IVY_PATTERN}</code></li>
-     * </ul>
-     * <h4>'maven'</h4>
-     * <p>
-     * A Repository Layout that applies the following patterns:
-     * </p>
-     * <ul>
-     *     <li>Artifacts: <code>$baseUri/{@value #MAVEN_ARTIFACT_PATTERN}</code></li>
-     *     <li>Ivy: <code>$baseUri/{@value #MAVEN_IVY_PATTERN}</code></li>
-     * </ul>
-     * <p>
-     * Following the Maven convention, the 'organisation' value is further processed by replacing '.' with '/'.
-     * </p>
-     * <h4>'ivy'</h4>
-     * <p>
-     * A Repository Layout that applies the following patterns:
-     * </p>
-     * <ul>
-     *     <li>Artifacts: <code>$baseUri/{@value #IVY_ARTIFACT_PATTERN}</code></li>
-     *     <li>Ivy: <code>$baseUri/{@value #IVY_ARTIFACT_PATTERN}</code></li>
-     * </ul>
-     * <p><b>Note:</b> this pattern is currently {@link org.gradle.api.Incubating incubating}.</p>
-     * <h4>'pattern'</h4>
-     * <p>
-     * A repository layout that allows custom patterns to be defined. eg:
-     * </p>
-     * <pre>
-     * repositories {
-     *     ivy {
-     *         layout 'pattern' , {
-     *             artifact '[module]/[revision]/[artifact](.[ext])'
-     *             ivy '[module]/[revision]/ivy.xml'
-     *         }
-     *     }
-     * }
-     * </pre>
-     * <p>The available pattern tokens are listed as part of <a href="http://ant.apache.org/ivy/history/master/concept.html#patterns">Ivy's Main Concepts documentation</a>.</p>
-     *
-     * @param layoutName The name of the layout to use.
-     * @param config The action used to configure the layout.
-     * @since 2.3 (feature was already present in Groovy DSL, this particular method introduced in 2.3)
-     * @deprecated use {@link #layout(String)} or {@link #patternLayout(Action)}
-     */
-    @Deprecated
-    void layout(String layoutName, Action<? extends RepositoryLayout> config);
 
     /**
      * Specifies how the items of the repository are organized.
@@ -212,26 +186,16 @@ public interface IvyArtifactRepository extends ArtifactRepository, Authenticatio
      * @param config The action used to configure the layout.
      * @since 5.0
      */
-    @Incubating
-    void patternLayout(Action<? super  IvyPatternRepositoryLayout> config);
-
-    /**
-     * Specifies how the items of the repository are organized. See {@link #layout(String, org.gradle.api.Action)}
-     *
-     * @param layoutName The name of the layout to use.
-     * @param config The closure used to configure the layout.
-     * An instance of {@link RepositoryLayout} is passed as a parameter to the closure.
-     * @deprecated use {@link #layout(String)} or {@link #patternLayout(Action)}
-     */
-    @Deprecated
-    void layout(String layoutName, Closure config);
+    void patternLayout(Action<? super IvyPatternRepositoryLayout> config);
 
     /**
      * Returns the meta-data provider used when resolving artifacts from this repository. The provider is responsible for locating and interpreting the meta-data
      * for the modules and artifacts contained in this repository. Using this provider, you can fine tune how this resolution happens.
      *
      * @return The meta-data provider for this repository.
+     * @since 1.5
      */
+    @NotToBeReplacedByLazyProperty(because = "Not settable property")
     IvyArtifactRepositoryMetaDataProvider getResolve();
 
     /**
@@ -243,7 +207,7 @@ public interface IvyArtifactRepository extends ArtifactRepository, Authenticatio
      *
      * @since 4.0
      */
-    @Incubating
+    @Override
     void setMetadataSupplier(Class<? extends ComponentMetadataSupplier> rule);
 
     /**
@@ -254,7 +218,7 @@ public interface IvyArtifactRepository extends ArtifactRepository, Authenticatio
      *
      * @since 4.0
      */
-    @Incubating
+    @Override
     void setMetadataSupplier(Class<? extends ComponentMetadataSupplier> rule, Action<? super ActionConfiguration> configureAction);
 
     /**
@@ -265,8 +229,15 @@ public interface IvyArtifactRepository extends ArtifactRepository, Authenticatio
      *
      * @since 4.5
      */
-    @Incubating
     void metadataSources(Action<? super MetadataSources> configureAction);
+
+    /**
+     * Returns the current metadata sources configuration for the repository.
+     *
+     * @since 6.4
+     */
+    @NotToBeReplacedByLazyProperty(because = "Not settable property")
+    MetadataSources getMetadataSources();
 
     /**
      * Allows configuring the sources of metadata for a specific repository.
@@ -274,23 +245,64 @@ public interface IvyArtifactRepository extends ArtifactRepository, Authenticatio
      * @since 4.5
      *
      */
-    @Incubating
     interface MetadataSources {
         /**
          * Indicates that this repository will contain Gradle metadata.
+         * @since 4.5
          */
         void gradleMetadata();
 
         /**
          * Indicates that this repository will contain Ivy descriptors.
+         * If the Ivy file contains a marker telling that Gradle metadata exists
+         * for this component, Gradle will <i>also</i> look for the Gradle metadata
+         * file. Gradle module metadata redirection will not happen if {@code ignoreGradleMetadataRedirection()} has been used.
+         * @since 4.5
          */
         void ivyDescriptor();
 
         /**
          * Indicates that this repository may not contain metadata files,
          * but we can infer it from the presence of an artifact file.
+         * @since 4.5
          */
         void artifact();
+
+        /**
+         * Indicates that this repository will ignore Gradle module metadata redirection markers found in Ivy files.
+         *
+         * @since 5.6
+         *
+         */
+        void ignoreGradleMetadataRedirection();
+
+        /**
+         * Indicates if this repository contains Gradle module metadata.
+         *
+         * @since 6.4
+         */
+        boolean isGradleMetadataEnabled();
+
+        /**
+         * Indicates if this repository contains Ivy descriptors.
+         *
+         * @since 6.4
+         */
+        boolean isIvyDescriptorEnabled();
+
+        /**
+         * Indicates if this repository only contains artifacts.
+         *
+         * @since 6.4
+         */
+        boolean isArtifactEnabled();
+
+        /**
+         * Indicates if this repository ignores Gradle module metadata redirection markers.
+         *
+         * @since 6.4
+         */
+        boolean isIgnoreGradleMetadataRedirectionEnabled();
     }
 
 }

@@ -17,6 +17,7 @@ package org.gradle.api.artifacts.repositories;
 
 import org.gradle.api.Incubating;
 import org.gradle.api.attributes.Attribute;
+import org.jspecify.annotations.Nullable;
 
 /**
  * <p>Descriptor of a repository content, used to avoid reaching to
@@ -28,68 +29,37 @@ import org.gradle.api.attributes.Attribute;
  *
  * @since 5.1
  */
-@Incubating
-public interface RepositoryContentDescriptor {
-
-    /**
-     * Declares that an entire group should be searched for in this repository.
-     *
-     * @param group the group name
-     */
-    void includeGroup(String group);
-
-    /**
-     * Declares that an entire group should be searched for in this repository.
-     *
-     * @param groupRegex a regular expression of the group name
-     */
-    void includeGroupByRegex(String groupRegex);
-
-    /**
-     * Declares that an entire module should be searched for in this repository.
-     *
-     * @param group the group name
-     * @param moduleName the module name
-     */
-    void includeModule(String group, String moduleName);
-
-    /**
-     * Declares that an entire module should be searched for in this repository, using regular expressions.
-     *
-     * @param groupRegex the group name regular expression
-     * @param moduleNameRegex the module name regular expression
-     */
-    void includeModuleByRegex(String groupRegex, String moduleNameRegex);
-
-    /**
-     * Declares that a specific module version should be searched for in this repository.
-     *
-     * @param group the group name
-     * @param moduleName the module name
-     * @param version the module version
-     */
-    void includeVersion(String group, String moduleName, String version);
-
-    /**
-     * Declares that a specific module version should be searched for in this repository, using regular expressions.
-     *
-     * @param groupRegex the group name regular expression
-     * @param moduleNameRegex the module name regular expression
-     * @param versionRegex the module version regular expression
-     */
-    void includeVersionByRegex(String groupRegex, String moduleNameRegex, String versionRegex);
+public interface RepositoryContentDescriptor extends InclusiveRepositoryContentDescriptor {
 
     /**
      * Declares that an entire group shouldn't be searched for in this repository.
      *
      * @param group the group name
+     * @since 5.1
      */
     void excludeGroup(String group);
 
     /**
+     * Declares that an entire group and its subgroups shouldn't be searched for in this repository.
+     *
+     * <p>
+     * A subgroup is a group that starts with the given prefix and has a dot immediately after the prefix.
+     * For example, if the prefix is {@code org.gradle}, then {@code org.gradle} is matched as a group,
+     * and {@code org.gradle.foo} and {@code org.gradle.foo.bar} are matched as subgroups. {@code org.gradlefoo}
+     * is not matched as a subgroup.
+     * </p>
+     *
+     * @param groupPrefix the group prefix to include
+     * @since 8.1
+     */
+    @Incubating
+    void excludeGroupAndSubgroups(String groupPrefix);
+
+    /**
      * Declares that an entire group shouldn't be searched for in this repository.
      *
      * @param groupRegex the group name regular expression
+     * @since 5.1
      */
     void excludeGroupByRegex(String groupRegex);
 
@@ -98,6 +68,7 @@ public interface RepositoryContentDescriptor {
      *
      * @param group the group name
      * @param moduleName the module name
+     * @since 5.1
      */
     void excludeModule(String group, String moduleName);
 
@@ -106,24 +77,31 @@ public interface RepositoryContentDescriptor {
      *
      * @param groupRegex the group name regular expression
      * @param moduleNameRegex the module name regular expression
+     * @since 5.1
      */
     void excludeModuleByRegex(String groupRegex, String moduleNameRegex);
 
     /**
      * Declares that a specific module version shouldn't be searched for in this repository.
+     * <p>
+     * The version notation for a regex will be matched against a single version and does not support range notations.
      *
      * @param group the group name
      * @param moduleName the module name
      * @param version the module version
+     * @since 5.1
      */
     void excludeVersion(String group, String moduleName, String version);
 
     /**
      * Declares that a specific module version shouldn't be searched for in this repository, using regular expressions.
+     * <p>
+     * The version notation for a regex will be matched against a single version and does not support range notations.
      *
      * @param groupRegex the group name
      * @param moduleNameRegex the module name
      * @param versionRegex the module version
+     * @since 5.1
      */
     void excludeVersionByRegex(String groupRegex, String moduleNameRegex, String versionRegex);
 
@@ -132,16 +110,18 @@ public interface RepositoryContentDescriptor {
      * set of configurations. Defaults to any configuration
      *
      * @param configurationNames the names of the configurations the repository will be used for
+     * @since 5.1
      */
-    void onlyForConfigurations(String... configurationNames);
+    void onlyForConfigurations(@Nullable String... configurationNames);
 
     /**
      * Declares that this repository should not be used for a specific
      * set of configurations. Defaults to any configuration
      *
      * @param configurationNames the names of the configurations the repository will not be used for
+     * @since 5.1
      */
-    void notForConfigurations(String... configurationNames);
+    void notForConfigurations(@Nullable String... configurationNames);
 
     /**
      * Declares that this repository will only be searched if the consumer requires a
@@ -149,6 +129,8 @@ public interface RepositoryContentDescriptor {
      * @param attribute the attribute
      * @param validValues the list of accepted values
      * @param <T> the type of the attribute
+     * @since 5.1
      */
+    @SuppressWarnings("unchecked")
     <T> void onlyForAttribute(Attribute<T> attribute, T... validValues);
 }

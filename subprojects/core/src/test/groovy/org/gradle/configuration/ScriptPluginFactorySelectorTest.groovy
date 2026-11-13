@@ -19,18 +19,20 @@ import org.gradle.api.Project
 import org.gradle.api.initialization.Settings
 import org.gradle.api.initialization.dsl.ScriptHandler
 import org.gradle.api.internal.initialization.ClassLoaderScope
-import org.gradle.configuration.internal.DefaultUserCodeApplicationContext
 import org.gradle.groovy.scripts.ScriptSource
-import org.gradle.internal.operations.TestBuildOperationExecutor
+import org.gradle.groovy.scripts.internal.ScriptSourceListener
+import org.gradle.internal.code.TestUserCodeApplicationContext
+import org.gradle.internal.operations.TestBuildOperationRunner
 import org.gradle.internal.resource.StringTextResource
+import org.gradle.internal.scripts.ScriptingLanguages
 import spock.lang.Specification
-import spock.lang.Unroll
 
 class ScriptPluginFactorySelectorTest extends Specification {
 
     def providerInstantiator = Mock(ScriptPluginFactorySelector.ProviderInstantiator)
     def defaultScriptPluginFactory = Mock(ScriptPluginFactory)
-    def selector = new ScriptPluginFactorySelector(defaultScriptPluginFactory, providerInstantiator, new TestBuildOperationExecutor(), new DefaultUserCodeApplicationContext())
+    def remoteScriptListener = Mock(ScriptSourceListener)
+    def selector = new ScriptPluginFactorySelector(providerInstantiator, new TestBuildOperationRunner(), new TestUserCodeApplicationContext(), remoteScriptListener)
 
     def scriptHandler = Mock(ScriptHandler)
     def targetScope = Mock(ClassLoaderScope)
@@ -39,11 +41,11 @@ class ScriptPluginFactorySelectorTest extends Specification {
     def defaultScriptPlugin = Mock(ScriptPlugin)
 
     def setup() {
+        _ * providerInstantiator.instantiate(ScriptingLanguages.defaultLanguage().provider) >> defaultScriptPluginFactory
         _ * defaultScriptPluginFactory.create(*_) >> defaultScriptPlugin
     }
 
-    @Unroll
-    def "selects default scripting support short circuiting provider lookup for #fileName"() {
+    def "selects default scripting support for #fileName"() {
         given:
         def scriptSource = scriptSourceFor(fileName)
         def target = new Object()

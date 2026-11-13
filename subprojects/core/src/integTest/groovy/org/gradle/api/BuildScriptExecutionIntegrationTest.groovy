@@ -56,6 +56,7 @@ try {
 
     @Test
     void buildScriptCanContainATaskDefinition() {
+
         testFile('build.gradle') << '''
             task t(type: SomeTask)
 
@@ -63,11 +64,12 @@ try {
             }
 '''
 
-        inTestDirectory().withTaskList().run()
+        inTestDirectory().withTasks("help").run()
     }
 
     @Test
     void buildScriptCanContainOnlyClassDefinitions() {
+
         testFile('build.gradle') << '''
             class TestComparable implements Comparable<TestComparable>, SomeInterface {
                 int compareTo(TestComparable t) {
@@ -81,6 +83,6 @@ try {
             }
 '''
 
-        inTestDirectory().withTaskList().run()
+        inTestDirectory().withTasks("help").run()
     }
 }

@@ -20,53 +20,60 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.SortedSetMultimap;
 import com.google.common.collect.TreeMultimap;
-import org.apache.commons.io.FileUtils;
-import org.gradle.api.logging.Logger;
-import org.gradle.api.logging.Logging;
+import org.gradle.api.internal.changedetection.state.CrossBuildFileHashCache;
 import org.gradle.api.specs.Spec;
+import org.gradle.cache.CleanupFrequency;
 import org.gradle.cache.CleanupProgressMonitor;
+import org.gradle.internal.cache.MonitoredCleanupAction;
+import org.gradle.internal.file.Deleter;
 import org.gradle.internal.time.Time;
 import org.gradle.internal.time.Timer;
-import org.gradle.util.GFileUtils;
+import org.gradle.internal.versionedcache.VersionSpecificCacheDirectory;
+import org.gradle.internal.versionedcache.VersionSpecificCacheDirectoryScanner;
 import org.gradle.util.GradleVersion;
+import org.gradle.util.internal.GFileUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nonnull;
 import java.io.File;
 import java.io.IOException;
+import java.time.Instant;
 import java.util.SortedSet;
-import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
-import static org.gradle.api.internal.changedetection.state.CrossBuildFileHashCache.FILE_HASHES_CACHE_KEY;
-
-public class VersionSpecificCacheCleanupAction implements DirectoryCleanupAction {
+public class VersionSpecificCacheCleanupAction implements MonitoredCleanupAction {
+    private final static String FILE_HASHES_CACHE_KEY =  CrossBuildFileHashCache.Kind.FILE_HASHES.getCacheId();
 
     @VisibleForTesting static final String MARKER_FILE_PATH = FILE_HASHES_CACHE_KEY + "/" + FILE_HASHES_CACHE_KEY + ".lock";
-    private static final Logger LOGGER = Logging.getLogger(VersionSpecificCacheCleanupAction.class);
-    private static final long CLEANUP_INTERVAL_IN_HOURS = 24;
+    private static final Logger LOGGER = LoggerFactory.getLogger(VersionSpecificCacheCleanupAction.class);
 
     private final VersionSpecificCacheDirectoryScanner versionSpecificCacheDirectoryScanner;
-    private final long maxUnusedDaysForReleases;
-    private final long maxUnusedDaysForSnapshots;
+    private final Supplier<Long> releaseTimestampSupplier;
+    private final Supplier<Long> snapshotTimestampSupplier;
+    private final Deleter deleter;
+    private final CleanupFrequency cleanupFrequency;
 
-    public VersionSpecificCacheCleanupAction(File cacheBaseDir, long maxUnusedDaysForReleasesAndSnapshots) {
-        this(cacheBaseDir, maxUnusedDaysForReleasesAndSnapshots, maxUnusedDaysForReleasesAndSnapshots);
+    public VersionSpecificCacheCleanupAction(File cacheBaseDir, Supplier<Long> releasesAndSnapshotTimestampSupplier, Deleter deleter, CleanupFrequency cleanupFrequency) {
+        this(cacheBaseDir, releasesAndSnapshotTimestampSupplier, releasesAndSnapshotTimestampSupplier, deleter, cleanupFrequency);
     }
 
-    public VersionSpecificCacheCleanupAction(File cacheBaseDir, long maxUnusedDaysForReleases, long maxUnusedDaysForSnapshots) {
-        Preconditions.checkArgument(maxUnusedDaysForReleases >= maxUnusedDaysForSnapshots,
-            "maxUnusedDaysForReleases (%s) must be greater than or equal to maxUnusedDaysForSnapshots (%s)", maxUnusedDaysForReleases, maxUnusedDaysForSnapshots);
+    public VersionSpecificCacheCleanupAction(File cacheBaseDir, Supplier<Long> releaseTimestampSupplier, Supplier<Long> snapshotTimestampSupplier, Deleter deleter, CleanupFrequency cleanupFrequency) {
+        this.deleter = deleter;
+        Preconditions.checkArgument(releaseTimestampSupplier.get() <= snapshotTimestampSupplier.get(),
+            "release timestamp (%s) must supply a timestamp older than or equal to snapshot timestamp (%s)", releaseTimestampSupplier.get(), snapshotTimestampSupplier.get());
         this.versionSpecificCacheDirectoryScanner = new VersionSpecificCacheDirectoryScanner(cacheBaseDir);
-        this.maxUnusedDaysForReleases = maxUnusedDaysForReleases;
-        this.maxUnusedDaysForSnapshots = maxUnusedDaysForSnapshots;
+        this.releaseTimestampSupplier = releaseTimestampSupplier;
+        this.snapshotTimestampSupplier = snapshotTimestampSupplier;
+        this.cleanupFrequency = cleanupFrequency;
     }
 
     @Override
-    @Nonnull
     public String getDisplayName() {
         return "Deleting unused version-specific caches in " + versionSpecificCacheDirectoryScanner.getBaseDir();
     }
 
-    public boolean execute(@Nonnull CleanupProgressMonitor progressMonitor) {
+    @Override
+    public boolean execute(CleanupProgressMonitor progressMonitor) {
         if (requiresCleanup()) {
             Timer timer = Time.startTimer();
             performCleanup(progressMonitor);
@@ -77,13 +84,20 @@ public class VersionSpecificCacheCleanupAction implements DirectoryCleanupAction
     }
 
     private boolean requiresCleanup() {
+        Instant lastCleanupTime;
+
         File gcFile = getGcFile();
         if (!gcFile.exists()) {
-            return gcFile.getParentFile().exists();
+            if (!gcFile.getParentFile().exists()) {
+                return false;
+            } else {
+                lastCleanupTime = null;
+            }
+        } else {
+            lastCleanupTime = Instant.ofEpochMilli(gcFile.lastModified());
         }
-        long duration = System.currentTimeMillis() - gcFile.lastModified();
-        long timeInHours = TimeUnit.MILLISECONDS.toHours(duration);
-        return timeInHours >= CLEANUP_INTERVAL_IN_HOURS;
+
+        return cleanupFrequency.requiresCleanup(lastCleanupTime);
     }
 
     private void markCleanedUp() {
@@ -96,10 +110,9 @@ public class VersionSpecificCacheCleanupAction implements DirectoryCleanupAction
     }
 
     private void performCleanup(CleanupProgressMonitor progressMonitor) {
-        MinimumTimestampProvider minimumTimestampProvider = new MinimumTimestampProvider();
         SortedSetMultimap<GradleVersion, VersionSpecificCacheDirectory> cacheDirsByBaseVersion = scanForVersionSpecificCacheDirs();
         for (GradleVersion baseVersion : cacheDirsByBaseVersion.keySet()) {
-            performCleanup(cacheDirsByBaseVersion.get(baseVersion), minimumTimestampProvider, progressMonitor);
+            performCleanup(cacheDirsByBaseVersion.get(baseVersion), releaseTimestampSupplier, snapshotTimestampSupplier, progressMonitor);
         }
         markCleanedUp();
     }
@@ -112,8 +125,8 @@ public class VersionSpecificCacheCleanupAction implements DirectoryCleanupAction
         return cacheDirsByBaseVersion;
     }
 
-    private void performCleanup(SortedSet<VersionSpecificCacheDirectory> cacheDirsWithSameBaseVersion, MinimumTimestampProvider minimumTimestampProvider, CleanupProgressMonitor progressMonitor) {
-        Spec<VersionSpecificCacheDirectory> cleanupCondition = new CleanupCondition(cacheDirsWithSameBaseVersion, minimumTimestampProvider);
+    private void performCleanup(SortedSet<VersionSpecificCacheDirectory> cacheDirsWithSameBaseVersion, Supplier<Long> releaseTimestampSupplier, Supplier<Long> snapshotTimestampSupplier, CleanupProgressMonitor progressMonitor) {
+        Spec<VersionSpecificCacheDirectory> cleanupCondition = new CleanupCondition(cacheDirsWithSameBaseVersion, releaseTimestampSupplier, snapshotTimestampSupplier);
         for (VersionSpecificCacheDirectory cacheDir : cacheDirsWithSameBaseVersion) {
             if (cleanupCondition.isSatisfiedBy(cacheDir)) {
                 progressMonitor.incrementDeleted();
@@ -130,16 +143,18 @@ public class VersionSpecificCacheCleanupAction implements DirectoryCleanupAction
 
     private void deleteCacheDir(File cacheDir) throws IOException {
         LOGGER.debug("Deleting version-specific cache directory at {}", cacheDir);
-        FileUtils.deleteDirectory(cacheDir);
+        deleter.deleteRecursively(cacheDir);
     }
 
     private static class CleanupCondition implements Spec<VersionSpecificCacheDirectory> {
         private final SortedSet<VersionSpecificCacheDirectory> cacheDirsWithSameBaseVersion;
-        private final MinimumTimestampProvider minimumTimestampProvider;
+        private final Supplier<Long> releaseTimestampSupplier;
+        private final Supplier<Long> snapshotTimestampSupplier;
 
-        CleanupCondition(SortedSet<VersionSpecificCacheDirectory> cacheDirsWithSameBaseVersion, MinimumTimestampProvider minimumTimestampProvider) {
+        CleanupCondition(SortedSet<VersionSpecificCacheDirectory> cacheDirsWithSameBaseVersion, Supplier<Long> releaseTimestampSupplier, Supplier<Long> snapshotTimestampSupplier) {
             this.cacheDirsWithSameBaseVersion = cacheDirsWithSameBaseVersion;
-            this.minimumTimestampProvider = minimumTimestampProvider;
+            this.releaseTimestampSupplier = releaseTimestampSupplier;
+            this.snapshotTimestampSupplier = snapshotTimestampSupplier;
         }
 
         @Override
@@ -152,36 +167,14 @@ public class VersionSpecificCacheCleanupAction implements DirectoryCleanupAction
         }
 
         private boolean markerFileHasNotBeenTouchedRecently(VersionSpecificCacheDirectory cacheDir, File markerFile) {
-            if (markerFile.lastModified() < minimumTimestampProvider.forReleases()) {
+            if (markerFile.lastModified() < releaseTimestampSupplier.get()) {
                 return true;
             }
-            if (cacheDir.getVersion().isSnapshot() && markerFile.lastModified() < minimumTimestampProvider.forSnapshots()) {
+            if (cacheDir.getVersion().isSnapshot() && markerFile.lastModified() < snapshotTimestampSupplier.get()) {
+                // Keep at least one snapshot version for this base version
                 return cacheDirsWithSameBaseVersion.tailSet(cacheDir).size() > 1;
             }
             return false;
-        }
-    }
-
-    private class MinimumTimestampProvider {
-        private final long minimumReleaseTimestamp;
-        private final long minimumSnapshotTimestamp;
-
-        MinimumTimestampProvider() {
-            long startTime = System.currentTimeMillis();
-            this.minimumReleaseTimestamp = compute(startTime, maxUnusedDaysForReleases);
-            this.minimumSnapshotTimestamp = compute(startTime, maxUnusedDaysForSnapshots);
-        }
-
-        private long compute(long startTime, long maxUnusedDays) {
-            return Math.max(0, startTime - TimeUnit.DAYS.toMillis(maxUnusedDays));
-        }
-
-        long forReleases() {
-            return minimumReleaseTimestamp;
-        }
-
-        long forSnapshots() {
-            return minimumSnapshotTimestamp;
         }
     }
 }

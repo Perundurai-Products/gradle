@@ -15,15 +15,14 @@
  */
 package org.gradle.api
 
+import org.gradle.api.internal.FeaturePreviewsActivationFixture
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.integtests.fixtures.FeaturePreviewsFixture
 import org.gradle.integtests.fixtures.executer.ArtifactBuilder
+import org.gradle.internal.os.OperatingSystem
 import org.gradle.test.fixtures.file.TestFile
-import spock.lang.Unroll
+import spock.lang.Issue
 
 class SettingsScriptExecutionIntegrationTest extends AbstractIntegrationSpec {
-
-    @Unroll
     def "emits deprecation warnings when enabling inactive #feature feature"() {
         given:
         settingsFile << """
@@ -31,15 +30,57 @@ class SettingsScriptExecutionIntegrationTest extends AbstractIntegrationSpec {
         """
 
         when:
-        executer.expectDeprecationWarning()
-        succeeds()
+        executer.expectDocumentedDeprecationWarning("enableFeaturePreview('$feature') has been deprecated. This is scheduled to be removed in Gradle 10. " +
+                "The feature flag is no longer relevant, please remove it from your settings file. " +
+                "For more information, please refer to https://docs.gradle.org/current/userguide/feature_lifecycle.html#feature_preview in the Gradle documentation.")
 
         then:
-        outputContains("enableFeaturePreview('$feature') has been deprecated.")
-        outputContains("The feature flag is no longer relevant, please remove it from your settings file.")
+        succeeds()
 
         where:
-        feature << FeaturePreviewsFixture.inactiveFeatures()
+        feature << FeaturePreviewsActivationFixture.inactiveFeatures()
+    }
+
+    @Issue("https://github.com/gradle/gradle/issues/8840")
+    def "can use exec in settings"() {
+        addExecToScript(settingsFile)
+        when:
+        succeeds()
+        then:
+        outputContains("hello from settings")
+    }
+
+    @Issue("https://github.com/gradle/gradle/issues/8840")
+    def "can use exec in settings applied from another script"() {
+        settingsFile << """
+            apply from: 'other.gradle'
+        """
+        addExecToScript(file("other.gradle"))
+        when:
+        succeeds()
+        then:
+        outputContains("hello from settings")
+    }
+
+    private void addExecToScript(TestFile scriptFile) {
+        file("message") << """
+            hello from settings
+        """
+        if (OperatingSystem.current().windows) {
+            scriptFile << """
+                def message = providers.exec {
+                    commandLine "cmd.exe", "/d", "/c", "type", "message"
+                }.standardOutput.asText.get()
+                print message
+            """
+        } else {
+            scriptFile << """
+                def message = providers.exec {
+                    commandLine "cat", "message"
+                }.standardOutput.asText.get()
+                print message
+            """
+        }
     }
 
     def "notices changes to settings scripts that do not change the file length"() {
@@ -67,13 +108,14 @@ buildscript {
     dependencies { classpath files('repo/test-1.3.jar') }
 }
 new org.gradle.test.BuildClass()
-new BuildSrcClass();
+
 println 'quiet message'
 logging.captureStandardOutput(LogLevel.ERROR)
 println 'error message'
 assert settings != null
-assert buildscript.classLoader == getClass().classLoader.parent
-assert buildscript.classLoader == Thread.currentThread().contextClassLoader
+// TODO:configuration-cache consider restoring assertion on the relationship
+//  between buildscript.classLoader and getClas().classLoader
+assert getClass().classLoader.parent == Thread.currentThread().contextClassLoader
 Gradle.class.classLoader.loadClass('${implClassName}')
 try {
     buildscript.classLoader.loadClass('${implClassName}')
@@ -84,6 +126,13 @@ try {
     if (buildscript.classLoader instanceof Closeable) {
         buildscript.classLoader.close()
     }
+}
+
+try {
+    buildscript.classLoader.loadClass('BuildSrcClass')
+    assert false: 'should fail'
+} catch (ClassNotFoundException e) {
+    // expected
 }
 """
         buildFile << 'task doStuff'

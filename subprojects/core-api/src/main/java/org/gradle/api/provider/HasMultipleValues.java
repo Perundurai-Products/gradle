@@ -16,9 +16,9 @@
 
 package org.gradle.api.provider;
 
-import org.gradle.api.Incubating;
-
-import javax.annotation.Nullable;
+import org.gradle.api.SupportsKotlinAssignmentOverloading;
+import org.gradle.declarative.dsl.model.annotations.HiddenInDefinition;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Represents a property whose value can be set using multiple elements of type {@link T}, such as a collection property.
@@ -28,14 +28,17 @@ import javax.annotation.Nullable;
  * @param <T> the type of elements.
  * @since 4.5
  */
-@Incubating
-public interface HasMultipleValues<T> {
+@SupportsKotlinAssignmentOverloading
+@HiddenInDefinition
+public interface HasMultipleValues<T> extends HasConfigurableValue, SupportsConvention {
     /**
      * Sets the value of the property to the elements of the given iterable, and replaces any existing value. This property will query the elements of the iterable each time the value of this property is queried.
      *
-     * <p>This method can also be used to clear the value of the property, by passing {@code null} as the value.
+     * <p>This method can also be used to discard the value of the property, by passing {@code null} as the value.
+     * The convention for this property, if any, will be used to provide the value instead.
      *
      * @param elements The elements, can be null.
+     * @since 4.5
      */
     void set(@Nullable Iterable<? extends T> elements);
 
@@ -43,8 +46,31 @@ public interface HasMultipleValues<T> {
      * Sets the property to have the same value of the given provider, and replaces any existing value. This property will track the value of the provider and query its value each time the value of this property is queried. When the provider has no value, this property will also have no value.
      *
      * @param provider Provider of the elements.
+     * @since 4.5
      */
     void set(Provider<? extends Iterable<? extends T>> provider);
+
+    /**
+     * Sets the value of the property to the elements of the given iterable, and replaces any existing value. This property will query the elements of the iterable each time the value of this property is queried.
+     *
+     * <p>This is the same as {@link #set(Iterable)} but returns this property to allow method chaining.</p>
+     *
+     * @param elements The elements, can be null.
+     * @return this
+     * @since 5.6
+     */
+    HasMultipleValues<T> value(@Nullable Iterable<? extends T> elements);
+
+    /**
+     * Sets the property to have the same value of the given provider, and replaces any existing value. This property will track the value of the provider and query its value each time the value of this property is queried. When the provider has no value, this property will also have no value.
+     *
+     * <p>This is the same as {@link #set(Provider)} but returns this property to allow method chaining.</p>
+     *
+     * @param provider Provider of the elements.
+     * @return this
+     * @since 5.6
+     */
+    HasMultipleValues<T> value(Provider<? extends Iterable<? extends T>> provider);
 
     /**
      * Sets the value of this property to an empty collection, and replaces any existing value.
@@ -58,6 +84,7 @@ public interface HasMultipleValues<T> {
      * Adds an element to the property value.
      *
      * @param element The element
+     * @since 4.5
      */
     void add(T element);
 
@@ -68,6 +95,7 @@ public interface HasMultipleValues<T> {
      * This property will have no value when the given provider has no value.
      *
      * @param provider The provider of an element
+     * @since 4.5
      */
     void add(Provider<? extends T> provider);
 
@@ -77,6 +105,7 @@ public interface HasMultipleValues<T> {
      * @param elements The elements to add
      * @since 4.10
      */
+    @SuppressWarnings("unchecked")
     void addAll(T... elements);
 
     /**
@@ -96,17 +125,18 @@ public interface HasMultipleValues<T> {
      * This property will have no value when the given provider has no value.
      *
      * @param provider Provider of elements
+     * @since 4.5
      */
     void addAll(Provider<? extends Iterable<? extends T>> provider);
 
     /**
      * Specifies the value to use as the convention for this property. The convention is used when no value has been set for this property.
      *
-     * @param elements The elements
+     * @param elements The elements, or {@code null} when the convention is that the property has no value.
      * @return this
      * @since 5.1
      */
-    HasMultipleValues<T> convention(Iterable<? extends T> elements);
+    HasMultipleValues<T> convention(@Nullable Iterable<? extends T> elements);
 
     /**
      * Specifies the provider of the value to use as the convention for this property. The convention is used when no value has been set for this property.
@@ -126,5 +156,6 @@ public interface HasMultipleValues<T> {
      *
      * @since 5.0
      */
+    @Override
     void finalizeValue();
 }

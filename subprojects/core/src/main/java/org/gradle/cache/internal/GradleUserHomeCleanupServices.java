@@ -16,17 +16,50 @@
 
 package org.gradle.cache.internal;
 
+import org.gradle.api.internal.cache.CacheConfigurationsInternal;
+import org.gradle.cache.HasCleanupAction;
+import org.gradle.cache.scopes.GlobalScopedCacheBuilderFactory;
 import org.gradle.initialization.GradleUserHomeDirProvider;
-import org.gradle.internal.logging.progress.ProgressLoggerFactory;
+import org.gradle.internal.event.ListenerManager;
+import org.gradle.internal.file.Deleter;
+import org.gradle.internal.operations.BuildOperationRunner;
 import org.gradle.internal.service.ServiceRegistration;
+import org.gradle.internal.service.ServiceRegistrationProvider;
+import org.gradle.internal.session.BuildSessionLifecycleListener;
+import org.gradle.internal.versionedcache.UsedGradleVersions;
+import org.gradle.internal.versionedcache.UsedGradleVersionsFromGradleUserHomeCaches;
 
-public class GradleUserHomeCleanupServices {
+public class GradleUserHomeCleanupServices implements ServiceRegistrationProvider {
 
-    public void configure(ServiceRegistration registration, GradleUserHomeDirProvider gradleUserHomeDirProvider, CacheScopeMapping cacheScopeMapping, ProgressLoggerFactory progressLoggerFactory) {
-        UsedGradleVersions usedGradleVersions = new UsedGradleVersionsFromGradleUserHomeCaches(cacheScopeMapping);
+    public void configure(
+        ServiceRegistration registration,
+        GlobalScopedCacheBuilderFactory cacheBuilderFactory,
+        Deleter deleter,
+        GradleUserHomeDirProvider gradleUserHomeDirProvider,
+        BuildOperationRunner buildOperationRunner,
+        CacheConfigurationsInternal cacheConfigurations,
+        ListenerManager listenerManager,
+        CacheFactory cacheFactory
+    ) {
+        UsedGradleVersions usedGradleVersions = new UsedGradleVersionsFromGradleUserHomeCaches(cacheBuilderFactory);
         registration.add(UsedGradleVersions.class, usedGradleVersions);
+
         // register eagerly so stop() is triggered when services are being stopped
-        registration.add(GradleUserHomeCleanupService.class, new GradleUserHomeCleanupService(gradleUserHomeDirProvider, cacheScopeMapping, usedGradleVersions, progressLoggerFactory));
+        GradleUserHomeCleanupService gradleUserHomeCleanupService = new GradleUserHomeCleanupService(deleter, gradleUserHomeDirProvider, cacheBuilderFactory, usedGradleVersions, buildOperationRunner, cacheConfigurations);
+        registration.add(
+            GradleUserHomeCleanupService.class,
+            gradleUserHomeCleanupService
+        );
+
+        listenerManager.addListener(new BuildSessionLifecycleListener() {
+            @Override
+            public void beforeComplete() {
+                if (cacheConfigurations.getCleanupFrequency().get().shouldCleanupOnEndOfSession()) {
+                    gradleUserHomeCleanupService.cleanup();
+                    cacheFactory.visitCaches(HasCleanupAction::cleanup);
+                }
+            }
+        });
     }
 
 }

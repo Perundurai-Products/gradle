@@ -16,11 +16,16 @@
 package org.gradle.api.file;
 
 import groovy.lang.Closure;
+import groovy.lang.DelegatesTo;
+import groovy.transform.stc.ClosureParams;
+import groovy.transform.stc.SimpleType;
 import org.gradle.api.Action;
 import org.gradle.api.Transformer;
 import org.gradle.api.specs.Spec;
 import org.gradle.api.tasks.util.PatternFilterable;
 import org.gradle.internal.HasInternalProtocol;
+import org.gradle.internal.instrumentation.api.annotations.ToBeReplacedByLazyProperty;
+import org.jspecify.annotations.Nullable;
 
 import java.io.FilterReader;
 import java.util.Map;
@@ -83,6 +88,7 @@ import java.util.regex.Pattern;
  *
  * @see org.gradle.api.tasks.Copy Copy Task
  * @see org.gradle.api.Project#copy(groovy.lang.Closure) Project.copy()
+ * @since 0.8
  */
 @HasInternalProtocol
 public interface CopySpec extends CopySourceSpec, CopyProcessingSpec, PatternFilterable {
@@ -90,13 +96,16 @@ public interface CopySpec extends CopySourceSpec, CopyProcessingSpec, PatternFil
      * Specifies whether case-sensitive pattern matching should be used.
      *
      * @return true for case-sensitive matching.
+     * @since 0.9
      */
+    @ToBeReplacedByLazyProperty
     boolean isCaseSensitive();
 
     /**
      * Specifies whether case-sensitive pattern matching should be used for this CopySpec.
      *
      * @param caseSensitive true for case-sensitive matching.
+     * @since 0.9
      */
     void setCaseSensitive(boolean caseSensitive);
 
@@ -104,13 +113,16 @@ public interface CopySpec extends CopySourceSpec, CopyProcessingSpec, PatternFil
      * Tells if empty target directories will be included in the copy.
      *
      * @return <code>true</code> if empty target directories will be included in the copy, <code>false</code> otherwise
+     * @since 1.0
      */
+    @ToBeReplacedByLazyProperty
     boolean getIncludeEmptyDirs();
 
     /**
      * Controls if empty target directories should be included in the copy.
      *
      * @param includeEmptyDirs <code>true</code> if empty target directories should be included in the copy, <code>false</code> otherwise
+     * @since 1.0
      */
     void setIncludeEmptyDirs(boolean includeEmptyDirs);
 
@@ -123,12 +135,16 @@ public interface CopySpec extends CopySourceSpec, CopyProcessingSpec, PatternFil
      *
      * @return the strategy to use for files included by this copy spec.
      * @see DuplicatesStrategy
+     * @since 1.7
      */
+    @ToBeReplacedByLazyProperty
     DuplicatesStrategy getDuplicatesStrategy();
 
     /**
-     * The strategy to use when trying to copy more than one file to the same destination. Set to {@link DuplicatesStrategy#INHERIT}, the default strategy, to use
-     * the strategy inherited from the parent copy spec, if any, or {@link DuplicatesStrategy#INCLUDE} if this copy spec has no parent.
+     * The strategy to use when trying to copy more than one file to the same destination.
+     * Defaults to {@link DuplicatesStrategy#INHERIT}, the strategy inherited from the parent copy spec.
+     * If no explicit deduplication strategy is set, but duplicates are found, an error is thrown.
+     * @since 1.7
      */
     void setDuplicatesStrategy(DuplicatesStrategy strategy);
 
@@ -139,6 +155,7 @@ public interface CopySpec extends CopySourceSpec, CopyProcessingSpec, PatternFil
      * @param pattern Ant-style pattern used to match against files' relative paths
      * @param action action called for the FileCopyDetails of each file matching pattern
      * @return this
+     * @since 1.7
      */
     CopySpec filesMatching(String pattern, Action<? super FileCopyDetails> action);
 
@@ -149,6 +166,7 @@ public interface CopySpec extends CopySourceSpec, CopyProcessingSpec, PatternFil
      * @param patterns Ant-style patterns used to match against files' relative paths
      * @param action action called for the FileCopyDetails of each file matching pattern
      * @return this
+     * @since 3.1
      */
     CopySpec filesMatching(Iterable<String> patterns, Action<? super FileCopyDetails> action);
 
@@ -160,6 +178,7 @@ public interface CopySpec extends CopySourceSpec, CopyProcessingSpec, PatternFil
      * @param pattern Ant-style pattern used to match against files' relative paths
      * @param action action called for the FileCopyDetails of each file that does not match pattern
      * @return this
+     * @since 1.7
      */
     CopySpec filesNotMatching(String pattern, Action<? super FileCopyDetails> action);
 
@@ -171,6 +190,7 @@ public interface CopySpec extends CopySourceSpec, CopyProcessingSpec, PatternFil
      * @param patterns Ant-style patterns used to match against files' relative paths
      * @param action action called for the FileCopyDetails of each file that does not match any pattern
      * @return this
+     * @since 3.1
      */
     CopySpec filesNotMatching(Iterable<String> patterns, Action<? super FileCopyDetails> action);
 
@@ -192,6 +212,7 @@ public interface CopySpec extends CopySourceSpec, CopyProcessingSpec, PatternFil
      *
      * @param sourceSpecs The specs to add
      * @return this
+     * @since 0.9
      */
     CopySpec with(CopySpec... sourceSpecs);
 
@@ -201,13 +222,16 @@ public interface CopySpec extends CopySourceSpec, CopyProcessingSpec, PatternFil
      * {@inheritDoc}
      */
     @Override
-    CopySpec from(Object... sourcePaths);
+    CopySpec from(@Nullable Object... sourcePaths);
 
     /**
      * {@inheritDoc}
      */
     @Override
-    CopySpec from(Object sourcePath, Closure c);
+    CopySpec from(Object sourcePath,
+                  @DelegatesTo(CopySpec.class)
+                  @ClosureParams(value = SimpleType.class, options = "org.gradle.api.file.CopySpec")
+                  Closure c);
 
     /**
      * {@inheritDoc}
@@ -312,8 +336,9 @@ public interface CopySpec extends CopySourceSpec, CopyProcessingSpec, PatternFil
      * @param destPath Path to the destination directory for a Copy
      * @param configureClosure The closure to use to configure the child {@code CopySpec}.
      * @return this
+     * @since 0.9
      */
-    CopySpec into(Object destPath, Closure configureClosure);
+    CopySpec into(Object destPath, @DelegatesTo(CopySpec.class) Closure configureClosure);
 
     /**
      * Creates and configures a child {@code CopySpec} with the given destination path.
@@ -322,6 +347,7 @@ public interface CopySpec extends CopySourceSpec, CopyProcessingSpec, PatternFil
      * @param destPath Path to the destination directory for a Copy
      * @param copySpec The action to use to configure the child {@code CopySpec}.
      * @return this
+     * @since 3.0
      */
     CopySpec into(Object destPath, Action<? super CopySpec> copySpec);
 
@@ -335,7 +361,7 @@ public interface CopySpec extends CopySourceSpec, CopyProcessingSpec, PatternFil
      * {@inheritDoc}
      */
     @Override
-    CopySpec rename(Transformer<String, String> renamer);
+    CopySpec rename(Transformer<@Nullable String, String> renamer);
 
     /**
      * {@inheritDoc}
@@ -371,7 +397,7 @@ public interface CopySpec extends CopySourceSpec, CopyProcessingSpec, PatternFil
      * {@inheritDoc}
      */
     @Override
-    CopySpec filter(Transformer<String, String> transformer);
+    CopySpec filter(Transformer<@Nullable String, String> transformer);
 
     /**
      * {@inheritDoc}
@@ -383,13 +409,19 @@ public interface CopySpec extends CopySourceSpec, CopyProcessingSpec, PatternFil
      * {@inheritDoc}
      */
     @Override
+    CopySpec expand(Map<String, ?> properties, Action<? super ExpandDetails> action);
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
     CopySpec eachFile(Action<? super FileCopyDetails> action);
 
     /**
      * {@inheritDoc}
      */
     @Override
-    CopySpec eachFile(Closure closure);
+    CopySpec eachFile(@DelegatesTo(FileCopyDetails.class) Closure closure);
 
     /**
      * Gets the charset used to read and write files when filtering.
@@ -398,6 +430,7 @@ public interface CopySpec extends CopySourceSpec, CopyProcessingSpec, PatternFil
      * @return the charset used to read and write files when filtering
      * @since 2.14
      */
+    @ToBeReplacedByLazyProperty
     String getFilteringCharset();
 
     /**

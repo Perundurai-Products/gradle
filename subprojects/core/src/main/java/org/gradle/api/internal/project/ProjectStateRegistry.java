@@ -16,75 +16,63 @@
 package org.gradle.api.internal.project;
 
 import org.gradle.api.Project;
-import org.gradle.api.artifacts.component.BuildIdentifier;
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier;
-import org.gradle.internal.Factory;
+import org.gradle.initialization.ProjectDescriptorRegistry;
+import org.gradle.internal.build.BuildIdentity;
+import org.gradle.internal.build.BuildProjectRegistry;
 import org.gradle.internal.build.BuildState;
+import org.gradle.internal.project.ImmutableProjectDescriptor;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 import org.gradle.util.Path;
+import org.jspecify.annotations.Nullable;
 
 import javax.annotation.concurrent.ThreadSafe;
-import java.util.Collection;
 
 /**
- * A registry of all of the projects present in a build tree.
+ * A registry of all projects present in a build tree.
  */
 @ThreadSafe
-public interface ProjectStateRegistry {
+@ServiceScope(Scope.BuildTree.class)
+public interface ProjectStateRegistry extends ProjectStateLookup {
     /**
-     * Returns all projects in the build tree.
+     * Locates the state object that owns the given public project model. Can use {@link ProjectInternal#getOwner()} instead.
      */
-    Collection<? extends ProjectState> getAllProjects();
-
-    /**
-     * Locates the state object that owns the given public project model.
-     */
-    ProjectState stateFor(Project project);
+    ProjectState stateFor(Project project) throws IllegalArgumentException;
 
     /**
      * Locates the state object that owns the project with the given identifier.
      */
-    ProjectState stateFor(ProjectComponentIdentifier identifier);
+    ProjectState stateFor(ProjectComponentIdentifier identifier) throws IllegalArgumentException;
 
     /**
-     * Locates the state object for the given project.
+     * Locates the state object that owns the project with the identity path.
      */
-    ProjectState stateFor(BuildIdentifier buildIdentifier, Path projectPath);
+    ProjectState stateFor(Path identityPath) throws IllegalArgumentException;
 
     /**
-     * Registers a project.
+     * Locates the state objects for all projects of the given build.
      */
-    void register(BuildState owner, ProjectInternal project);
+    BuildProjectRegistry projectsFor(BuildIdentity buildIdentity) throws IllegalArgumentException;
+
+    /**
+     * Locates the state objects for all projects of the given build, or {@code null} if these are not available yet.
+     */
+    @Nullable
+    BuildProjectRegistry findProjectsFor(BuildIdentity buildIdentity);
 
     /**
      * Registers the projects of a build.
      */
-    void registerProjects(BuildState build);
+    void registerProjects(BuildState owner, ProjectDescriptorRegistry projectRegistry);
 
     /**
-     * Allows a section of code to be run with state locking disabled.  This should be used to allow
-     * deprecated practices that we eventually want to retire.
+     * Registers a single project.
      */
-    void withLenientState(Runnable runnable);
+    ProjectState registerProject(BuildState owner, ImmutableProjectDescriptor projectDescriptor);
 
     /**
-     * Creates the object with state locking disabled.  This should be used to allow
-     * deprecated practices that we eventually want to retire.
+     * Discards all projects for the given build.
      */
-    <T> T withLenientState(Factory<T> factory);
-
-    /**
-     * Returns a {@link SafeExclusiveLock}.
-     */
-    SafeExclusiveLock newExclusiveOperationLock();
-
-    /**
-     * Represents a lock that can be used to perform safe concurrent execution in light of the possibility that a project
-     * lock might be released during execution.  Specifically, it avoids blocking on the lock while holding the project lock.
-     */
-    interface SafeExclusiveLock {
-        /**
-         * Safely waits for the lock before executing the given action.
-         */
-        void withLock(Runnable runnable);
-    }
+    void discardProjectsFor(BuildState build);
 }

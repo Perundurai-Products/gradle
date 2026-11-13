@@ -18,6 +18,7 @@ package org.gradle.api.internal.tasks.execution;
 
 import com.google.common.collect.ImmutableMap;
 import org.gradle.api.internal.TaskInternal;
+import org.gradle.api.internal.project.taskfactory.TaskIdentity;
 import org.gradle.execution.plan.LocalTaskNode;
 import org.gradle.internal.operations.trace.CustomOperationTraceSerialization;
 import org.gradle.internal.scan.NotUsedByScanPlugin;
@@ -43,22 +44,22 @@ public class ExecuteTaskBuildOperationDetails implements ExecuteTaskBuildOperati
 
     @Override
     public String getBuildPath() {
-        return getTask().getTaskIdentity().buildPath.toString();
+        return taskIdentity().getProjectIdentity().getBuildPath().asString();
     }
 
     @Override
     public String getTaskPath() {
-        return getTask().getTaskIdentity().projectPath.toString();
+        return taskIdentity().getPath().asString();
     }
 
     @Override
     public long getTaskId() {
-        return getTask().getTaskIdentity().uniqueId;
+        return taskIdentity().getId();
     }
 
     @Override
     public Class<?> getTaskClass() {
-        return getTask().getTaskIdentity().type;
+        return taskIdentity().getTaskType();
     }
 
     @Override
@@ -69,5 +70,9 @@ public class ExecuteTaskBuildOperationDetails implements ExecuteTaskBuildOperati
         builder.put("taskClass", getTaskClass().getName());
         builder.put("taskId", getTaskId());
         return builder.build();
+    }
+
+    private TaskIdentity<?> taskIdentity() {
+        return getTask().getTaskIdentity();
     }
 }

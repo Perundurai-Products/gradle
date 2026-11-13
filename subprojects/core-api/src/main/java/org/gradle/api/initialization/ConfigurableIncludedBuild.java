@@ -27,6 +27,14 @@ import org.gradle.api.artifacts.DependencySubstitutions;
 public interface ConfigurableIncludedBuild extends IncludedBuild {
 
     /**
+     * Sets the name of the included build.
+     *
+     * @param name the name of the build
+     * @since 6.0
+     */
+    void setName(String name);
+
+    /**
      * Configures the dependency substitution rules for this included build.
      *
      * The action receives an instance of {@link DependencySubstitutions} which can be configured with substitution rules.
@@ -34,6 +42,7 @@ public interface ConfigurableIncludedBuild extends IncludedBuild {
      *
      * @see org.gradle.api.artifacts.ResolutionStrategy#dependencySubstitution(Action)
      * @see DependencySubstitutions
+     * @since 3.1
      */
     void dependencySubstitution(Action<? super DependencySubstitutions> action);
 }

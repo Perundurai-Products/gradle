@@ -17,7 +17,7 @@
 package org.gradle.integtests.composite
 
 import org.gradle.integtests.fixtures.build.BuildTestFile
-import spock.lang.Unroll
+import org.gradle.integtests.fixtures.modes.ToBeFixedForIsolatedProjects
 
 class CompositeBuildBuildSrcIdentityIntegrationTest extends AbstractCompositeBuildIntegrationTest {
     BuildTestFile buildB
@@ -29,12 +29,12 @@ class CompositeBuildBuildSrcIdentityIntegrationTest extends AbstractCompositeBui
                 allprojects {
                     apply plugin: 'java'
                 }
-"""
+            """
         }
         includedBuilds << buildB
     }
 
-    @Unroll
+    @ToBeFixedForIsolatedProjects(because = "cross-build configuration in composite build")
     def "includes build identifier in logging output with #display"() {
         dependency "org.test:buildB:1.0"
 
@@ -59,10 +59,11 @@ class CompositeBuildBuildSrcIdentityIntegrationTest extends AbstractCompositeBui
         "rootProject.name='someLib'" | "configured root project name"
     }
 
-    @Unroll
+    @ToBeFixedForIsolatedProjects(because = "cross-build configuration in composite build")
     def "includes build identifier in dependency report with #display"() {
         dependency "org.test:buildB:1.0"
 
+        createDirs("buildB", "buildB/buildSrc", "buildB/buildSrc/b1", "buildB/buildSrc/b2")
         buildB.file("buildSrc/settings.gradle") << """
             $settings
             include 'b1', 'b2'
@@ -80,8 +81,8 @@ class CompositeBuildBuildSrcIdentityIntegrationTest extends AbstractCompositeBui
         then:
         outputContains("""
 runtimeClasspath - Runtime classpath of source set 'main'.
-\\--- project :buildB:buildSrc:b1
-     \\--- project :buildB:buildSrc:b2
+\\--- project ':buildB:buildSrc:b1'
+     \\--- project ':buildB:buildSrc:b2'
 """)
 
         where:
@@ -90,7 +91,6 @@ runtimeClasspath - Runtime classpath of source set 'main'.
         "rootProject.name='someLib'" | "configured root project name"
     }
 
-    @Unroll
     def "includes build identifier in error message on failure to resolve dependencies of build with #display"() {
         dependency "org.test:buildB:1.0"
 
@@ -106,7 +106,7 @@ runtimeClasspath - Runtime classpath of source set 'main'.
         failure.assertHasCause("Could not resolve all files for configuration ':buildB:buildSrc:compileClasspath'.")
         failure.assertHasCause("""Cannot resolve external dependency test:test:1.2 because no repositories are defined.
 Required by:
-    project :buildB:buildSrc""")
+    project ':buildB:buildSrc'""")
 
         where:
         settings                     | display
@@ -114,7 +114,6 @@ Required by:
         "rootProject.name='someLib'" | "configured root project name"
     }
 
-    @Unroll
     def "includes build identifier in task failure error message with #display"() {
         dependency "org.test:buildB:1.0"
 
@@ -129,7 +128,7 @@ Required by:
         fails(buildA, ":assemble")
 
         then:
-        failure.assertHasDescription("Execution failed for task ':buildB:buildSrc:classes'.")
+        failure.assertHasDescription("Execution failed for task ':buildB:buildSrc:classes' (registered by plugin class 'org.gradle.api.plugins.JavaBasePlugin').")
         failure.assertHasCause("broken")
 
         where:
@@ -138,10 +137,11 @@ Required by:
         "rootProject.name='someLib'" | "configured root project name"
     }
 
-    @Unroll
+    @ToBeFixedForIsolatedProjects(because = "cross-build configuration in composite build")
     def "includes build identifier in dependency resolution results with #display"() {
         dependency "org.test:buildB:1.0"
 
+        createDirs("buildB", "buildB/buildSrc", "buildB/buildSrc/a")
         buildB.file("buildSrc/settings.gradle") << """
             ${settings}
             include 'a'
@@ -156,20 +156,19 @@ Required by:
             classes.doLast {
                 def components = configurations.compileClasspath.incoming.resolutionResult.allComponents.id
                 assert components.size() == 2
-                // TODO - should encode 'buildB' somewhere
-                assert components[0].build.name == 'buildSrc'
-                assert components[0].build.currentBuild
+                assert components[0].build.buildPath == ':buildB:buildSrc'
                 assert components[0].projectPath == ':'
-                assert components[0].projectName == 'buildSrc'
-                assert components[1].build.name == 'buildSrc'
-                assert components[1].build.currentBuild
+                assert components[0].projectName == '$rootProjectName'
+                assert components[0].buildTreePath == ':buildB:buildSrc'
+                assert components[1].build.buildPath == ':buildB:buildSrc'
                 assert components[1].projectPath == ':a'
                 assert components[1].projectName == 'a'
+                assert components[1].buildTreePath == ':buildB:buildSrc:a'
 
                 def selectors = configurations.runtimeClasspath.incoming.resolutionResult.allDependencies.requested
                 assert selectors.size() == 1
-                assert selectors[0].displayName == 'project :buildB:buildSrc:a'
-                assert selectors[0].buildName == 'buildSrc'
+                assert selectors[0].displayName == 'project \\':buildB:buildSrc:a\\''
+                assert selectors[0].buildPath == ':buildB:buildSrc'
                 assert selectors[0].projectPath == ':a'
             }
         """
@@ -178,10 +177,8 @@ Required by:
         execute(buildA, ":assemble")
 
         where:
-        settings                     | display
-        ""                           | "default root project name"
-        "rootProject.name='someLib'" | "configured root project name"
+        settings                     | rootProjectName | display
+        ""                           | "buildSrc"      | "default root project name"
+        "rootProject.name='someLib'" | "someLib"       | "configured root project name"
     }
 }
-
-

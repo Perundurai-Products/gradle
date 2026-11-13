@@ -16,62 +16,88 @@
 
 package org.gradle.cache.internal;
 
+import org.gradle.api.internal.cache.CacheConfigurationsInternal;
+import org.gradle.cache.scopes.GlobalScopedCacheBuilderFactory;
 import org.gradle.initialization.GradleUserHomeDirProvider;
+import org.gradle.internal.cache.MonitoredCleanupAction;
 import org.gradle.internal.concurrent.Stoppable;
-import org.gradle.internal.logging.progress.ProgressLogger;
-import org.gradle.internal.logging.progress.ProgressLoggerFactory;
-import org.gradle.util.GUtil;
+import org.gradle.internal.file.Deleter;
+import org.gradle.internal.operations.BuildOperationContext;
+import org.gradle.internal.operations.BuildOperationDescriptor;
+import org.gradle.internal.operations.BuildOperationRunner;
+import org.gradle.internal.operations.CallableBuildOperation;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
+import org.gradle.internal.versionedcache.UsedGradleVersions;
 
 import java.io.File;
-import java.util.Properties;
 
+import static org.gradle.launcher.daemon.logging.DaemonLogConstants.DAEMON_LOG_DIR;
+
+@ServiceScope(Scope.UserHome.class)
 public class GradleUserHomeCleanupService implements Stoppable {
-
-    private static final long MAX_UNUSED_DAYS_FOR_RELEASES = 30;
-    private static final long MAX_UNUSED_DAYS_FOR_SNAPSHOTS = 7;
-    private static final String CACHE_CLEANUP_PROPERTY = "org.gradle.cache.cleanup";
-
+    private final Deleter deleter;
     private final GradleUserHomeDirProvider userHomeDirProvider;
-    private final CacheScopeMapping cacheScopeMapping;
+    private final GlobalScopedCacheBuilderFactory cacheBuilderFactory;
     private final UsedGradleVersions usedGradleVersions;
-    private final ProgressLoggerFactory progressLoggerFactory;
+    private final BuildOperationRunner buildOperationRunner;
+    private final CacheConfigurationsInternal cacheConfigurations;
+    private boolean alreadyCleaned;
 
-    public GradleUserHomeCleanupService(GradleUserHomeDirProvider userHomeDirProvider, CacheScopeMapping cacheScopeMapping, UsedGradleVersions usedGradleVersions, ProgressLoggerFactory progressLoggerFactory) {
+    public GradleUserHomeCleanupService(
+        Deleter deleter,
+        GradleUserHomeDirProvider userHomeDirProvider,
+        GlobalScopedCacheBuilderFactory cacheBuilderFactory,
+        UsedGradleVersions usedGradleVersions,
+        BuildOperationRunner buildOperationRunner,
+        CacheConfigurationsInternal cacheConfigurations
+    ) {
+        this.deleter = deleter;
         this.userHomeDirProvider = userHomeDirProvider;
-        this.cacheScopeMapping = cacheScopeMapping;
+        this.cacheBuilderFactory = cacheBuilderFactory;
         this.usedGradleVersions = usedGradleVersions;
-        this.progressLoggerFactory = progressLoggerFactory;
+        this.buildOperationRunner = buildOperationRunner;
+        this.cacheConfigurations = cacheConfigurations;
+    }
+
+    public void cleanup() {
+        File cacheBaseDir = cacheBuilderFactory.getRootDir();
+        boolean wasCleanedUp = execute(
+            new VersionSpecificCacheCleanupAction(
+                cacheBaseDir,
+                cacheConfigurations.getReleasedWrappers().getEntryRetentionTimestampSupplier(),
+                cacheConfigurations.getSnapshotWrappers().getEntryRetentionTimestampSupplier(),
+                deleter,
+                cacheConfigurations.getCleanupFrequency().get()
+            )
+        );
+        // with this VersionSpecificCacheCleanupAction manages the cleanup frequency timing
+        if (wasCleanedUp) {
+            File gradleUserHomeDirectory = userHomeDirProvider.getGradleUserHomeDirectory();
+            execute(new WrapperDistributionCleanupAction(gradleUserHomeDirectory, usedGradleVersions));
+            execute(new DaemonLogCleanupAction(new File(gradleUserHomeDirectory, DAEMON_LOG_DIR), deleter, cacheConfigurations.getDaemonLogs().getEntryRetentionTimestampSupplier()));
+        }
+        alreadyCleaned = true;
     }
 
     @Override
     public void stop() {
-        // TODO Will be implemented without hard-coded access to `$GRADLE_USER_HOME/gradle.properties` for 5.1 in #6084
-        File gradleUserHomeDirectory = userHomeDirProvider.getGradleUserHomeDirectory();
-        File gradleProperties = new File(gradleUserHomeDirectory, "gradle.properties");
-        if (gradleProperties.isFile()) {
-            Properties properties = GUtil.loadProperties(gradleProperties);
-            String cleanup = properties.getProperty(CACHE_CLEANUP_PROPERTY);
-            if (cleanup != null && cleanup.equals("false")) {
-                return;
+        if (!alreadyCleaned) {
+            cleanup();
+        }
+    }
+
+    private boolean execute(MonitoredCleanupAction action) {
+        return Boolean.TRUE.equals(buildOperationRunner.call(new CallableBuildOperation<Boolean>() {
+            @Override
+            public Boolean call(BuildOperationContext context) {
+                return action.execute(new DefaultCleanupProgressMonitor(context));
             }
-        }
-        File cacheBaseDir = cacheScopeMapping.getRootDirectory(null);
-        boolean wasCleanedUp = execute(new VersionSpecificCacheCleanupAction(cacheBaseDir, MAX_UNUSED_DAYS_FOR_RELEASES, MAX_UNUSED_DAYS_FOR_SNAPSHOTS));
-        if (wasCleanedUp) {
-            execute(new WrapperDistributionCleanupAction(gradleUserHomeDirectory, usedGradleVersions));
-        }
-    }
 
-    private boolean execute(DirectoryCleanupAction action) {
-        ProgressLogger progressLogger = startNewOperation(action.getClass(), action.getDisplayName());
-        try {
-            return action.execute(new DefaultCleanupProgressMonitor(progressLogger));
-        } finally {
-            progressLogger.completed();
-        }
-    }
-
-    private ProgressLogger startNewOperation(Class<?> loggerClass, String description) {
-        return progressLoggerFactory.newOperation(loggerClass).start(description, description);
+            @Override
+            public BuildOperationDescriptor.Builder description() {
+                return BuildOperationDescriptor.displayName(action.getDisplayName());
+            }
+        }));
     }
 }

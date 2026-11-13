@@ -16,15 +16,14 @@
 
 package org.gradle.api.artifacts;
 
-import org.gradle.api.Incubating;
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier;
 import org.gradle.internal.HasInternalProtocol;
+import org.jspecify.annotations.Nullable;
 
-import javax.annotation.Nullable;
-
-/***
+/**
  * Represents a tuple of the component selector of a module and a candidate version
  * to be evaluated in a component selection rule.
+ * @since 2.2
  */
 @HasInternalProtocol
 public interface ComponentSelection {
@@ -32,6 +31,7 @@ public interface ComponentSelection {
      * Gets the candidate version of the module.
      *
      * @return the candidate version of the module
+     * @since 2.2
      */
     ModuleComponentIdentifier getCandidate();
 
@@ -44,7 +44,6 @@ public interface ComponentSelection {
      * @return the {@code ComponentMetadata} or {@code null} if not available
      * @since 5.0
      */
-    @Incubating
     @Nullable
     ComponentMetadata getMetadata();
 
@@ -63,7 +62,6 @@ public interface ComponentSelection {
      * @see org.gradle.api.artifacts.ivy.IvyModuleDescriptor
      * @since 5.0
      */
-    @Incubating
     @Nullable
     <T> T getDescriptor(Class<T> descriptorClass);
 
@@ -71,6 +69,7 @@ public interface ComponentSelection {
      * Rejects the candidate for the resolution.
      *
      * @param reason The reason the candidate was rejected.
+     * @since 2.2
      */
     void reject(String reason);
 }

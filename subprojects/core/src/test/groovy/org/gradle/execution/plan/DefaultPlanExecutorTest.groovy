@@ -17,30 +17,46 @@
 package org.gradle.execution.plan
 
 import org.gradle.api.Action
+import org.gradle.api.BuildCancelledException
 import org.gradle.api.Project
 import org.gradle.api.internal.TaskInternal
 import org.gradle.api.internal.tasks.TaskStateInternal
 import org.gradle.api.invocation.Gradle
 import org.gradle.initialization.BuildCancellationToken
-import org.gradle.internal.concurrent.DefaultParallelismConfiguration
+import org.gradle.internal.buildoption.DefaultInternalOptions
 import org.gradle.internal.concurrent.ExecutorFactory
-import org.gradle.internal.concurrent.ManagedExecutor
-import org.gradle.internal.resources.ResourceLockCoordinationService
-import org.gradle.internal.resources.ResourceLockState
+import org.gradle.internal.operations.BuildOperationRef
+import org.gradle.internal.operations.CurrentBuildOperationRef
+import org.gradle.internal.operations.OperationIdentifier
+import org.gradle.internal.resources.DefaultResourceLockCoordinationService
+import org.gradle.internal.work.DefaultWorkerLimits
+import org.gradle.internal.work.WorkerLeaseRegistry
 import org.gradle.internal.work.WorkerLeaseService
 import spock.lang.Specification
 
+import java.util.concurrent.atomic.AtomicReference
+
 class DefaultPlanExecutorTest extends Specification {
-    def executionPlan = Mock(ExecutionPlan)
+    def workSource = Mock(WorkSource)
     def worker = Mock(Action)
     def executorFactory = Mock(ExecutorFactory)
     def cancellationHandler = Mock(BuildCancellationToken)
-    def coordinationService = Stub(ResourceLockCoordinationService) {
-        withStateLock(_) >> { transformer ->
-            transformer[0].transform(Stub(ResourceLockState))
-        }
+    def coordinationService = new DefaultResourceLockCoordinationService()
+    def workerLeaseService = Mock(WorkerLeaseService)
+    def workerLease = Mock(WorkerLeaseRegistry.WorkerLease)
+    def executor = new DefaultPlanExecutor(new DefaultWorkerLimits(1), executorFactory, workerLeaseService, cancellationHandler, coordinationService, new DefaultInternalOptions([:]))
+
+    def parentOperation = Stub(BuildOperationRef) {
+        getId() >> new OperationIdentifier(42L)
     }
-    def executor = new DefaultPlanExecutor(new DefaultParallelismConfiguration(false, 1), executorFactory, Stub(WorkerLeaseService), cancellationHandler, coordinationService)
+
+    def setup() {
+        CurrentBuildOperationRef.instance().set(parentOperation)
+    }
+
+    def cleanup() {
+        CurrentBuildOperationRef.instance().clear()
+    }
 
     def "executes tasks until no further tasks remain"() {
         def gradle = Mock(Gradle)
@@ -53,20 +69,30 @@ class DefaultPlanExecutorTest extends Specification {
         task.state >> state
 
         when:
-        executor.process(executionPlan, [], worker)
+        def result = executor.process(workSource, worker)
 
         then:
-        1 * executorFactory.create(_) >> Mock(ManagedExecutor)
+        result.failures.empty
+
+        1 * workerLeaseService.currentWorkerLease >> workerLease
+
+        then:
         1 * cancellationHandler.isCancellationRequested() >> false
-        1 * executionPlan.hasNodesRemaining() >> true
-        1 * executionPlan.selectNext(_, _) >> node
+        1 * workerLease.tryLock() >> true
+        1 * workSource.executionState() >> WorkSource.State.MaybeWorkReadyToStart
+        1 * workSource.selectNext() >> WorkSource.Selection.of(node)
         1 * worker.execute(node)
+        1 * workSource.finishedExecuting(node, null)
 
         then:
         1 * cancellationHandler.isCancellationRequested() >> false
-        1 * executionPlan.hasNodesRemaining() >> false
-        1 * executionPlan.allNodesComplete() >> true
-        1 * executionPlan.collectFailures([])
+        1 * workSource.executionState() >> WorkSource.State.NoMoreWorkToStart
+
+        then:
+        1 * workerLease.tryLock() >> true
+        3 * workSource.allExecutionComplete() >> true
+        1 * workSource.collectFailures([])
+        0 * workSource._
     }
 
     def "execution is canceled when cancellation requested"() {
@@ -80,23 +106,115 @@ class DefaultPlanExecutorTest extends Specification {
         task.state >> state
 
         when:
-        executor.process(executionPlan, [], worker)
+        def result = executor.process(workSource, worker)
 
         then:
-        1 * executionPlan.getDisplayName() >> "task plan"
-        1 * executorFactory.create(_) >> Mock(ManagedExecutor)
+        result.failures.empty
+        1 * workerLeaseService.currentWorkerLease >> workerLease
+
+        then:
         1 * cancellationHandler.isCancellationRequested() >> false
-        1 * executionPlan.hasNodesRemaining() >> true
-        1 * executionPlan.selectNext(_, _) >> node
+        1 * workSource.executionState() >> WorkSource.State.MaybeWorkReadyToStart
+        1 * workerLease.tryLock() >> true
+        1 * workSource.selectNext() >> WorkSource.Selection.of(node)
         1 * worker.execute(node)
-        1 * executionPlan.nodeComplete(node)
+        1 * workSource.finishedExecuting(node, null)
 
         then:
         1 * cancellationHandler.isCancellationRequested() >> true
-        1 * executionPlan.cancelExecution()
-        1 * executionPlan.hasNodesRemaining() >> false
-        1 * executionPlan.allNodesComplete() >> true
-        1 * executionPlan.collectFailures([])
-        0 * executionPlan._
+        1 * workSource.cancelExecution()
+        1 * workSource.executionState() >> WorkSource.State.NoMoreWorkToStart
+
+        then:
+        1 * workerLease.tryLock() >> true
+        3 * workSource.allExecutionComplete() >> true
+        1 * workSource.collectFailures([])
+        0 * workSource._
     }
+
+    def "runs work with the operation that was running when execution started"() {
+        def node = Mock(LocalTaskNode)
+        def otherOperation = Stub(BuildOperationRef) {
+            getId() >> new OperationIdentifier(23L)
+        }
+        def operationWhileExecuting = new AtomicReference<BuildOperationRef>()
+
+        when:
+        def result = executor.process(workSource, worker)
+
+        then:
+        result.failures.empty
+        1 * workerLeaseService.currentWorkerLease >> workerLease
+
+        then:
+        1 * cancellationHandler.isCancellationRequested() >> false
+        1 * workerLease.tryLock() >> true
+        1 * workSource.executionState() >> {
+            // Whatever the thread goes on to do, the work should still run under the operation captured on entry
+            CurrentBuildOperationRef.instance().set(otherOperation)
+            WorkSource.State.MaybeWorkReadyToStart
+        }
+        1 * workSource.selectNext() >> WorkSource.Selection.of(node)
+        1 * worker.execute(node) >> {
+            operationWhileExecuting.set(CurrentBuildOperationRef.instance().get())
+        }
+        1 * workSource.finishedExecuting(node, null)
+
+        then:
+        1 * cancellationHandler.isCancellationRequested() >> false
+        1 * workSource.executionState() >> WorkSource.State.NoMoreWorkToStart
+
+        then:
+        1 * workerLease.tryLock() >> true
+        3 * workSource.allExecutionComplete() >> true
+        1 * workSource.collectFailures([])
+        0 * workSource._
+
+        and:
+        operationWhileExecuting.get().is(parentOperation)
+    }
+
+    def "no work is started when cancellation is requested before the first work item is selected"() {
+        when:
+        def result = executor.process(workSource, worker)
+
+        then:
+        result.failures.empty
+        1 * workerLeaseService.currentWorkerLease >> workerLease
+
+        then:
+        1 * cancellationHandler.isCancellationRequested() >> true
+        1 * workSource.cancelExecution()
+        1 * workSource.executionState() >> WorkSource.State.NoMoreWorkToStart
+
+        then:
+        1 * workerLease.tryLock() >> true
+        3 * workSource.allExecutionComplete() >> true
+        1 * workSource.collectFailures([])
+        0 * workSource._
+        0 * worker._
+    }
+
+    def "failures collected from the work source are reported in the result"() {
+        def cancellation = new BuildCancelledException()
+
+        when:
+        def result = executor.process(workSource, worker)
+
+        then:
+        result.failures == [cancellation]
+        1 * workerLeaseService.currentWorkerLease >> workerLease
+
+        then:
+        1 * cancellationHandler.isCancellationRequested() >> true
+        1 * workSource.cancelExecution()
+        1 * workSource.executionState() >> WorkSource.State.NoMoreWorkToStart
+
+        then:
+        1 * workerLease.tryLock() >> true
+        3 * workSource.allExecutionComplete() >> true
+        1 * workSource.collectFailures(_) >> { arguments -> arguments[0].add(cancellation) }
+        0 * workSource._
+    }
+
 }

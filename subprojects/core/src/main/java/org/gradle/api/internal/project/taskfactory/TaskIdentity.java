@@ -17,47 +17,114 @@
 package org.gradle.api.internal.project.taskfactory;
 
 import org.gradle.api.Task;
-import org.gradle.api.internal.project.ProjectInternal;
+import org.gradle.api.internal.project.ProjectIdentity;
+import org.gradle.internal.code.UserCodeSource;
+import org.gradle.internal.scan.UsedByScanPlugin;
 import org.gradle.util.Path;
+import org.jspecify.annotations.Nullable;
 
-import java.util.concurrent.atomic.AtomicLong;
-
+@UsedByScanPlugin
 public final class TaskIdentity<T extends Task> {
 
-    private static final AtomicLong SEQUENCE = new AtomicLong();
-
-    public final Class<T> type;
-    public final String name;
-    public final Path projectPath; // path within its build (i.e. including project path)
-    public final Path identityPath; // path within the build tree (i.e. including project path)
-    public final Path buildPath; // path of the owning build
+    // TODO #34344: Remove these public fields and String-typed getters.
 
     /**
+     * The type of the task.
+     *
+     * @deprecated Use {@link #getTaskType()} instead.
+     */
+    @Deprecated
+    public final Class<T> type;
+
+    /**
+     * The name of the task.
+     *
+     * @deprecated Use {@link #getName()} instead.
+     */
+    @Deprecated
+    public final String name;
+
+    /**
+     * The path of the task within the build.
+     *
+     * @deprecated Use {@link #getPath()} instead.
+     */
+    @Deprecated
+    @UsedByScanPlugin("ImportJUnitXmlReports")
+    public final Path projectPath;
+
+    /**
+     * The path of the task within the build tree.
+     *
+     * @deprecated Use {@link #getBuildTreePath()} instead.
+     */
+    @Deprecated
+    public final Path identityPath;
+
+    /**
+     * The path of the owning build.
+     *
+     * @deprecated Use {@link #getProjectIdentity()} instead.
+     */
+    @Deprecated
+    @UsedByScanPlugin("ImportJUnitXmlReports")
+    public final Path buildPath;
+
+    /**
+     * A unique identifier for the task within the build.
+     *
+     * @deprecated Use {@link #getId()} instead.
+     */
+    @Deprecated
+    public final long uniqueId;
+
+    private final @Nullable UserCodeSource userCodeSource;
+
+    private final ProjectIdentity projectIdentity;
+
+    TaskIdentity(
+        Class<T> type,
+        String name,
+        ProjectIdentity projectIdentity,
+        long uniqueId,
+        @Nullable UserCodeSource userCodeSource
+    ) {
+        this.name = name;
+        this.type = type;
+        this.projectIdentity = projectIdentity;
+        this.uniqueId = uniqueId;
+        this.userCodeSource = userCodeSource;
+
+        this.projectPath = projectIdentity.getProjectPath().child(name);
+        this.identityPath = projectIdentity.getBuildTreePath().child(name);
+        this.buildPath = projectIdentity.getBuildPath();
+    }
+
+    /**
+     * Get the user code that was executing when the identified task was created.
+     * May be null if the task was not created by user code, or if the user code
+     * creating this task was not properly tracked.
+     * <p>
+     * Note: We do not properly track user code for software model rules, so this
+     * field is improperly null for tasks created by software model rules.
+     */
+    public @Nullable UserCodeSource getUserCodeSource() {
+        return userCodeSource;
+    }
+
+    /**
+     * Get the name of the task.
+     */
+    public String getName() {
+        return name;
+    }
+
+    /**
+     * Get the unique identifier for the task within the build.
+     * <p>
      * Tasks can be replaced in Gradle, meaning there can be two different tasks with the same path/type.
      * This allows identifying a precise instance.
      */
-    public final long uniqueId;
-
-    private TaskIdentity(Class<T> type, String name, Path projectPath, Path identityPath, Path buildPath, long uniqueId) {
-        this.name = name;
-        this.projectPath = projectPath;
-        this.identityPath = identityPath;
-        this.buildPath = buildPath;
-        this.type = type;
-        this.uniqueId = uniqueId;
-    }
-
-    public static <T extends Task> TaskIdentity<T> create(String name, Class<T> type, ProjectInternal project) {
-        return new TaskIdentity<T>(
-            type,
-            name,
-            project.projectPath(name),
-            project.identityPath(name),
-            project.getGradle().getIdentityPath(),
-            SEQUENCE.getAndIncrement()
-        );
-    }
-
     public long getId() {
         return uniqueId;
     }
@@ -76,11 +143,76 @@ public final class TaskIdentity<T extends Task> {
 
     @Override
     public int hashCode() {
-        return (int) (uniqueId ^ (uniqueId >>> 32));
+        return Long.hashCode(uniqueId);
     }
 
     @Override
     public String toString() {
         return "TaskIdentity{path=" + identityPath + ", type=" + type + ", uniqueId=" + uniqueId + '}';
     }
+
+    /**
+     * Get the path of this task within the build.
+     */
+    public Path getPath() {
+        return projectPath;
+    }
+
+    /**
+     * Get the path of this task within the build tree.
+     */
+    public Path getBuildTreePath() {
+        return identityPath;
+    }
+
+    /**
+     * Get the path of this task within the build.
+     *
+     * @deprecated Use {@link #getPath()} instead.
+     */
+    @Deprecated
+    public String getTaskPath() {
+        return getPath().asString();
+    }
+
+    /**
+     * @deprecated Use {@link #getProjectIdentity()} instead.
+     */
+    @Deprecated
+    public String getProjectPath() {
+        return getProjectIdentity().getProjectPath().asString();
+    }
+
+    /**
+     * Get the path of this task within the build tree.
+     *
+     * @deprecated Use {@link #getBuildTreePath()} instead.
+     */
+    @Deprecated
+    public String getIdentityPath() {
+        return getBuildTreePath().asString();
+    }
+
+    /**
+     * @deprecated Use {@link #getProjectIdentity()} instead.
+     */
+    @Deprecated
+    public String getBuildPath() {
+        return getProjectIdentity().getBuildPath().asString();
+    }
+
+    /**
+     * Get the type of the task.
+     */
+    public Class<T> getTaskType() {
+        return type;
+    }
+
+    /**
+     * Get the identity of the project that owns this task.
+     */
+    public ProjectIdentity getProjectIdentity() {
+        return projectIdentity;
+    }
+
 }

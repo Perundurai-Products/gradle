@@ -16,14 +16,22 @@
 
 package org.gradle.internal.build;
 
-import org.gradle.api.artifacts.component.BuildIdentifier;
 import org.gradle.api.internal.BuildDefinition;
+import org.gradle.internal.buildtree.NestedBuildTree;
+import org.gradle.internal.classpath.ClassPath;
+import org.gradle.internal.scopeids.id.BuildInvocationScopeId;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
+import org.gradle.util.Path;
+import org.jspecify.annotations.Nullable;
 
 import java.util.Collection;
+import java.util.function.Consumer;
 
 /**
  * A registry of all the builds present in a build tree.
  */
+@ServiceScope(Scope.BuildTree.class)
 public interface BuildStateRegistry {
     /**
      * Creates the root build.
@@ -43,38 +51,44 @@ public interface BuildStateRegistry {
     RootBuildState getRootBuild() throws IllegalStateException;
 
     /**
-     * Returns all children of the root build.
+     * Returns all included builds.
      */
     Collection<? extends IncludedBuildState> getIncludedBuilds();
 
     /**
-     * Locates an included build by {@link BuildIdentifier}, if present. Fails if not an included build.
-     */
-    IncludedBuildState getIncludedBuild(BuildIdentifier buildIdentifier);
-
-    /**
      * Locates a build. Fails if not present.
      */
-    BuildState getBuild(BuildIdentifier buildIdentifier);
+    BuildState getBuild(Path identityPath) throws IllegalArgumentException;
+
+    /**
+     * Finds a build. Returns null if there's no build with the given identifier.
+     */
+    @Nullable
+    BuildState findBuild(Path identityPath);
 
     /**
      * Notification that the settings have been loaded for the root build.
      *
-     * This shouldn't be on this interface, as this is state for the root build that should be managed internally by the {@link RootBuildState} instance instead. This method is here to allow transition towards that structure.
+     * <p>This shouldn't be on this interface, as this is state for the root build that should be managed internally by the {@link RootBuildState} instance instead. This method is here to allow transition towards that structure.
      */
     void finalizeIncludedBuilds();
 
     /**
-     * Notification that the root build is about to be configured.
-     *
-     * This shouldn't be on this interface, as this is state for the root build that should be managed internally by the {@link RootBuildState} instance instead. This method is here to allow transition towards that structure.
+     * Notifies the registry about root build inclusion.
      */
-    void beforeConfigureRootBuild();
+    default void onRootBuildInclude(RootBuildState rootBuild, BuildState referrer, boolean asPluginBuild) {}
 
     /**
      * Creates an included build. An included build is-a nested build whose projects and outputs are treated as part of the composite build.
      */
-    IncludedBuildState addIncludedBuild(BuildDefinition buildDefinition);
+    IncludedBuildState addIncludedBuild(BuildDefinition buildDefinition, BuildState referrer);
+
+    /**
+     * Creates an included build. An included build is-a nested build whose projects and outputs are treated as part of the composite build.
+     *
+     * This is used when loaded from the Configuration Cache when the path of the build is already known.
+     */
+    IncludedBuildState addIncludedBuild(BuildDefinition buildDefinition, Path buildPath);
 
     /**
      * Creates an implicit included build. An implicit build is-a nested build that is managed by Gradle and whose outputs are used by dependency resolution.
@@ -82,12 +96,30 @@ public interface BuildStateRegistry {
     IncludedBuildState addImplicitIncludedBuild(BuildDefinition buildDefinition);
 
     /**
-     * Creates a standalone nested build.
+     * Creates an implicit included build with a known build path.
+     *
+     * This is used when loaded from the Configuration Cache when the path of the build is already known.
      */
-    StandAloneNestedBuild addNestedBuild(BuildDefinition buildDefinition, BuildState owner);
+    IncludedBuildState addImplicitIncludedBuild(BuildDefinition buildDefinition, Path buildPath);
+
+    /**
+     * Locates the buildSrc build for the given build, if present. Returns null if the given build does not have an associated buildSrc build.
+     */
+    @Nullable
+    StandAloneNestedBuild getBuildSrcNestedBuild(BuildState owner);
 
     /**
      * Creates a new standalone nested build tree.
      */
-    NestedRootBuild addNestedBuildTree(BuildDefinition buildDefinition, BuildState owner);
+    NestedBuildTree addNestedBuildTree(BuildInvocationScopeId buildInvocationScopeId, BuildDefinition buildDefinition, BuildState owner, @Nullable String buildName, ClassPath injectedPluginClassPath);
+
+    /**
+     * Visits all registered builds, ordered by {@link BuildState#getIdentityPath()}
+     */
+    void visitBuilds(Consumer<? super BuildState> visitor);
+
+    /**
+     * Discards the model of every registered build, so that the build tree can be configured again.
+     */
+    void resetModels();
 }

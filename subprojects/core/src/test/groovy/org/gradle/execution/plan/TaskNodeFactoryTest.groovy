@@ -16,18 +16,26 @@
 
 package org.gradle.execution.plan
 
-import org.gradle.api.internal.GradleInternal
+import org.gradle.api.DefaultTask
 import org.gradle.api.internal.TaskInternal
+import org.gradle.api.internal.plugins.PluginManagerInternal
+import org.gradle.api.internal.project.ProjectIdentity
 import org.gradle.api.internal.project.ProjectInternal
-import org.gradle.composite.internal.IncludedBuildTaskGraph
-import org.gradle.internal.build.BuildState
-import org.gradle.internal.service.ServiceRegistry
+import org.gradle.api.internal.project.taskfactory.TestTaskIdentities
+import org.gradle.composite.internal.BuildTreeWorkGraphController
+import org.gradle.internal.build.BuildIdentity
+import org.gradle.internal.build.BuildStateRegistry
+import org.gradle.internal.operations.TestBuildOperationRunner
+import org.gradle.util.Path
+import org.gradle.util.TestUtil
 import spock.lang.Specification
 
 class TaskNodeFactoryTest extends Specification {
-    def gradle = Stub(GradleInternal)
-    def project = Stub(ProjectInternal)
-    def graph
+    def project = Stub(ProjectInternal) {
+        getProjectIdentity() >> ProjectIdentity.forRootProject(Path.ROOT, "root")
+        getPluginManager() >> Stub(PluginManagerInternal)
+    }
+    TaskNodeFactory factory
     def a = task('a')
     def b = task('b')
     def c = task('c')
@@ -35,25 +43,24 @@ class TaskNodeFactoryTest extends Specification {
     def e = task('e')
 
     def setup() {
-        def services = Stub(ServiceRegistry)
-        gradle.services >> services
-        services.get(BuildState) >> Stub(BuildState)
-        project.gradle >> gradle
-
-        graph = new TaskNodeFactory(gradle, Stub(IncludedBuildTaskGraph))
+        factory = new TaskNodeFactory(new BuildIdentity(Path.ROOT), Stub(BuildTreeWorkGraphController), Stub(BuildStateRegistry), Stub(NodeValidator), new TestBuildOperationRunner(), Stub(ExecutionNodeAccessHierarchies), TestUtil.problemsService())
     }
 
     private TaskInternal task(String name) {
+        def project = Mock(ProjectInternal) {
+            getProjectIdentity() >> ProjectIdentity.forRootProject(Path.ROOT, "root")
+        }
         Mock(TaskInternal) {
             getName() >> name
-            compareTo(_) >> { args -> name.compareTo(args[0].name)}
+            compareTo(_) >> { args -> name.compareTo(args[0].name) }
             getProject() >> project
+            getTaskIdentity() >> TestTaskIdentities.create(name, DefaultTask, project)
         }
     }
 
     void 'can create a node for a task'() {
         when:
-        def node = graph.getOrCreateNode(a)
+        def node = factory.getOrCreateNode(a)
 
         then:
         !node.inKnownState
@@ -67,29 +74,29 @@ class TaskNodeFactoryTest extends Specification {
 
     void 'caches node for a given task'() {
         when:
-        def node = graph.getOrCreateNode(a)
+        def node = factory.getOrCreateNode(a)
 
         then:
-        graph.getOrCreateNode(a).is(node)
+        factory.getOrCreateNode(a).is(node)
     }
 
     void 'can add multiple nodes'() {
         when:
-        graph.getOrCreateNode(a)
-        graph.getOrCreateNode(b)
+        factory.getOrCreateNode(a)
+        factory.getOrCreateNode(b)
 
         then:
-        graph.tasks == [a, b] as Set
+        factory.tasks == [a, b] as Set
     }
 
-    void 'clear'() {
+    void 'reset state'() {
         when:
-        graph.getOrCreateNode(a)
-        graph.getOrCreateNode(b)
-        graph.getOrCreateNode(c)
-        graph.clear()
+        factory.getOrCreateNode(a)
+        factory.getOrCreateNode(b)
+        factory.getOrCreateNode(c)
+        factory.resetState()
 
         then:
-        !graph.tasks
+        !factory.tasks
     }
 }

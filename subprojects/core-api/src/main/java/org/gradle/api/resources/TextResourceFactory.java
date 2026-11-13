@@ -16,8 +16,6 @@
 
 package org.gradle.api.resources;
 
-import org.gradle.api.Incubating;
-
 /**
  * Creates {@code TextResource}s backed by sources such as strings, files, and archive entries.
  *
@@ -38,7 +36,9 @@ import org.gradle.api.Incubating;
  * def sourcedFromConfiguration =
  *   resources.text.fromArchiveEntry(configurations.someConfig, "path/to/archive/entry.txt")
  *
- * def sourceFromUri = resources.text.fromUri("https://path/to/the/resource")
+ * def sourceFromUri = resources.text.fromUri("https://example.com/resource")
+ *
+ * def sourceFromInsecureUri = resources.text.fromInsecureUri("http://example.com/resource")
  * </pre>
  *
  * File based factory methods optionally accept a character encoding. If no encoding is specified,
@@ -52,6 +52,7 @@ public interface TextResourceFactory {
      *
      * @param string a string
      * @return a text resource backed by the given string
+     * @since 2.2
      */
     TextResource fromString(String string);
 
@@ -61,11 +62,15 @@ public interface TextResourceFactory {
      * @param file a text file evaluated as per {@link org.gradle.api.Project#files(Object...)}
      * @param charset the file's character encoding (e.g. {@code "utf-8"})
      * @return a text resource backed by the given file
+     * @since 2.2
      */
     TextResource fromFile(Object file, String charset);
 
     /**
      * Same as {@code fromFile(file, Charset.defaultCharset())}.
+     *
+     * @see #fromFile(Object, String)
+     * @since 2.2
      */
     TextResource fromFile(Object file);
 
@@ -79,11 +84,13 @@ public interface TextResourceFactory {
      * @param charset the archive entry's character encoding (e.g. {@code "utf-8"})
      *
      * @return a text resource backed by the archive entry at the given path within the given archive
+     * @since 2.2
      */
     TextResource fromArchiveEntry(Object archive, String entryPath, String charset);
 
     /**
      * Same as {@code fromArchiveEntry(archive, path, Charset.defaultCharset().name())}.
+     * @since 2.2
      */
     TextResource fromArchiveEntry(Object archive, String path);
 
@@ -95,6 +102,19 @@ public interface TextResourceFactory {
      * @return a text resource backed by the given uri
      * @since 4.8
      */
-    @Incubating
     TextResource fromUri(Object uri);
+
+    /**
+     * Creates a text resource backed by the given uri.
+     *
+     * <b>NOTE:</b> This method allows insecure protocols (like HTTP) to be used. Only use this method if you're comfortable with the dangers.
+     *
+     * @param uri a URI as evaluated by {@link org.gradle.api.Project#uri(Object)}
+     *
+     * @return a text resource backed by the given uri
+     * @since 6.0
+     * @see #fromUri(Object)
+     */
+    TextResource fromInsecureUri(Object uri);
+
 }

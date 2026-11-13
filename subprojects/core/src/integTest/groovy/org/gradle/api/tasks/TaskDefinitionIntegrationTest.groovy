@@ -16,18 +16,16 @@
 
 package org.gradle.api.tasks
 
+import org.gradle.api.internal.AbstractTask
+import org.gradle.api.internal.TaskInternal
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.util.Requires
-import spock.lang.Unroll
-
-import static org.gradle.util.TestPrecondition.KOTLIN_SCRIPT
 
 class TaskDefinitionIntegrationTest extends AbstractIntegrationSpec {
     private static final String CUSTOM_TASK_WITH_CONSTRUCTOR_ARGS = """
-        import javax.inject.Inject
-
         class CustomTask extends DefaultTask {
+            @Internal
             final String message
+            @Internal
             final int number
 
             @Inject
@@ -81,7 +79,7 @@ class TaskDefinitionIntegrationTest extends AbstractIntegrationSpec {
         """
 
         expect:
-        succeeds ":emptyOptions", ":nothing",":withAction", ":withOptions", ":withOptionsAndAction"
+        succeeds ":emptyOptions", ":nothing", ":withAction", ":withOptions", ":withOptionsAndAction"
     }
 
     def "can define tasks in nested blocks"() {
@@ -124,7 +122,7 @@ class TaskDefinitionIntegrationTest extends AbstractIntegrationSpec {
             ":withAction", ":withOptions", ":withOptionsAndAction", ":all"
     }
 
-    def "can configure tasks when the are defined"() {
+    def "can configure tasks when they are defined"() {
         buildFile << """
             task withDescription { description = 'value' }
             task(asMethod)\n{ description = 'value' }
@@ -139,11 +137,63 @@ class TaskDefinitionIntegrationTest extends AbstractIntegrationSpec {
                 assert 'value' == it.description
             }
             task all(dependsOn: ["withDescription", "asMethod", "asStatement", "dynamic", "asExpression", "postConfigure"])
-            class TestTask extends DefaultTask { String property }
+            class TestTask extends DefaultTask { @Input String property }
         """
 
         expect:
         succeeds "all"
+    }
+
+    def "can define task using type Task"() {
+        buildFile << """
+            task thing(type: Task) { t ->
+                assert t instanceof DefaultTask
+                doFirst { println("thing") }
+            }
+        """
+
+        expect:
+        succeeds("thing")
+    }
+
+    def "creating a task of type AbstractTask is not supported"() {
+        buildFile << """
+            task thing(type: ${AbstractTask.name}) { t ->
+                assert t instanceof DefaultTask
+                doFirst { println("thing") }
+            }
+        """
+
+        expect:
+        fails("thing")
+        failureHasCause("Cannot create task ':thing' of type 'AbstractTask' as this type is not supported for task registration.")
+    }
+
+    def "creating a task of type TaskInternal is not supported"() {
+        buildFile << """
+            task thing(type: ${TaskInternal.name}) { t ->
+                assert t instanceof DefaultTask
+                doFirst { println("thing") }
+            }
+        """
+
+        expect:
+        fails("thing")
+        failureHasCause("Cannot create task ':thing' of type 'TaskInternal' as this type is not supported for task registration.")
+    }
+
+    def "creating a task that is a subtype of AbstractTask is not supported"() {
+        buildFile << """
+            class CustomTask extends ${AbstractTask.name} {
+            }
+            task thing(type: CustomTask) { t ->
+                doFirst { println("thing") }
+            }
+        """
+
+        expect:
+        fails("thing")
+        failureHasCause("Cannot create task ':thing' of type 'CustomTask' as directly extending AbstractTask is not supported.")
     }
 
     def "does not hide local methods and variables"() {
@@ -292,7 +342,6 @@ class TaskDefinitionIntegrationTest extends AbstractIntegrationSpec {
         outputContains("hello 42")
     }
 
-    @Unroll
     def "can construct a custom task with constructor arguments as #description via Map"() {
         given:
         buildFile << CUSTOM_TASK_WITH_CONSTRUCTOR_ARGS
@@ -310,7 +359,29 @@ class TaskDefinitionIntegrationTest extends AbstractIntegrationSpec {
         'Object[]'  | "(['hello', 42] as Object[])"
     }
 
-    @Unroll
+    def "task constructor can use identity properties of task"() {
+        given:
+        buildFile << """
+            class LoggingTask extends DefaultTask {
+                LoggingTask() {
+                    println("name = " + name)
+                    println("path = " + path)
+                    println("toString() = " + this)
+                }
+            }
+
+            task one(type: LoggingTask)
+        """
+
+        when:
+        run("one")
+
+        then:
+        outputContains("name = one")
+        outputContains("path = :one")
+        outputContains("toString() = task ':one'")
+    }
+
     def "fails to create custom task using #description if constructor arguments are missing"() {
         given:
         buildFile << CUSTOM_TASK_WITH_CONSTRUCTOR_ARGS
@@ -322,7 +393,7 @@ class TaskDefinitionIntegrationTest extends AbstractIntegrationSpec {
         then:
         failure.assertHasCause("Could not create task ':myTask'.")
         failure.assertHasCause("Could not create task of type 'CustomTask'.")
-        failure.assertHasCause("Unable to determine constructor argument #2: missing parameter of int, or no service of type int")
+        failure.assertHasCause("Unable to determine constructor argument #2: missing parameter of type int, or no service of type int")
 
         where:
         description   | script
@@ -330,7 +401,6 @@ class TaskDefinitionIntegrationTest extends AbstractIntegrationSpec {
         'direct call' | "tasks.create('myTask', CustomTask, 'hello')"
     }
 
-    @Unroll
     def "fails to create custom task using #description if all constructor arguments missing"() {
         given:
         buildFile << CUSTOM_TASK_WITH_CONSTRUCTOR_ARGS
@@ -342,7 +412,7 @@ class TaskDefinitionIntegrationTest extends AbstractIntegrationSpec {
         then:
         failure.assertHasCause("Could not create task ':myTask'.")
         failure.assertHasCause("Could not create task of type 'CustomTask'.")
-        failure.assertHasCause("Unable to determine constructor argument #1: missing parameter of class java.lang.String, or no service of type class java.lang.String")
+        failure.assertHasCause("Unable to determine constructor argument #1: missing parameter of type String, or no service of type String")
 
         where:
         description   | script
@@ -351,7 +421,6 @@ class TaskDefinitionIntegrationTest extends AbstractIntegrationSpec {
         'direct call' | "tasks.create('myTask', CustomTask)"
     }
 
-    @Unroll
     def "fails when constructorArgs not list or Object[], but #description"() {
         given:
         buildFile << CUSTOM_TASK_WITH_CONSTRUCTOR_ARGS
@@ -372,7 +441,6 @@ class TaskDefinitionIntegrationTest extends AbstractIntegrationSpec {
         'primitive' | '123'
     }
 
-    @Unroll
     def "fails when #description constructor argument is wrong type"() {
         given:
         buildFile << CUSTOM_TASK_WITH_CONSTRUCTOR_ARGS
@@ -391,7 +459,6 @@ class TaskDefinitionIntegrationTest extends AbstractIntegrationSpec {
         'last'      | '"abc", "123"'  | 2              | 'int'
     }
 
-    @Unroll
     def "fails to create via #description when null passed as a constructor argument value at #position"() {
         given:
         buildFile << CUSTOM_TASK_WITH_CONSTRUCTOR_ARGS
@@ -418,12 +485,12 @@ class TaskDefinitionIntegrationTest extends AbstractIntegrationSpec {
             class MyPlugin implements Plugin<Project> {
                 class MyTask extends DefaultTask {
                 }
-                
+
                 void apply(Project p) {
                     p.tasks.register("myTask", MyTask)
                 }
             }
-            
+
             apply plugin: MyPlugin
         """
 
@@ -433,17 +500,15 @@ class TaskDefinitionIntegrationTest extends AbstractIntegrationSpec {
         then:
         failure.assertHasCause("Could not create task ':myTask'.")
         failure.assertHasCause("Could not create task of type 'MyTask'.")
-        failure.assertHasCause("Class MyPlugin\$MyTask is a non-static inner class.")
+        failure.assertHasCause("Class MyPlugin.MyTask is a non-static inner class.")
     }
 
-    @Requires(KOTLIN_SCRIPT)
     def 'can run custom task with constructor arguments via Kotlin friendly DSL'() {
         given:
         settingsFile << "rootProject.buildFileName = 'build.gradle.kts'"
         file("build.gradle.kts") << """
             import org.gradle.api.*
             import org.gradle.api.tasks.*
-            import javax.inject.Inject
 
             open class CustomTask @Inject constructor(private val message: String, private val number: Int) : DefaultTask() {
                 @TaskAction fun run() = println("\$message \$number")
@@ -459,24 +524,24 @@ class TaskDefinitionIntegrationTest extends AbstractIntegrationSpec {
         outputContains('hello 42')
     }
 
-    def "renders deprecation warning when adding a pre-created task to the task container"() {
+    def "throws exception when adding a pre-created task to the task container"() {
         given:
         buildFile << """
             Task foo = tasks.create("foo")
-            
+
             tasks.add(new Bar("bar", foo))
-            
+
             class Bar implements Task {
                 String name
-                
+
                 @Delegate
                 Task delegate
-                
+
                 Bar(String name, Task delegate) {
                     this.name = name
                     this.delegate = delegate
                 }
-                
+
                 String getName() {
                     return name
                 }
@@ -484,18 +549,17 @@ class TaskDefinitionIntegrationTest extends AbstractIntegrationSpec {
         """
 
         when:
-        executer.expectDeprecationWarning()
-        succeeds("help")
+        fails("help")
 
         then:
-        outputContains("Using method TaskContainer.add() has been deprecated. This will fail with an error in Gradle 6.0. Please use the TaskContainer.register() method instead.")
+        failure.assertHasCause("Adding a task directly to the task container is not supported.  Use register() instead.")
     }
 
     def "cannot add a pre-created task provider to the task container"() {
         given:
         buildFile << """
             Task foo = tasks.create("foo")
-            
+
             tasks.addLater(provider { foo })
         """
 
@@ -518,29 +582,18 @@ class TaskDefinitionIntegrationTest extends AbstractIntegrationSpec {
             tasks.register("defaultTask") {
                 assert false : "This should not be realized"
             }
-             
+
             def schema = tasks.collectionSchema.elements.collectEntries { e ->
                 [ e.name, e.publicType.simpleName ]
             }
-            assert schema.size() == 16
             
+            // check some built-in tasks
             assert schema["help"] == "Help"
-            
             assert schema["projects"] == "ProjectReportTask"
             assert schema["tasks"] == "TaskReportTask"
             assert schema["properties"] == "PropertyReportTask"
-            
-            assert schema["dependencyInsight"] == "DependencyInsightReportTask"
-            assert schema["dependencies"] == "DependencyReportTask"
-            assert schema["buildEnvironment"] == "BuildEnvironmentReportTask"
-            
-            assert schema["components"] == "ComponentReport"
-            assert schema["model"] == "ModelReport"
-            assert schema["dependentComponents"] == "DependentComponentsReport"
-            
-            assert schema["init"] == "InitBuild"
-            assert schema["wrapper"] == "Wrapper"
-            
+
+            // check some tasks from the project itself
             assert schema["foo"] == "Foo"
             assert schema["bar"] == "Foo"
             assert schema["builtInTask"] == "Copy"
@@ -555,7 +608,7 @@ class TaskDefinitionIntegrationTest extends AbstractIntegrationSpec {
         buildFile << """
             Task foo = tasks.create("foo")
             Task bar = tasks.create("bar")
-            
+
             tasks.addAllLater(provider { [foo, bar] })
         """
 
@@ -564,5 +617,41 @@ class TaskDefinitionIntegrationTest extends AbstractIntegrationSpec {
 
         then:
         failure.assertHasCause("Adding a task provider directly to the task container is not supported.")
+    }
+
+    def "can override description and group without @Internal annotation"() {
+        buildFile << """
+            class CustomTask extends DefaultTask {
+                @Override
+                public String getDescription() {
+                    return "My custom task description.";
+                }
+                @Override
+                public String getGroup() {
+                    return "custom group";
+                }
+                @TaskAction
+                void doWork() {
+                    println("Hello from CustomTask")
+                }
+            }
+            tasks.register("customTask", CustomTask)
+        """
+
+        when:
+        succeeds("tasks")
+
+        then:
+        outputContains("""
+Custom group tasks
+------------------
+customTask - My custom task description.
+""")
+
+        when:
+        succeeds("customTask")
+
+        then:
+        outputContains("Hello from CustomTask")
     }
 }

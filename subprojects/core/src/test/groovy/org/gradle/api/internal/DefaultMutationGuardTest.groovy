@@ -22,7 +22,6 @@ import org.gradle.internal.Actions
 import org.spockframework.runtime.UnallowedExceptionThrownError
 import spock.lang.Specification
 import spock.lang.Subject
-import spock.lang.Unroll
 
 @Subject(DefaultMutationGuard)
 class DefaultMutationGuardTest extends Specification {
@@ -30,7 +29,6 @@ class DefaultMutationGuardTest extends Specification {
 
     def target = new Object()
 
-    @Unroll
     def "does not throw exception when calling a disallowed method when allowed using #methodUnderTest(#callableClass.type)"() {
         def callable = callableClass.newInstance(this)
 
@@ -42,11 +40,10 @@ class DefaultMutationGuardTest extends Specification {
         callable.called
 
         where:
-        methodUnderTest        | callableClass
-        "withMutationEnabled"  | ActionCallingDisallowedMethod
+        methodUnderTest    | callableClass
+        "wrapEagerAction"  | ActionCallingDisallowedMethod
     }
 
-    @Unroll
     def "throws IllegalStateException when calling a disallowed method when disallowed using #methodUnderTest(#callableClass.type)"() {
         def callable = callableClass.newInstance(this)
 
@@ -59,7 +56,7 @@ class DefaultMutationGuardTest extends Specification {
 
         where:
         methodUnderTest         | callableClass
-        "withMutationDisabled"  | ActionCallingDisallowedMethod
+        "wrapLazyAction"  | ActionCallingDisallowedMethod
     }
 
     def "doesn't throw exception when calling disallowed method when allowed"() {
@@ -70,13 +67,12 @@ class DefaultMutationGuardTest extends Specification {
         noExceptionThrown()
     }
 
-    @Unroll
-    def "call to #methodUnderTest(#callableType) inside withMutationDisabled(Action) does not disable disallow check"() {
+    def "call to #methodUnderTest(#callableType) inside wrapLazyAction(Action) does not disable disallow check"() {
         def aMethodUnderTest = methodUnderTest
         def aCallable = callable
 
         when:
-        guard.withMutationDisabled(new Action<Void>() {
+        guard.wrapLazyAction(new Action<Void>() {
             @Override
             void execute(Void aVoid) {
                 ensureExecuted(guard."${aMethodUnderTest}"(aCallable))
@@ -89,18 +85,17 @@ class DefaultMutationGuardTest extends Specification {
         ex.message == "${target.class.simpleName}#someProtectedMethod() on ${target.toString()} cannot be executed in the current context."
 
         where:
-        methodUnderTest         | callableType | callable
-        "withMutationDisabled"  | "Action"     | Actions.doNothing()
-        "withMutationEnabled"   | "Action"     | Actions.doNothing()
+        methodUnderTest     | callableType | callable
+        "wrapLazyAction"    | "Action"     | Actions.doNothing()
+        "wrapEagerAction"   | "Action"     | Actions.doNothing()
     }
 
-    @Unroll
-    def "call to #methodUnderTest(#callableType) inside withMutationEnabled(Action) does enable disallow check outside scope"() {
+    def "call to #methodUnderTest(#callableType) inside wrapEagerAction(Action) does enable disallow check outside scope"() {
         def aMethodUnderTest = methodUnderTest
         def aCallable = callable
 
         when:
-        guard.withMutationEnabled(new Action<Void>() {
+        guard.wrapEagerAction(new Action<Void>() {
             @Override
             void execute(Void aVoid) {
                 ensureExecuted(guard."${aMethodUnderTest}"(aCallable))
@@ -112,15 +107,15 @@ class DefaultMutationGuardTest extends Specification {
         noExceptionThrown()
 
         where:
-        methodUnderTest         | callableType | callable
-        "withMutationDisabled"  | "Action"     | Actions.doNothing()
-        "withMutationEnabled"   | "Action"     | Actions.doNothing()
+        methodUnderTest     | callableType | callable
+        "wrapLazyAction"    | "Action"     | Actions.doNothing()
+        "wrapEagerAction"   | "Action"     | Actions.doNothing()
     }
 
     def "doesn't protect across thread boundaries"() {
         given:
         def callable = new ActionCallingDisallowedMethod()
-        def action = guard.withMutationDisabled(new Action<Void>() {
+        def action = guard.wrapLazyAction(new Action<Void>() {
             @Override
             void execute(Void aVoid) {
                 def thread = new Thread(new Runnable() {
@@ -144,7 +139,7 @@ class DefaultMutationGuardTest extends Specification {
     }
 
     private void disallowedMethod() {
-        guard.assertMutationAllowed("someProtectedMethod()", target)
+        guard.assertEagerContext("someProtectedMethod()", target)
     }
 
     protected void ensureExecuted(def callable) {

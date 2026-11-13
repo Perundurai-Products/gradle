@@ -17,422 +17,246 @@
 package org.gradle.execution.taskgraph
 
 import org.gradle.api.Action
-import org.gradle.api.BuildCancelledException
-import org.gradle.api.CircularReferenceException
-import org.gradle.api.DefaultTask
 import org.gradle.api.Task
 import org.gradle.api.execution.TaskExecutionGraphListener
 import org.gradle.api.execution.TaskExecutionListener
-import org.gradle.api.internal.TaskInputsInternal
-import org.gradle.api.internal.TaskInternal
-import org.gradle.api.internal.TaskOutputsInternal
-import org.gradle.api.internal.project.ProjectInternal
-import org.gradle.api.internal.project.taskfactory.TaskIdentity
-import org.gradle.api.internal.tasks.TaskDestroyablesInternal
-import org.gradle.api.internal.tasks.TaskLocalStateInternal
-import org.gradle.api.internal.tasks.TaskStateInternal
-import org.gradle.api.specs.Spec
-import org.gradle.api.tasks.TaskDependency
-import org.gradle.composite.internal.IncludedBuildTaskGraph
+import org.gradle.api.internal.BuildScopeListenerRegistrationListener
+import org.gradle.api.internal.GradleInternal
 import org.gradle.configuration.internal.TestListenerBuildOperationDecorator
-import org.gradle.execution.ProjectExecutionServiceRegistry
-import org.gradle.execution.plan.DefaultPlanExecutor
-import org.gradle.execution.plan.LocalTaskNode
-import org.gradle.execution.plan.Node
-import org.gradle.execution.plan.NodeExecutor
-import org.gradle.execution.plan.PlanExecutor
-import org.gradle.execution.plan.TaskDependencyResolver
-import org.gradle.execution.plan.TaskNodeDependencyResolver
-import org.gradle.execution.plan.TaskNodeFactory
-import org.gradle.initialization.BuildCancellationToken
-import org.gradle.internal.concurrent.DefaultParallelismConfiguration
-import org.gradle.internal.concurrent.ExecutorFactory
-import org.gradle.internal.concurrent.ManagedExecutor
-import org.gradle.internal.concurrent.ParallelismConfigurationManagerFixture
+import org.gradle.execution.plan.AbstractExecutionPlanSpec
+import org.gradle.execution.plan.FinalizedExecutionPlan
+import org.gradle.execution.plan.QueryableExecutionPlan
+import org.gradle.internal.build.BuildProjectRegistry
+import org.gradle.internal.build.BuildState
 import org.gradle.internal.event.DefaultListenerManager
-import org.gradle.internal.operations.TestBuildOperationExecutor
-import org.gradle.internal.resources.DefaultResourceLockCoordinationService
-import org.gradle.internal.work.DefaultWorkerLeaseService
-import org.gradle.internal.work.WorkerLeaseRegistry
-import org.gradle.testfixtures.ProjectBuilder
-import spock.lang.Specification
+import org.gradle.internal.operations.TestBuildOperationRunner
+import org.gradle.internal.operations.ProgressDisplayName
+import org.gradle.internal.service.scopes.Scope
+import org.gradle.util.Path
+import spock.lang.Issue
 
-class DefaultTaskExecutionGraphSpec extends Specification {
-    def cancellationToken = Mock(BuildCancellationToken)
-    def project = ProjectBuilder.builder().build()
-    def listenerManager = new DefaultListenerManager()
+class DefaultTaskExecutionGraphSpec extends AbstractExecutionPlanSpec {
+
+    def listenerManager = new DefaultListenerManager(Scope.Build)
     def graphListeners = listenerManager.createAnonymousBroadcaster(TaskExecutionGraphListener.class)
+    def internalGraphListeners = listenerManager.createAnonymousBroadcaster(TaskExecutionGraphExecutionListener.class)
     def taskExecutionListeners = listenerManager.createAnonymousBroadcaster(TaskExecutionListener.class)
-    def nodeExecutor = Mock(NodeExecutor)
-    def buildOperationExecutor = new TestBuildOperationExecutor()
+    def listenerRegistrationListener = listenerManager.getBroadcaster(BuildScopeListenerRegistrationListener.class)
+    def buildOperationRunner = new TestBuildOperationRunner()
     def listenerBuildOperationDecorator = new TestListenerBuildOperationDecorator()
-    def coordinationService = new DefaultResourceLockCoordinationService()
-    def parallelismConfiguration = new DefaultParallelismConfiguration(true, 1)
-    def parallelismConfigurationManager = new ParallelismConfigurationManagerFixture(parallelismConfiguration)
-    def workerLeases = new DefaultWorkerLeaseService(coordinationService, parallelismConfigurationManager)
-    def executorFactory = Mock(ExecutorFactory)
-    def thisBuild = project.gradle
-    def taskNodeFactory = new TaskNodeFactory(thisBuild, Stub(IncludedBuildTaskGraph))
-    def dependencyResolver = new TaskDependencyResolver([new TaskNodeDependencyResolver(taskNodeFactory)])
-    def taskGraph = new DefaultTaskExecutionGraph(new DefaultPlanExecutor(parallelismConfiguration, executorFactory, workerLeases, cancellationToken, coordinationService), [nodeExecutor], buildOperationExecutor, listenerBuildOperationDecorator, workerLeases, coordinationService, thisBuild, taskNodeFactory, dependencyResolver, graphListeners, taskExecutionListeners)
-    WorkerLeaseRegistry.WorkerLeaseCompletion parentWorkerLease
-    def executedTasks = []
-    def failures = []
+    def taskGraph = new DefaultTaskExecutionGraph(
+        buildOperationRunner,
+        listenerBuildOperationDecorator,
+        thisBuild,
+        graphListeners,
+        internalGraphListeners,
+        taskExecutionListeners,
+        listenerRegistrationListener,
+    )
 
-    def setup() {
-        parentWorkerLease = workerLeases.getWorkerLease().start()
-        _ * executorFactory.create(_) >> Mock(ManagedExecutor)
-        _ * nodeExecutor.execute(_ as Node, _ as ProjectExecutionServiceRegistry) >> { Node node, ProjectExecutionServiceRegistry services ->
-            if (node instanceof LocalTaskNode) {
-                executedTasks << node.task
-                return true
-            } else {
-                return false
-            }
-        }
+    def "is empty when no tasks have been added"() {
+        Task a = createTask("a")
+
+        expect:
+        !taskGraph.hasTask(":a")
+        !taskGraph.hasTask(a)
+        taskGraph.findTask(":a") == null
+        taskGraph.allTasks.empty
     }
 
-    def cleanup() {
-        parentWorkerLease.leaseFinish()
-        workerLeases.stop()
-    }
-
-    def "collects task failures"() {
-        def failure = new RuntimeException()
-        def a = brokenTask("a", failure)
-
-        given:
-        taskGraph.addEntryTasks([a])
+    def "can query tasks of populated plan"() {
+        Task a = createTask("a")
+        Task b = createTask("b")
+        Task c = createTask("c")
 
         when:
-        taskGraph.execute(failures)
-
-        then:
-        failures == [failure]
-    }
-
-    def "stops running tasks and fails with exception when build is cancelled"() {
-        def a = task("a")
-        def b = task("b")
-
-        given:
-        cancellationToken.cancellationRequested >>> [false, true]
-
-        when:
-        taskGraph.addEntryTasks([a, b])
-        taskGraph.execute(failures)
-
-        then:
-        failures.size() == 1
-        failures[0] instanceof BuildCancelledException
-        executedTasks == [a]
-    }
-
-    def "does not fail with exception when build is cancelled after last task has started"() {
-        def a = task("a")
-        def b = task("b")
-
-        given:
-        cancellationToken.cancellationRequested >>> [false, false, true]
-
-        when:
-        taskGraph.addEntryTasks([a, b])
-        taskGraph.execute(failures)
-
-        then:
-        failures.empty
-        executedTasks == [a, b]
-    }
-
-    def "does not fail with exception when build is cancelled and no tasks scheduled"() {
-        given:
-        cancellationToken.cancellationRequested >>> [true]
-
-        when:
-        taskGraph.addEntryTasks([])
-        taskGraph.execute(failures)
-
-        then:
-        failures.empty
-    }
-
-    def "executes tasks in dependency order"() {
-        Task a = task("a")
-        Task b = task("b", a)
-        Task c = task("c", b, a)
-        Task d = task("d", c)
-
-        when:
-        taskGraph.addEntryTasks([d])
-        taskGraph.execute(failures)
-
-        then:
-        executedTasks == [a, b, c, d]
-        failures.empty
-    }
-
-    def "executes dependencies in name order"() {
-        Task a = task("a")
-        Task b = task("b")
-        Task c = task("c")
-        Task d = task("d", b, a, c)
-
-        when:
-        taskGraph.addEntryTasks([d])
-        taskGraph.execute(failures)
-
-        then:
-        executedTasks == [a, b, c, d]
-        failures.empty
-    }
-
-    def "executes tasks in a single batch in name order"() {
-        Task a = task("a")
-        Task b = task("b")
-        Task c = task("c")
-
-        when:
-        taskGraph.addEntryTasks([b, c, a])
-        taskGraph.execute(failures)
-
-        then:
-        executedTasks == [a, b, c]
-        failures.empty
-    }
-
-    def "executes batches in order added"() {
-        Task a = task("a")
-        Task b = task("b")
-        Task c = task("c")
-        Task d = task("d")
-
-        when:
-        taskGraph.addEntryTasks([c, b])
-        taskGraph.addEntryTasks([d, a])
-        taskGraph.execute(failures)
-
-        then:
-        executedTasks == [b, c, a, d]
-        failures.empty
-    }
-
-    def "executes shared dependencies of batches once only"() {
-        Task a = task("a")
-        Task b = task("b")
-        Task c = task("c", a, b)
-        Task d = task("d")
-        Task e = task("e", b, d)
-
-        when:
-        taskGraph.addEntryTasks([c])
-        taskGraph.addEntryTasks([e])
-        taskGraph.execute(failures)
-
-        then:
-        executedTasks == [a, b, c, d, e]
-        failures.empty
-    }
-
-    def "adding tasks adds dependencies"() {
-        Task a = task("a")
-        Task b = task("b", a)
-        Task c = task("c", b, a)
-        Task d = task("d", c)
-
-        when:
-        taskGraph.addEntryTasks([d])
+        populate([a, b])
 
         then:
         taskGraph.hasTask(":a")
         taskGraph.hasTask(a)
+        taskGraph.findTask(":a") == a
         taskGraph.hasTask(":b")
         taskGraph.hasTask(b)
-        taskGraph.hasTask(":c")
-        taskGraph.hasTask(c)
-        taskGraph.hasTask(":d")
-        taskGraph.hasTask(d)
-        taskGraph.allTasks == [a, b, c, d]
+        taskGraph.findTask(":b") == b
+        !taskGraph.hasTask(":c")
+        !taskGraph.hasTask(c)
+        taskGraph.findTask(":c") == null
     }
 
-    def "get all tasks returns tasks in execution order"() {
-        Task d = task("d")
-        Task c = task("c")
-        Task b = task("b", d, c)
-        Task a = task("a", b)
+    def "retains tasks after execute until next execution"() {
+        Task a = createTask("a")
+        Task b = createTask("b")
+        Task c = createTask("c")
 
         when:
-        taskGraph.addEntryTasks([a])
-
-        then:
-        taskGraph.allTasks == [c, d, b, a]
-    }
-
-    def "cannot use getter methods when graph has not been calculated"() {
-        when:
+        populate([a, b])
         taskGraph.hasTask(":a")
+        taskGraph.depopulate()
 
         then:
-        def e = thrown(IllegalStateException)
-        e.message == "Task information is not available, as this task execution graph has not been populated."
+        taskGraph.hasTask(":a")
+        taskGraph.hasTask(a)
+        taskGraph.findTask(":a") == a
+        taskGraph.allTasks == [a, b]
 
         when:
-        taskGraph.hasTask("a")
-
-        then:
-        e = thrown(IllegalStateException)
-        e.message == "Task information is not available, as this task execution graph has not been populated."
-
-        when:
-        taskGraph.getAllTasks()
-
-        then:
-        e = thrown(IllegalStateException)
-        e.message == "Task information is not available, as this task execution graph has not been populated."
-    }
-
-    def "discards tasks after execute"() {
-        Task a = task("a")
-        Task b = task("b", a)
-
-        when:
-        taskGraph.addEntryTasks([b])
-        taskGraph.execute(failures)
+        populate([c])
 
         then:
         !taskGraph.hasTask(":a")
         !taskGraph.hasTask(a)
-        taskGraph.allTasks.isEmpty()
+        taskGraph.findTask(":a") == null
+        taskGraph.hasTask(":c")
+        taskGraph.hasTask(c)
+        taskGraph.findTask(":c") == c
+        taskGraph.allTasks == [c]
     }
 
-    def "can execute multiple times"() {
-        Task a = brokenTask("a", new RuntimeException())
-        Task b = task("b", a)
-        Task c = task("c")
+    def "discards tasks on reset"() {
+        Task a = createTask("a")
 
         when:
-        taskGraph.addEntryTasks([b])
-        taskGraph.execute(failures)
+        populate([a])
+        taskGraph.hasTask(":a")
+        taskGraph.resetState()
 
         then:
-        executedTasks == [a]
-        failures.size() == 1
+        !taskGraph.hasTask(":a")
+        !taskGraph.hasTask(a)
+        taskGraph.findTask(":a") == null
+        taskGraph.allTasks.empty
+    }
+
+    def "allTasks returns tasks from populated plan"() {
+        final Task a = createTask("a")
+        final Task b = createTask("b")
 
         when:
-        def failures2 = []
-        executedTasks.clear()
-        taskGraph.addEntryTasks([c])
+        populate([a, b])
+
+        then:
+        taskGraph.allTasks == [a, b]
+    }
+
+    def "can populate multiple times"() {
+        Task a = createTask("a")
+        Task b = createTask("b")
+
+        when:
+        populate([a, b])
+
+        then:
+        taskGraph.allTasks == [a, b]
+
+        when:
+        Task c = createTask("c")
+        populate([c])
 
         then:
         taskGraph.allTasks == [c]
-
-        when:
-        taskGraph.execute(failures2)
-
-        then:
-        executedTasks == [c]
-        failures2.empty
-    }
-
-    def "cannot add task with circular reference"() {
-        Task a = newTask("a")
-        Task b = task("b", a)
-        Task c = task("c", b)
-        addDependencies(a, c)
-
-        when:
-        taskGraph.addEntryTasks([c])
-        taskGraph.execute(failures)
-
-        then:
-        thrown(CircularReferenceException)
     }
 
     def "notifies graph listener before first execute"() {
-        def planExecutor = Mock(PlanExecutor)
-        def taskGraph = new DefaultTaskExecutionGraph(planExecutor, [nodeExecutor], buildOperationExecutor, listenerBuildOperationDecorator, workerLeases, coordinationService, thisBuild, taskNodeFactory, dependencyResolver, graphListeners, taskExecutionListeners)
+        def taskGraph = new DefaultTaskExecutionGraph(
+            buildOperationRunner,
+            listenerBuildOperationDecorator,
+            thisBuild,
+            graphListeners,
+            internalGraphListeners,
+            taskExecutionListeners,
+            listenerRegistrationListener
+        )
         TaskExecutionGraphListener listener = Mock(TaskExecutionGraphListener)
-        Task a = task("a")
 
         when:
         taskGraph.addTaskExecutionGraphListener(listener)
-        taskGraph.addEntryTasks([a])
-        taskGraph.execute(failures)
+        def finalizedPlan = Stub(FinalizedExecutionPlan)
+        taskGraph.populate(finalizedPlan)
 
         then:
         1 * listener.graphPopulated(_)
 
-        then:
-        1 * planExecutor.process(_, _, _)
-
         when:
-        taskGraph.execute(failures)
+        taskGraph.populate(finalizedPlan)
 
         then:
         0 * listener._
     }
 
     def "executes whenReady listener before first execute"() {
-        def planExecutor = Mock(PlanExecutor)
-        def taskGraph = new DefaultTaskExecutionGraph(planExecutor, [nodeExecutor], buildOperationExecutor, listenerBuildOperationDecorator, workerLeases, coordinationService, thisBuild, taskNodeFactory, dependencyResolver, graphListeners, taskExecutionListeners)
+        def taskGraph = new DefaultTaskExecutionGraph(
+            buildOperationRunner,
+            listenerBuildOperationDecorator,
+            thisBuild,
+            graphListeners,
+            internalGraphListeners,
+            taskExecutionListeners,
+            listenerRegistrationListener
+        )
         def closure = Mock(Closure)
         def action = Mock(Action)
-        Task a = task("a")
 
         when:
         taskGraph.whenReady(closure)
         taskGraph.whenReady(action)
-        taskGraph.addEntryTasks([a])
-        taskGraph.execute(failures)
+        def finalizedPlan = Stub(FinalizedExecutionPlan)
+        taskGraph.populate(finalizedPlan)
 
         then:
         1 * closure.call()
         1 * action.execute(_)
 
-        then:
-        1 * planExecutor.process(_, _, _)
-
         and:
-        with(buildOperationExecutor.operations[0]){
+        with(buildOperationRunner.operations[0]) {
             name == 'Notify task graph whenReady listeners'
             displayName == 'Notify task graph whenReady listeners'
             details.buildPath == ':'
         }
 
         when:
-        taskGraph.execute(failures)
+        def finalizedPlan2 = Stub(FinalizedExecutionPlan)
+        taskGraph.populate(finalizedPlan2)
 
         then:
         0 * closure._
         0 * action._
     }
 
-    def "stops execution on first failure when no failure handler provided"() {
-        final RuntimeException failure = new RuntimeException()
-        final Task a = brokenTask("a", failure)
-        final Task b = task("b")
-
-        taskGraph.addEntryTasks([a, b])
+    @Issue("https://github.com/gradle/gradle/issues/39539")
+    def "shows the task graph ready listeners of the #build on a worker line"() {
+        given:
+        def gradle = Stub(GradleInternal) {
+            getIdentityPath() >> buildPath
+            getOwner() >> Stub(BuildState) {
+                getOwnerToShow() >> ownerToShow
+                getProjects() >> Stub(BuildProjectRegistry) {
+                    withMutableStateOfAllProjects(_ as Runnable) >> { Runnable action -> action.run() }
+                }
+            }
+        }
+        def taskGraph = new DefaultTaskExecutionGraph(
+            buildOperationRunner,
+            listenerBuildOperationDecorator,
+            gradle,
+            graphListeners,
+            internalGraphListeners,
+            taskExecutionListeners,
+            listenerRegistrationListener
+        )
+        taskGraph.whenReady(Mock(Action))
 
         when:
-        taskGraph.execute(failures)
+        taskGraph.populate(Stub(FinalizedExecutionPlan))
 
         then:
-        executedTasks == [a]
-        failures == [failure]
-    }
+        buildOperationRunner.operations[0].displayName == displayName
+        buildOperationRunner.operations[0].progressDisplayName == ProgressDisplayName.of(ownerToShow, "Running task graph ready listeners")
 
-    def "stops execution on failure when failure handler indicates that execution should stop"() {
-        final RuntimeException failure = new RuntimeException()
-        final Task a = brokenTask("a", failure)
-        final Task b = task("b")
-
-        when:
-        taskGraph.addEntryTasks([a, b])
-        taskGraph.execute(failures)
-
-        then:
-        executedTasks == [a]
-        failures == [failure]
+        where:
+        build            | buildPath         | ownerToShow | displayName
+        "root build"     | Path.ROOT         | null        | "Notify task graph whenReady listeners"
+        "included build" | Path.path(":lib") | ":lib"      | "Notify task graph whenReady listeners (:lib)"
     }
 
     def "notifies before task listeners"() {
@@ -441,8 +265,8 @@ class DefaultTaskExecutionGraphSpec extends Specification {
         }
         def action = Mock(Action)
 
-        final Task a = task("a")
-        final Task b = task("b")
+        final Task a = createTask("a")
+        final Task b = createTask("b")
 
         when:
         taskGraph.beforeTask(closure)
@@ -463,8 +287,8 @@ class DefaultTaskExecutionGraphSpec extends Specification {
         }
         def action = Mock(Action)
 
-        final Task a = task("a")
-        final Task b = task("b")
+        final Task a = createTask("a")
+        final Task b = createTask("b")
 
         when:
         taskGraph.afterTask(closure)
@@ -479,134 +303,13 @@ class DefaultTaskExecutionGraphSpec extends Specification {
         1 * action.execute(b)
     }
 
-    def "does not execute filtered tasks"() {
-        final Task a = task("a", task("a-dep"))
-        Task b = task("b")
-        Spec<Task> spec = new Spec<Task>() {
-            public boolean isSatisfiedBy(Task element) {
-                return element != a
+    private populate(List<Task> tasks) {
+        def finalizedPlan = Mock(FinalizedExecutionPlan) {
+            getContents() >> Mock(QueryableExecutionPlan) {
+                getTasks() >> (tasks as Set)
             }
         }
-
-        when:
-        taskGraph.useFilter(spec)
-        taskGraph.addEntryTasks([a, b])
-
-        then:
-        taskGraph.allTasks == [b]
-
-        when:
-        taskGraph.execute(failures)
-
-        then:
-        executedTasks == [b]
-        failures.empty
+        taskGraph.populate(finalizedPlan)
     }
 
-    def "does not execute filtered dependencies"() {
-        final Task a = task("a", task("a-dep"))
-        Task b = task("b")
-        Task c = task("c", a, b)
-        Spec<Task> spec = new Spec<Task>() {
-            public boolean isSatisfiedBy(Task element) {
-                return element != a
-            }
-        }
-
-        when:
-        taskGraph.useFilter(spec)
-        taskGraph.addEntryTasks([c])
-
-        then:
-        taskGraph.allTasks == [b, c]
-
-        when:
-        taskGraph.execute(failures)
-
-        then:
-        executedTasks == [b, c]
-        failures.empty
-    }
-
-    def "will execute a task whose dependencies have been filtered on failure"() {
-        final RuntimeException failure = new RuntimeException()
-        final Task a = brokenTask("a", failure)
-        final Task b = task("b")
-        final Task c = task("c", b)
-
-        when:
-        taskGraph.continueOnFailure = true
-        taskGraph.useFilter(new Spec<Task>() {
-            boolean isSatisfiedBy(Task element) {
-                return element != b
-            }
-        })
-        taskGraph.addEntryTasks([a, c])
-        taskGraph.execute(failures)
-
-        then:
-        executedTasks == [a, c]
-        failures == [failure]
-    }
-
-    def "returns root project"() {
-        expect:
-        taskGraph.rootProject == project
-    }
-
-    def newTask(String name) {
-        def mock = Mock(TaskInternal, name: name)
-        _ * mock.name >> name
-        _ * mock.identityPath >> project.identityPath.child(name)
-        _ * mock.project >> project
-        _ * mock.state >> Stub(TaskStateInternal) {
-            getFailure() >> null
-        }
-        _ * mock.finalizedBy >> Stub(TaskDependency)
-        _ * mock.mustRunAfter >> Stub(TaskDependency)
-        _ * mock.shouldRunAfter >> Stub(TaskDependency)
-        _ * mock.compareTo(_) >> { Task t -> name.compareTo(t.name) }
-        _ * mock.outputs >> Stub(TaskOutputsInternal)
-        _ * mock.inputs >> Stub(TaskInputsInternal)
-        _ * mock.destroyables >> Stub(TaskDestroyablesInternal)
-        _ * mock.localState >> Stub(TaskLocalStateInternal)
-        _ * mock.path >> ":${name}"
-        _ * mock.taskIdentity >> TaskIdentity.create(name, DefaultTask, project as ProjectInternal)
-        return mock
-    }
-
-    def task(String name, Task... dependsOn=[]) {
-        def mock = newTask(name)
-        addDependencies(mock, dependsOn)
-        return mock
-    }
-
-    def addDependencies(Task task, Task... dependsOn) {
-        _ * task.taskDependencies >> Stub(TaskDependency) {
-            getDependencies(_) >> (dependsOn as Set)
-        }
-    }
-
-    def brokenTask(String name, RuntimeException failure) {
-        def mock = Mock(TaskInternal)
-        _ * mock.name >> name
-        _ * mock.identityPath >> project.identityPath.child(name)
-        _ * mock.project >> project
-        _ * mock.state >> Stub(TaskStateInternal) {
-            getFailure() >> failure
-            rethrowFailure() >> { throw failure }
-        }
-        _ * mock.taskDependencies >> Stub(TaskDependency)
-        _ * mock.finalizedBy >> Stub(TaskDependency)
-        _ * mock.mustRunAfter >> Stub(TaskDependency)
-        _ * mock.shouldRunAfter >> Stub(TaskDependency)
-        _ * mock.compareTo(_) >> { Task t -> name.compareTo(t.name) }
-        _ * mock.outputs >> Stub(TaskOutputsInternal)
-        _ * mock.inputs >> Stub(TaskInputsInternal)
-        _ * mock.destroyables >> Stub(TaskDestroyablesInternal)
-        _ * mock.localState >> Stub(TaskLocalStateInternal)
-        _ * mock.path >> ":${name}"
-        _ * mock.taskIdentity >> TaskIdentity.create(name, DefaultTask, project as ProjectInternal)
-        return mock
-    }
 }

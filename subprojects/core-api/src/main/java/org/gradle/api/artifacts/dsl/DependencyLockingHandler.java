@@ -16,14 +16,18 @@
 
 package org.gradle.api.artifacts.dsl;
 
-import org.gradle.api.Incubating;
+import org.gradle.api.file.RegularFileProperty;
+import org.gradle.api.provider.ListProperty;
+import org.gradle.api.provider.Property;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 
 /**
  * A {@code DependencyLockingHandler} manages the behaviour and configuration of dependency locking.
  *
  * @since 4.8
  */
-@Incubating
+@ServiceScope(Scope.Project.class)
 public interface DependencyLockingHandler {
 
     /**
@@ -33,6 +37,50 @@ public interface DependencyLockingHandler {
      *     resolutionStrategy.activateDependencyLocking()
      * }
      *
+     * @since 4.8
      */
     void lockAllConfigurations();
+
+    /**
+     * Convenience method for doing:
+     *
+     * configurations.all {
+     *     resolutionStrategy.deactivateDependencyLocking()
+     * }
+     *
+     * @since 6.0
+     */
+    void unlockAllConfigurations();
+
+    /**
+     * Allows to query the lock mode currently configured
+     *
+     * @since 6.1
+     */
+    Property<LockMode> getLockMode();
+
+    /**
+     * Allows to configure the file used for saving lock state
+     * <p>
+     * Make sure the lock file is unique per project and separate between the buildscript and project itself.
+     * <p>
+     * This requires opting in the support for per project single lock file.
+     *
+     * @since 6.4
+     */
+    RegularFileProperty getLockFile();
+
+    /**
+     * Allows to configure dependencies that will be ignored in the lock state.
+     * <p>
+     * The format of the entry is {@code <group>:<artifact>} where both can end with a {@code *} as a wildcard character.
+     * The value {@code *:*} is not considered a valid value as it is equivalent to disabling locking.
+     * <p>
+     * These dependencies will not be written to the lock state and any references to them in lock state will be ignored at runtime.
+     * It is thus not possible to set this property but still lock a matching entry by manually adding it to the lock state.
+     *
+     * @since 6.7
+     */
+    ListProperty<String> getIgnoredDependencies();
+
 }

@@ -16,43 +16,63 @@
 
 package org.gradle.composite.internal;
 
-import org.gradle.api.Transformer;
-import org.gradle.api.artifacts.component.BuildIdentifier;
 import org.gradle.api.internal.BuildDefinition;
-import org.gradle.api.internal.SettingsInternal;
-import org.gradle.initialization.GradleLauncher;
-import org.gradle.initialization.NestedBuildFactory;
+import org.gradle.initialization.IncludedBuildSpec;
+import org.gradle.internal.UncheckedException;
 import org.gradle.internal.build.AbstractBuildState;
 import org.gradle.internal.build.BuildState;
+import org.gradle.internal.build.ExecutionResult;
 import org.gradle.internal.build.StandAloneNestedBuild;
-import org.gradle.internal.concurrent.Stoppable;
-import org.gradle.internal.invocation.BuildController;
-import org.gradle.internal.invocation.GradleBuildController;
+import org.gradle.internal.buildtree.BuildTreeFinishExecutor;
+import org.gradle.internal.buildtree.BuildTreeLifecycleController;
+import org.gradle.internal.buildtree.BuildTreeLifecycleControllerFactory;
+import org.gradle.internal.buildtree.BuildTreeServices;
+import org.gradle.internal.buildtree.BuildTreeWorkExecutor;
+import org.gradle.internal.buildtree.DefaultBuildTreeWorkExecutor;
+import org.gradle.internal.concurrent.CompositeStoppable;
+import org.gradle.internal.exception.ExceptionAnalyser;
+import org.gradle.internal.service.ManagedServiceRegistry;
 import org.gradle.util.Path;
+import org.jspecify.annotations.Nullable;
 
-class DefaultNestedBuild extends AbstractBuildState implements StandAloneNestedBuild, Stoppable {
-    private final Path identityPath;
+import java.io.File;
+import java.util.List;
+import java.util.function.Function;
+
+class DefaultNestedBuild extends AbstractBuildState implements StandAloneNestedBuild {
+
     private final BuildState owner;
-    private final BuildIdentifier buildIdentifier;
     private final BuildDefinition buildDefinition;
-    private final GradleLauncher gradleLauncher;
+    private final BuildTreeLifecycleController buildTreeLifecycleController;
 
-    DefaultNestedBuild(BuildIdentifier buildIdentifier, Path identityPath, BuildDefinition buildDefinition, BuildState owner) {
-        this.buildIdentifier = buildIdentifier;
-        this.identityPath = identityPath;
+    DefaultNestedBuild(
+        Path identityPath,
+        BuildDefinition buildDefinition,
+        BuildState owner,
+        BuildTreeServices buildTreeServices
+    ) {
+        super(buildTreeServices, buildDefinition, identityPath, owner);
         this.buildDefinition = buildDefinition;
         this.owner = owner;
-        gradleLauncher = owner.getNestedBuildFactory().nestedInstance(buildDefinition, this);
+
+        ManagedServiceRegistry buildScopeServices = getBuildServices();
+        try {
+            ExceptionAnalyser exceptionAnalyser = buildScopeServices.get(ExceptionAnalyser.class);
+            BuildTreeWorkExecutor workExecutor = new DefaultBuildTreeWorkExecutor();
+            BuildTreeLifecycleControllerFactory buildTreeLifecycleControllerFactory = buildScopeServices.get(BuildTreeLifecycleControllerFactory.class);
+
+            // On completion of the action, do not finish this build. The root build will take care of finishing this build later
+            BuildTreeFinishExecutor finishExecutor = new DoNothingBuildFinishExecutor(exceptionAnalyser);
+            buildTreeLifecycleController = buildTreeLifecycleControllerFactory.createController(getBuildController(), workExecutor, finishExecutor);
+        } catch (Throwable t) {
+            CompositeStoppable.stoppable().addFailure(t).add(buildScopeServices).stop();
+            throw UncheckedException.throwAsUncheckedException(t);
+        }
     }
 
     @Override
-    public BuildIdentifier getBuildIdentifier() {
-        return buildIdentifier;
-    }
-
-    @Override
-    public Path getIdentityPath() {
-        return identityPath;
+    public BuildDefinition getBuildDefinition() {
+        return buildDefinition;
     }
 
     @Override
@@ -61,38 +81,40 @@ class DefaultNestedBuild extends AbstractBuildState implements StandAloneNestedB
     }
 
     @Override
-    public void stop() {
-        gradleLauncher.stop();
+    public BuildState getOwner() {
+        return owner;
     }
 
     @Override
-    public <T> T run(Transformer<T, ? super BuildController> buildAction) {
-        GradleBuildController buildController = new GradleBuildController(gradleLauncher);
-        try {
-            gradleLauncher.getGradle().setIdentityPath(getCurrentPrefixForProjectsInChildBuilds());
-            return buildAction.transform(buildController);
-        } finally {
-            buildController.stop();
+    public ExecutionResult<Void> finishBuild() {
+        return getBuildController().finishBuild(null);
+    }
+
+    @Override
+    public <T> T run(Function<? super BuildTreeLifecycleController, T> buildAction) {
+        return buildAction.apply(buildTreeLifecycleController);
+    }
+
+    @Override
+    public File getBuildRootDir() {
+        return buildDefinition.getBuildRootDir();
+    }
+
+    @Override
+    public void assertCanAdd(IncludedBuildSpec includedBuildSpec) {
+    }
+
+    private static class DoNothingBuildFinishExecutor implements BuildTreeFinishExecutor {
+        private final ExceptionAnalyser exceptionAnalyser;
+
+        public DoNothingBuildFinishExecutor(ExceptionAnalyser exceptionAnalyser) {
+            this.exceptionAnalyser = exceptionAnalyser;
         }
-    }
 
-    @Override
-    public SettingsInternal getLoadedSettings() {
-        return gradleLauncher.getGradle().getSettings();
-    }
-
-    @Override
-    public NestedBuildFactory getNestedBuildFactory() {
-        return gradleLauncher.getGradle().getServices().get(NestedBuildFactory.class);
-    }
-
-    @Override
-    public Path getCurrentPrefixForProjectsInChildBuilds() {
-        return owner.getCurrentPrefixForProjectsInChildBuilds().child(buildDefinition.getName());
-    }
-
-    @Override
-    public Path getIdentityPathForProject(Path projectPath) {
-        return gradleLauncher.getGradle().getIdentityPath().append(projectPath);
+        @Override
+        @Nullable
+        public RuntimeException finishBuildTree(List<Throwable> failures) {
+            return exceptionAnalyser.transform(failures);
+        }
     }
 }

@@ -16,6 +16,7 @@
 
 package org.gradle.api.tasks.console
 
+
 import org.gradle.integtests.fixtures.console.AbstractConsoleGroupedTaskFunctionalTest
 import spock.lang.Issue
 import spock.util.environment.OperatingSystem
@@ -25,7 +26,7 @@ abstract class AbstractExecOutputIntegrationTest extends AbstractConsoleGroupedT
     private static final String EXPECTED_OUTPUT = "Hello, World!"
     private static final String EXPECTED_ERROR = "Goodbye, World!"
 
-    def "Project.javaexec output is grouped with its task output"() {
+    def "ExecOperations.javaexec output is grouped with its task output"() {
         given:
         generateMainJavaFileEchoing(EXPECTED_OUTPUT, EXPECTED_ERROR)
         buildFile << """
@@ -33,10 +34,12 @@ abstract class AbstractExecOutputIntegrationTest extends AbstractConsoleGroupedT
 
             task run {
                 dependsOn 'compileJava'
+                def execOps = services.get(ExecOperations)
+                def execClasspath = sourceSets.main.runtimeClasspath
                 doLast {
-                    project.javaexec {
-                        classpath = sourceSets.main.runtimeClasspath
-                        main = 'Main'
+                    execOps.javaexec {
+                        classpath = execClasspath
+                        mainClass = 'Main'
                     }
                 }
             }
@@ -62,7 +65,7 @@ abstract class AbstractExecOutputIntegrationTest extends AbstractConsoleGroupedT
             task run(type: JavaExec) {
                 dependsOn 'compileJava'
                 classpath = sourceSets.main.runtimeClasspath
-                main = 'Main'
+                mainClass = 'Main'
             }
         """
 
@@ -77,12 +80,13 @@ abstract class AbstractExecOutputIntegrationTest extends AbstractConsoleGroupedT
         errorOutput.contains(EXPECTED_ERROR)
     }
 
-    def "Project.exec output is grouped with its task output"() {
+    def "ExecOperations.exec output is grouped with its task output"() {
         given:
         buildFile << """
             task run {
+                def execOps = services.get(ExecOperations)
                 doLast {
-                    project.exec {
+                    execOps.exec {
                         commandLine ${echo(EXPECTED_OUTPUT)}
                     }
                 }
@@ -90,7 +94,7 @@ abstract class AbstractExecOutputIntegrationTest extends AbstractConsoleGroupedT
         """
 
         when:
-        executer.withConsole(consoleType)
+        executer.withConsole(consoleType).withArgument("--no-problems-report")
         succeeds("run")
 
         then:
@@ -106,7 +110,7 @@ abstract class AbstractExecOutputIntegrationTest extends AbstractConsoleGroupedT
         """
 
         when:
-        executer.withConsole(consoleType)
+        executer.withConsole(consoleType).withArgument("--no-problems-report")
         succeeds("run")
 
         then:
@@ -115,7 +119,7 @@ abstract class AbstractExecOutputIntegrationTest extends AbstractConsoleGroupedT
 
     private static String echo(String s) {
         if (OperatingSystem.current.windows) {
-            return "'cmd.exe', '/c', 'echo $s'"
+            return "'cmd.exe', '/d', '/c', 'echo $s'"
         }
         return "'echo', '$s'"
     }

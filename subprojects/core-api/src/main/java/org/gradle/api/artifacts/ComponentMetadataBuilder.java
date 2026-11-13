@@ -17,7 +17,6 @@
 package org.gradle.api.artifacts;
 
 import org.gradle.api.Action;
-import org.gradle.api.Incubating;
 import org.gradle.api.attributes.AttributeContainer;
 
 import java.util.List;
@@ -27,17 +26,18 @@ import java.util.List;
  *
  * @since 4.0
  */
-@Incubating
 public interface ComponentMetadataBuilder {
     /**
      * Sets the status of this component
      * @param status the component status
+     * @since 4.0
      */
     void setStatus(String status);
 
     /**
      * Sets the status scheme of this component
      * @param scheme the status scheme
+     * @since 4.0
      */
     void setStatusScheme(List<String> scheme);
 

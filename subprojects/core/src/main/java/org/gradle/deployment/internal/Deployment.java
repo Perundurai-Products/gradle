@@ -17,6 +17,7 @@
 package org.gradle.deployment.internal;
 
 import org.gradle.internal.HasInternalProtocol;
+import org.jspecify.annotations.Nullable;
 
 /**
  * A deployed application.
@@ -43,6 +44,7 @@ public interface Deployment {
          * Returns a Throwable if the latest build failed for this deployment.
          * @return any failure for the current status.
          */
+        @Nullable
         Throwable getFailure();
 
         /**

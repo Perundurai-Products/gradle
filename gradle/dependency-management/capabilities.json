@@ -8,6 +8,23 @@
 [
     // Soft upgrades: only in case of conflict, will use the latest version of the selected module in the graph
     {
+        // hamcrest packaging changes, see https://hamcrest.org/JavaHamcrest/distributables#previous-versions-of-hamcrest
+        "name": "hamcrest",
+        "providedBy": [
+            "org.hamcrest:hamcrest-core",
+            "org.hamcrest:hamcrest-library",
+            "org.hamcrest:hamcrest-all"
+        ],
+        "selected": "org.hamcrest:hamcrest"
+    },
+    {
+        "name": "jna-platform",
+        "providedBy": [
+            "net.java.dev.jna:platform"
+        ],
+        "selected": "net.java.dev.jna:jna-platform"
+    },
+    {
         "name": "guava",
         "providedBy": [
             "com.google.collections:google-collections"
@@ -50,7 +67,7 @@
             "org.codehaus.groovy:groovy",
             "org.codehaus.groovy:groovy-all"
         ],
-        "selected": "org.gradle.groovy:groovy-all"
+        "selected": "org.codehaus.groovy:groovy"
     },
 
     // forced upgrade: the following modules will automatically be replaced with the selected module
@@ -61,7 +78,7 @@
             "asm:asm", "asm:asm-all", "asm:asm-debug-all"
         ],
         "selected": "org.ow2.asm:asm",
-        "upgrade": "7.0"
+        "upgrade": "7.1"
     },
     {
         "name": "asm-analysis",
@@ -69,7 +86,7 @@
             "asm:asm", "asm:asm-all", "asm:asm-debug-all"
         ],
         "selected": "org.ow2.asm:asm",
-        "upgrade": "7.0"
+        "upgrade": "7.1"
     },
     {
         "name": "asm-commons",
@@ -77,7 +94,7 @@
             "asm:asm-commons", "asm:asm-all", "asm:asm-debug-all"
         ],
         "selected": "org.ow2.asm:asm-commons",
-        "upgrade": "7.0"
+        "upgrade": "7.1"
     },
     {
         "name": "asm-tree",
@@ -85,7 +102,7 @@
             "asm:asm-tree", "asm:asm-all", "asm:asm-debug-all"
         ],
         "selected": "org.ow2.asm:asm-tree",
-        "upgrade": "7.0"
+        "upgrade": "7.1"
     },
     {
         "name": "asm-util",
@@ -93,7 +110,7 @@
             "asm:asm-util", "asm:asm-all", "asm:asm-debug-all"
         ],
         "selected": "org.ow2.asm:asm-util",
-        "upgrade": "7.0"
+        "upgrade": "7.1"
     },
     {
         "name": "cglib",
